@@ -196,3 +196,8 @@ deploy-package-<项目名>-v<版本号>.tar.gz
 
 部署包版本号必须与 git tag、package.json、镜像标签一致。
 详见 `guides/skeleton-and-repos.md` 第四节。
+
+## 踩坑必读（新增）
+
+- PIT-020：standalone 部署必须手动复制 Prisma engine + 部署后必须验证 API 通路
+- PIT-021：端口必须从 INFRA-LEDGER.md 按顺序取用，禁止随意选
