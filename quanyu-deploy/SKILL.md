@@ -16,6 +16,12 @@ description: 权舆科技项目部署技能。当任务涉及部署、Docker、�
 
 ## 强制约束
 
+### 端口分配规则（绝对禁止随意选端口）
+- 新项目端口必须从 `INFRA-LEDGER.md` 的端口分配表中按顺序取用
+- 演示环境：3100-3199 范围
+- 分配后必须更新 `INFRA-LEDGER.md`
+- 禁止使用安全组未开放的端口
+
 ### Docker 配置
 - `build.context` 指向 monorepo 源码根目录绝对路径，**禁止**临时目录/rsync/build-context 子目录
 - 演示 `restart: "no"`，生产 `restart: unless-stopped`
