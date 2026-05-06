@@ -31,18 +31,9 @@ description: 团队协作模式。适用于有调度者+多Agent的团队。调�
 
 ## 任务类型与预估
 
-| 类型 | 时长 | timeout |
-|------|------|---------|
-| DEV-TINY | 1-2分钟 | 120秒 |
-| DEV-SMALL | 2-4分钟 | 180秒 |
-| DEV-MEDIUM | 4-8分钟 | 300秒 |
-| DEV-LARGE | **必须拆分** | — |
-| REVIEW-QUICK | 2-3分钟 | 180秒 |
-| REVIEW-STANDARD | 4-8分钟 | 300秒 |
-| DEPLOY-UPDATE | 2-4分钟 | 180秒 |
-| DEPLOY-NEW | 5-10分钟 | 300秒 |
+详见 `guides/task-dispatch-mechanism.md` 第二章「任务类型清单」，此处不重复定义。
 
-**预估超过5分钟 → 必须拆分。**
+**核心规则：预估超过5分钟 → 必须拆分。**
 
 ## 任务台账
 
