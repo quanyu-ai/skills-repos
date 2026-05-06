@@ -113,6 +113,13 @@ description: 权舆科技开发技能。当任务涉及编码、开发、修bug�
 完整条目见 `knowledge/internal/pitfall-registry.md`。
 开发前**必须**阅读相关条目。发现新坑时登记。
 
+### Tailwind 必读（PIT-015~018）
+- PIT-015：content 路径必须覆盖 src/ 目录
+- PIT-016：自定义颜色必须用 `<alpha-value>` 格式
+- PIT-017：code-icon 类和 span 内容不要混用
+- PIT-018：postcss.config.js 不能缺
+- PIT-019：原型转代码要逐个 section 对照 checklist
+
 ## 技术栈约束
 
 | 层面 | 选择 |
