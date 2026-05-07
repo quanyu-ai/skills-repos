@@ -42,6 +42,34 @@ description: 开发工程师岗位技能。当任务涉及编码、开发、修b
 3. **创始人明确同意后**方可执行
 4. 执行后必须提供回滚方案
 
+## 原型转代码规范（PIT-031）
+
+有原型 HTML 文件时，必须 **照搬** 而不是 **翻译**：
+
+1. **CSS**：原型 `<style>` 中的 CSS **原封不动**复制到 `globals.css`
+2. **HTML → JSX**：只做语法转换，不改结构、不改类名、不加 inline style
+   - `class` → `className`
+   - `onclick` → `onClick`
+   - `style="..."` → `style={{...}}`
+   - SVG 属性驼峰（`stroke-width` → `strokeWidth`）
+3. **禁止行为**：
+   - ❌ 用不同的 Tailwind 类名重写原型样式
+   - ❌ 改变 HTML 层级结构
+   - ❌ 自己发明包裹层（如 `<div style={{ display: 'flex', height: 'calc...' }}>`）
+4. **验证**：完成后对比原型截图 vs 实现截图，差异必须说明原因
+
+## 数据库对接规范
+
+**新页面开发必须同步对接数据库，禁止硬编码数据。**
+
+开发顺序：
+1. 确认数据库 schema（Prisma model）
+2. 写/确认 tRPC API（router + procedure）
+3. 前端页面调用 tRPC 查询/写入
+4. 插入样例数据用于测试
+
+**绝对禁止**：写死示例数据在前端代码里（如 `const records = [{id: 1, amount: 500, ...}]`）
+
 ## 踩坑必读
 
 开发前必须阅读 `knowledge/internal/pitfall-registry.md` 中与当前技术栈相关的条目。

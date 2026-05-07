@@ -113,12 +113,23 @@ description: 权舆科技开发技能。当任务涉及编码、开发、修bug�
 完整条目见 `knowledge/internal/pitfall-registry.md`。
 开发前**必须**阅读相关条目。发现新坑时登记。
 
-### Tailwind 必读（PIT-015~018）
+### Tailwind 必读（PIT-015~018, PIT-034）
 - PIT-015：content 路径必须覆盖 src/ 目录
 - PIT-016：自定义颜色必须用 `<alpha-value>` 格式
 - PIT-017：code-icon 类和 span 内容不要混用
 - PIT-018：postcss.config.js 不能缺
 - PIT-019：原型转代码要逐个 section 对照 checklist
+- **PIT-034：新项目必须检查 tailwind.config.ts + postcss.config.js 是否存在！缺失会导致所有 Tailwind 类名静默失效**
+
+### OCR/AI 必读（PIT-033, PIT-035, PIT-036）
+- PIT-033：PaddleOCR v3.5 API 完全不兼容旧版，用 `predict()` + `rec_texts`
+- PIT-035：前端图片压缩质量不能低于 0.9，宽度不能低于 1500px
+- PIT-036：金额提取不能用 Math.max，必须按优先级匹配（小写 > 合计 > ¥ > 第二大）
+
+### 原型转代码必读（PIT-031）
+- **照搬不翻译**：原型 CSS 原封不动复制，HTML 只做语法转换
+- 禁止自己用不同的 Tailwind 类名重写原型样式
+- 完成后必须对比原型截图验证
 
 ## 技术栈约束
 
@@ -141,3 +152,14 @@ description: 权舆科技开发技能。当任务涉及编码、开发、修bug�
 - 独立项目骨架：`skeleton-vue-express-mysql`（Vue + Express + MySQL）
 - 骨架维护：从主项目单向提炼通用改进，不反向回写
 - 详见 `guides/skeleton-and-repos.md`
+
+## 新项目初始化检查清单
+
+从骨架创建新项目后，必须检查：
+
+- [ ] `tailwind.config.ts` 存在且 content 路径正确
+- [ ] `postcss.config.js` 存在
+- [ ] `tailwindcss` + `autoprefixer` + `postcss` 在 devDependencies 中
+- [ ] `pnpm build` 通过
+- [ ] 浏览器访问页面，确认 Tailwind 类名生效（如 `flex`、`grid` 布局正常）
+- [ ] 数据库连接正常（Prisma migrate / seed）
