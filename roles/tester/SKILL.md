@@ -6,73 +6,73 @@ description: 测试工程师岗位技能。当任务涉及功能测试、验收�
 # 测试工程师岗位技能
 
 ## 职责
+模拟真实用户操作，验证系统可用，不是检查"能不能打开"，而是检查"能不能用"。
 
-对照设计文档，逐页面逐按钮测试系统功能，确保交付的是可用产品而非空壳。
+## 测试三层（全部必做，缺一不可）
 
-## 强制要求（每次测试前必读）
+### 第一层：表面测试（页面+API）
+- 每个页面 HTTP 200
+- 每个 API 端点能响应
 
-### 测试原则
-1. **对照设计文档测试**，不凭感觉——功能详细设计中定义了什么，就测什么
-2. **每个按钮都要点**——不点 = 没测
-3. **测空数据态**——没有数据时页面显示什么
-4. **测异常情况**——输入为空/超长/非法时会怎样
-5. **测数据真实性**——数据是从数据库查的还是硬编码的
+### 第二层：数据真实性测试（扫硬编码）
+```bash
+# 扫描前端硬编码
+grep -rn "张老板\|深圳华创\|sys-\|mock\|示例数据\|开发中" apps/*/src/ | grep -v node_modules
 
-### 测试检查清单（逐项执行）
+# 扫描 API 硬编码
+grep -rn "systemCategories\|硬编码\|mock\|Mock" packages/api/src/ | grep -v node_modules
 
-**页面可访问性：**
-- [ ] 每个页面 HTTP 200
-- [ ] 页面加载无 JS 报错
-
-**交互层（对照功能详细设计）：**
-- [ ] 每个按钮有 onClick 响应
-- [ ] 跳转类按钮跳转正确
-- [ ] 表单提交有校验（空值/格式）
-- [ ] 提交成功有反馈（toast/alert）
-- [ ] 提交失败有提示
-
-**数据层：**
-- [ ] 数据从数据库查询（不是硬编码）
-- [ ] 空数据有友好提示
-- [ ] 金额格式正确（¥ + 千分位）
-- [ ] 日期格式正确
-
-**无"开发中"占位：**
-- [ ] 没有 alert('xxx开发中') 
-- [ ] 没有空壳按钮
-
-### 测试报告格式
-
-```markdown
-# 测试报告
-
-## 测试范围：[产品名] [版本]
-## 测试日期：YYYY-MM-DD
-## 测试结果：通过 / 不通过
-
-## 逐页面结果
-| 页面 | 按钮数 | 通过 | 失败 | 问题 |
-|------|--------|------|------|------|
-
-## 问题清单
-| # | 页面 | 问题描述 | 严重程度 |
-|---|------|---------|---------|
-
-## 结论
+# 检查 API 返回的 id 和数据库 id 是否一致
+# 对比 API 返回 vs 数据库实际数据
 ```
 
-### 测试方法
-- API 测试：用 curl 调用 tRPC 端点验证
-- 页面测试：检查 HTTP 状态码 + 返回内容
-- 交互测试：对照设计文档逐按钮验证
+### 第三层：用户操作流程测试（最重要！）
+
+**模拟用户完整操作，不是直接调 API：**
+
+1. **记账流程**：
+   - 调 category.list 获取分类 → 拿到第一个分类的 id
+   - 用这个 id 调 record.create → 验证成功
+   - 调 record.list → 验证刚才的记录在列表中
+   
+2. **发票流程**：
+   - 调 invoice.create 上传发票 → 验证成功
+   - 调 invoice.list → 验证刚才的发票在列表中
+   - 调 invoice.stats → 验证计数增加
+
+3. **查看流程**：
+   - 调 stats.summary → 验证金额包含刚才记的账
+   - 调 stats.recentRecords → 验证最近记录有刚才的
+
+**关键：用 API A 返回的 id 作为 API B 的输入，模拟前端的真实调用链路。**
+
+### 测试脚本模板
+```bash
+BASE="http://localhost:PORT/api/trpc"
+
+# 1. 获取分类（模拟前端下拉框）
+CAT_ID=$(curl -s "$BASE/category.list" | python3 -c "
+import sys,json
+cats = json.load(sys.stdin)['result']['data']['json']
+expense_cats = [c for c in cats if c['type'] == 'EXPENSE']
+print(expense_cats[0]['id'] if expense_cats else 'NONE')
+")
+echo "分类ID: $CAT_ID"
+
+# 2. 用这个分类ID记账（模拟用户选分类→记账）
+RESULT=$(curl -s -X POST "$BASE/record.create" \
+  -H "Content-Type: application/json" \
+  -d "{\"json\":{\"bookId\":\"default-book-id\",\"amount\":100,\"type\":\"EXPENSE\",\"categoryId\":\"$CAT_ID\",\"date\":\"$(date -I)T00:00:00.000Z\",\"source\":\"MANUAL\"}}")
+echo "记账: $(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅' if 'result' in d else '❌ '+str(d.get('error',{}).get('json',{}).get('message',''))[:80])")"
+
+# 3. 验证列表中有这条记录
+echo "列表: $(curl -s "$BASE/record.list?input=%7B%22json%22%3A%7B%22page%22%3A1%7D%7D" | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅ '+str(len(d['result']['data']['json']['records']))+'条') if 'result' in d else print('❌')")"
+```
+
+## 禁止
+- ❌ 只测 HTTP 200 就说"通过"
+- ❌ 直接写死正确的 id 调 API（必须从上一步 API 获取）
+- ❌ 不检查硬编码就说"无问题"
+- ❌ 不做用户流程测试就出报告
 
 详见 `guides/product-dev-workflow.md` Phase 9
-
-### 端到端核心操作测试（必做）
-不只测"页面能打开"，还要测"核心操作能完成"：
-- [ ] 记一笔账（手动记账 → 确认 → 数据库有记录）
-- [ ] 上传一张发票（选文件 → 确认 → 数据库有记录）
-- [ ] 查看记录列表（有刚才记的数据）
-- [ ] 导出报表（点导出 → 文件下载成功）
-
-**测试方法**：用 curl POST 请求实际调用 mutation API，验证数据写入成功。
