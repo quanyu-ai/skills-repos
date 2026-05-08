@@ -95,3 +95,9 @@ description: 开发工程师岗位技能。当任务涉及编码、开发、修b
 - 引入新 UI 组件库前，**必须先建最小 demo 验证 SSR 兼容性**
 - 不在主项目上直接引入未验证的库
 - 验证方法：新库引入 → build → standalone 部署 → 浏览器访问
+
+### Next.js tRPC 页面结构（PIT-039，必须遵守）
+所有使用 tRPC 的页面**必须**拆成两层：
+- `page.tsx`（server 组件）：`export const dynamic = 'force-dynamic';` + 导入 client 组件
+- `client.tsx`（client 组件）：`'use client'` + tRPC 调用 + 页面 UI
+**禁止**：在 `page.tsx` 中直接写 `'use client'` + tRPC 调用
