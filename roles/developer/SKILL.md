@@ -49,3 +49,9 @@ description: 开发工程师岗位技能。当任务涉及编码、开发、修b
 - 设计文档中定义了的功能，**必须实现**，不允许用 `alert('xxx开发中')` 占位
 - 如果某功能确实无法实现（缺 API 等），必须在代码中注释说明原因，并在任务反馈中标注
 - 按钮没有 onClick = 未完成，不允许提交
+
+### 提交交互规范
+- 所有提交按钮必须有 `saving` 状态 + `disabled={saving}` + loading 文字
+- mutation 成功后必须 `invalidate` 相关 query 缓存（或 `window.location.reload()`）
+- API 返回的 id 必须是数据库真实 id，禁止硬编码假 id
+- 所有 API 必须查数据库，禁止返回硬编码数据
