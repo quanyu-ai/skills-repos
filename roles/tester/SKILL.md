@@ -76,3 +76,11 @@ echo "列表: $(curl -s "$BASE/record.list?input=%7B%22json%22%3A%7B%22page%22%3
 - ❌ 不做用户流程测试就出报告
 
 详见 `guides/product-dev-workflow.md` Phase 9
+
+### 边界测试（必做）
+核心操作必须测以下边界情况：
+- [ ] 不选分类直接提交
+- [ ] 金额为空/为0/为负数
+- [ ] 商户名为空
+- [ ] 日期为空
+- [ ] 超长文本输入
