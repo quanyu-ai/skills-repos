@@ -45,3 +45,7 @@ description: 开发工程师岗位技能。当任务涉及编码、开发、修b
 - 踩坑登记册：`knowledge/internal/pitfall-registry.md`
 - 开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
 - 编码前确认：架构设计+功能详细设计（含交互层）已通过验收
+### 禁止"开发中"占位（PIT-040 补充）
+- 设计文档中定义了的功能，**必须实现**，不允许用 `alert('xxx开发中')` 占位
+- 如果某功能确实无法实现（缺 API 等），必须在代码中注释说明原因，并在任务反馈中标注
+- 按钮没有 onClick = 未完成，不允许提交
