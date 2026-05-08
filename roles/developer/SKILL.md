@@ -43,4 +43,5 @@ description: 开发工程师岗位技能。当任务涉及编码、开发、修b
 
 ## 参考文档
 - 踩坑登记册：`knowledge/internal/pitfall-registry.md`
-- 开发流程：`guides/product-dev-workflow.md`
+- 开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
+- 编码前确认：架构设计+功能详细设计（含交互层）已通过验收

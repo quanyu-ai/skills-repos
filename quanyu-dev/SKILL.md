@@ -63,5 +63,6 @@ catch 块统一 `catch (error: any)` 或类型守卫，访问 error 属性前：
 
 ## 参考文档
 - 踩坑登记册：`knowledge/internal/pitfall-registry.md`
-- 开发流程：`guides/product-dev-workflow.md`
+- 开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
+- 关键变化：Phase 3 架构设计、Phase 7 设计验收门禁、Phase 4 必须含交互层+数据层
 - 骨架模板：`guides/skeleton-and-repos.md`

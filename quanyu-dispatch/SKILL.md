@@ -56,5 +56,6 @@ Agent超时 → 检查中间产物 → 更新台账(status: timed_out) → 评�
 
 ## 参考文档
 - 完整规范：`guides/task-dispatch-mechanism.md`
-- 产品开发流程：`guides/product-dev-workflow.md`
+- 产品开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
+- 派发编码任务前必须确认 Phase 7 设计验收通过
 - 踩坑登记册：`knowledge/internal/pitfall-registry.md`
