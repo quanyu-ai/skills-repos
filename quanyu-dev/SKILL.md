@@ -66,3 +66,7 @@ catch 块统一 `catch (error: any)` 或类型守卫，访问 error 属性前：
 - 开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
 - 关键变化：Phase 3 架构设计、Phase 7 设计验收门禁、Phase 4 必须含交互层+数据层
 - 骨架模板：`guides/skeleton-and-repos.md`
+### 专业领域红线（PIT-041）
+- 涉及财税/法律/医疗等专业领域的功能，**必须有专业人士审核后才能上线**
+- AI 团队不具备专业资质，不能自己拍脑袋定规则
+- 宁可不做，也不能做错
