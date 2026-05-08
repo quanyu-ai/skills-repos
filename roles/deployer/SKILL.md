@@ -70,3 +70,8 @@ description: 部署运维岗位技能。当任务涉及部署、Docker、启停�
 | 官网 | 3100 |
 | 拍记 | 3101 |
 | 财税通 | 3102 |
+
+### 部署自动化红线（PIT-032）
+- **禁止手动执行零散部署命令**（手动复制 static、手动复制 Prisma engine 等）
+- 每个项目必须有 `scripts/deploy-<项目>.sh` 一键部署脚本
+- 脚本必须包含：build + 复制 static + 复制 Prisma engine + 重启服务 + 验证 HTTP 200
