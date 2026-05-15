@@ -176,7 +176,7 @@ bash skills/quanyu-deploy/scripts/check-deploy.sh /opt/demo/<project>
 - PIT-010：Monorepo Docker 构建上下文路径
 - PIT-011：edit 重试死循环
 
-详见 `knowledge/internal/pitfall-registry.md`。
+详见 `knowledge-repos/knowledge/internal/pitfall-registry.md`。
 完整规范见 `guides/demo-deployment.md`。
 
 ## 部署包方案
@@ -197,7 +197,44 @@ deploy-package-<项目名>-v<版本号>.tar.gz
 部署包版本号必须与 git tag、package.json、镜像标签一致。
 详见 `guides/skeleton-and-repos.md` 第四节。
 
+## 部署后必须清理（2026-05-12 新增）
+
+每次 `docker compose build` 后必须执行清理：
+```bash
+bash /opt/scripts/deploy-cleanup.sh
+```
+
+原因：Node.js 项目构建缓存每次 ~700MB，不清理会吃满磁盘（PIT-043）
+
 ## 踩坑必读（新增）
 
 - PIT-020：standalone 部署必须手动复制 Prisma engine + 部署后必须验证 API 通路
 - PIT-021：端口必须从 INFRA-LEDGER.md 按顺序取用，禁止随意选
+- PIT-043：Docker 构建缓存膨胀导致服务器卡死（2026-05-11事故），已配置 daemon.json 自动GC + 部署后清理脚本
+
+## PM2 部署环境变量检查清单（PIT-046）
+
+部署到 PM2 后，必须确认以下环境变量已注入：
+
+| 变量 | 必需 | 说明 |
+|------|------|------|
+| DATABASE_URL | ✅ | 数据库连接字符串 |
+| PORT | ✅ | 应用监听端口（不能与其他服务冲突） |
+| JWT_SECRET | ✅ | JWT 签名密钥 |
+| NODE_ENV | ✅ | 设为 production |
+
+### 检查命令
+```bash
+pm2 env <id> | grep -E "DATABASE_URL|PORT|JWT_SECRET|NODE_ENV"
+```
+
+### 端口分配表
+| 应用 | 端口 |
+|------|------|
+| paiji | 3101 |
+| cst | 3102 |
+| smartops | 3103 |
+| qicha | 3104 |
+
+### 踩坑记录
+- PIT-046：契查部署后数据不显示，因为 PM2 启动时没传 DATABASE_URL（2026-05-13）

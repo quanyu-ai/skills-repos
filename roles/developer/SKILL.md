@@ -33,16 +33,16 @@ description: 开发工程师岗位技能。当任务涉及编码、开发、修b
 ## 技术栈约束
 
 ### 新依赖引入红线（PIT-030）
-引入新 UI 库前必须验证 SSR 兼容性，详见 `knowledge/internal/pitfall-registry.md#PIT-030`。
+引入新 UI 库前必须验证 SSR 兼容性，详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-030`。
 
 ### Next.js tRPC 页面结构（PIT-039）
-页面必须拆成 server 组件（page.tsx）和 client 组件（client.tsx），详见 `knowledge/internal/pitfall-registry.md#PIT-039`。
+页面必须拆成 server 组件（page.tsx）和 client 组件（client.tsx），详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-039`。
 
 ### 原型转代码规范（PIT-031）
-必须照搬而非翻译原型，详见 `knowledge/internal/pitfall-registry.md#PIT-031`。
+必须照搬而非翻译原型，详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-031`。
 
 ## 参考文档
-- 踩坑登记册：`knowledge/internal/pitfall-registry.md`
+- 踩坑登记册：`knowledge-repos/knowledge/internal/pitfall-registry.md`
 - 开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
 - 编码前确认：架构设计+功能详细设计（含交互层）已通过验收
 ### 禁止"开发中"占位（PIT-040 补充）

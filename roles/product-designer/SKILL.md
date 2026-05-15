@@ -64,4 +64,4 @@ PRD 必须包含：
 - 产品开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
 - 原型必须可交互+有交互标注，功能设计必须含交互层+数据层
 - 设计规范：`guides/ui-ux-design-standards.md`
-- 踩坑登记册：`knowledge/internal/pitfall-registry.md`
+- 踩坑登记册：`knowledge-repos/knowledge/internal/pitfall-registry.md`

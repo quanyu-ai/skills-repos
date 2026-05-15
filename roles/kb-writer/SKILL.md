@@ -17,11 +17,11 @@ description: 知识库写入岗位技能。当任务涉及写文档、记录经�
 
 | 目录 | 内容 |
 |------|------|
-| `knowledge/internal/` | 团队内部经验、踩坑登记册 |
-| `knowledge/domain/` | 领域知识（按技术栈分子目录） |
-| `knowledge/general/` | 通用知识 |
-| `knowledge/templates/` | 复用模板 |
-| `knowledge/inbox/` | 待整理 |
+| `knowledge-repos/knowledge/internal/` | 团队内部经验、踩坑登记册 |
+| `knowledge-repos/knowledge/domain/` | 领域知识（按技术栈分子目录） |
+| `knowledge-repos/knowledge/general/` | 通用知识 |
+| `knowledge-repos/knowledge/templates/` | 复用模板 |
+| `knowledge-repos/knowledge/inbox/` | 待整理 |
 | `guides/` | 职责手册、流程规范 |
 
 ## 踩坑登记格式

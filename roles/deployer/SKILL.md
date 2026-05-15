@@ -33,7 +33,7 @@ description: 部署运维岗位技能。当任务涉及部署、Docker、启停�
 - 部署后 commit + push
 
 ### 部署自动化红线（PIT-032）
-禁止手动执行零散部署命令，必须用一键部署脚本，详见 `knowledge/internal/pitfall-registry.md#PIT-032`。
+禁止手动执行零散部署命令，必须用一键部署脚本，详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-032`。
 
 ## 参考文档
 - 部署流程：`guides/deployment-process.md`

@@ -7,11 +7,11 @@ description: 权舆科技知识库写入技能。当任务涉及写文档、记�
 
 ## 知识库位置
 
-`knowledge/` 目录，总索引和编写规范见 `knowledge/index.md`。
+`knowledge-repos/knowledge/` 目录，总索引和编写规范见 `knowledge-repos/knowledge/index.md`。
 
 ## 写入前必读
 
-阅读 `knowledge/index.md`，确认文件该放哪、怎么命名、头部格式。
+阅读 `knowledge-repos/knowledge/index.md`，确认文件该放哪、怎么命名、头部格式。
 
 ## 目录速查
 
@@ -32,7 +32,7 @@ description: 权舆科技知识库写入技能。当任务涉及写文档、记�
 
 ## 项目文档目录
 
-项目文档在 `docs-repos/<project>/` 下，标准结构见 `knowledge/general/project-doc-structure.md`。
+项目文档在 `docs-repos/<project>/` 下，标准结构见 `knowledge-repos/knowledge/general/project-doc-structure.md`。
 每个项目也有自己的 `inbox/` 目录，无法归类的项目文档先放这里。
 
 ## 文档头部模板
@@ -56,4 +56,4 @@ description: 权舆科技知识库写入技能。当任务涉及写文档、记�
 3. **无法归类 → inbox/**：文件名 `YYYY-MM-DD-简短描述.md`，标注待归类
 4. **不删除**：过时内容归档到 `_archive/`
 5. **角色代号**：不硬编码人名
-6. **写入后更新索引**：在 `knowledge/index.md` 的内容索引表中添加新文件记录
+6. **写入后更新索引**：在 `knowledge-repos/knowledge/index.md` 的内容索引表中添加新文件记录

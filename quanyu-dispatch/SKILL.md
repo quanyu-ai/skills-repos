@@ -49,7 +49,19 @@ Agent超时 → 检查中间产物 → 更新台账(status: timed_out) → 评�
 不可以：写/改任何代码/CSS/HTML、构建部署、代码审查、陷入长操作
 
 ## 任务描述规范（PIT-038）
-任务描述必须自包含，禁止引用>10KB文件，详见 `knowledge/internal/pitfall-registry.md#PIT-038`。
+任务描述必须自包含，禁止引用>10KB文件，详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-038`。
+
+## DESIGN.md 派发规范
+派发涉及 UI/前端的开发任务时，**必须在任务描述中加入**：
+
+> 「请先读取项目目录下的 DESIGN.md，严格遵循设计规范（颜色/字体/圆角/间距/组件样式）」
+
+各项目 DESIGN.md 位置：
+- 权舆官网: `quanyu-platform/DESIGN.md`
+- 财税通: `apps/cst/DESIGN.md`
+- 拍记: `apps/paiji/DESIGN.md`
+
+不加这句 → 不派发 UI 任务。这是硬性规则。
 
 ## 产品开发流程管控
 确保新产品按7步流程推进：PRD → 原型 → 功能设计 → 数据库设计 → API设计 → 编码 → 测试部署
@@ -58,4 +70,4 @@ Agent超时 → 检查中间产物 → 更新台账(status: timed_out) → 评�
 - 完整规范：`guides/task-dispatch-mechanism.md`
 - 产品开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
 - 派发编码任务前必须确认 Phase 7 设计验收通过
-- 踩坑登记册：`knowledge/internal/pitfall-registry.md`
+- 踩坑登记册：`knowledge-repos/knowledge/internal/pitfall-registry.md`

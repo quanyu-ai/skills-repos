@@ -21,7 +21,7 @@ description: 权舆科技共用规范。所有AI协作者必须遵守。涉及Gi
 
 ## 踩坑登记规则
 
-- 踩坑统一登记到 `knowledge-repos` 的 `knowledge/internal/pitfall-registry.md`
+- 踩坑统一登记到 `knowledge-repos` 的 `knowledge-repos/knowledge/internal/pitfall-registry.md`
 - 格式：PIT-编号 + 标题 + 发现日期 + 标签 + 问题 + 根因 + 修复 + 预防规则 + 检查方式
 - 开发前必须阅读与当前技术栈相关的踩坑条目
 - 花了超过10分钟调试的问题 → 必须登记
@@ -41,6 +41,6 @@ description: 权舆科技共用规范。所有AI协作者必须遵守。涉及Gi
 ## 知识库写入规范
 
 - 所有知识沉淀写入 `knowledge-repos`
-- 内部经验 → `knowledge/internal/`
-- 领域知识 → `knowledge/domain/`
-- 复用模板 → `knowledge/templates/`
+- 内部经验 → `knowledge-repos/knowledge/internal/`
+- 领域知识 → `knowledge-repos/knowledge/domain/`
+- 复用模板 → `knowledge-repos/knowledge/templates/`
