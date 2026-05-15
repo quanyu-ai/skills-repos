@@ -1,6 +1,6 @@
 ---
 name: shared-conventions
-description: 权舆科技共用规范。所有AI协作者必须遵守。涉及Git提交、仓库命名、踩坑登记、通用部署规则时激活。
+description: 权舆科技共用规范入口。所有AI协作者必须遵守的基础规则。
 ---
 
 # 共用规范（所有AI必须遵守）

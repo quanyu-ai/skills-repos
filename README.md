@@ -4,26 +4,23 @@
 
 ```
 skills/
-├── shared/                         ← 共用规范（所有AI必须遵守）
-│   └── SKILL.md                    Git规范、命名规则、踩坑登记、通用部署规则
+├── shared/                         ← 共用规范入口（所有AI必须遵守）
+│   └── SKILL.md                    Git规范、命名规则、知识库写入入口
 │
 ├── roles/                          ← 岗位职责操作技能（怎么干活）
 │   ├── developer/SKILL.md          开发工程师：代码提交4步闭环、数据库红线
 │   ├── reviewer/SKILL.md           代码审查员：审查清单、报告格式
-│   ├── deployer/SKILL.md           部署运维：部署4步闭环、端口规则
-│   ├── product-designer/SKILL.md   产品设计：需求文档规范、MVP原则
-│   └── tester/SKILL.md             测试工程师：功能测试、验收检查、bug验证
+│   ├── deployer/SKILL.md           部署运维：部署4步闭环、一键脚本
+│   ├── product-designer/SKILL.md   产品设计：PRD→原型→评审→交付
+│   └── tester/SKILL.md             测试工程师：测试流程、验收检查
 │
 ├── modes/                          ← 工作模式技能（怎么管理任务）
 │   ├── team-mode/SKILL.md          团队协作：调度者+多Agent，任务台账+超时处理
 │   └── solo-mode/SKILL.md          单人作业：自拆解+自执行+自验证+自记录
 │
 └── quanyu-*/                       ← 权舆项目专用技能
-    ├── quanyu-dispatch/            任务调度技能
-    ├── quanyu-deploy/              部署技能
-    ├── quanyu-prototype/           原型设计规范
-    ├── quanyu-seed/                种子数据编写规范
-    └── quanyu-test/                测试验证规范
+    ├── quanyu-dispatch/            任务调度技能（项目经理专用）
+    └── quanyu-seed/                种子数据编写规范
 ```
 
 ## 新AI接入指南
@@ -44,8 +41,7 @@ skills/
 - ✅ `shared/` — 共用规范
 - ✅ `roles/developer/` — 开发工程师
 - ✅ `modes/team-mode/` — 团队协作（受小缺调度）
-- ✅ `quanyu-dispatch/` — 任务调度
-- ✅ `quanyu-deploy/` — 部署技能
+- ✅ `quanyu-dispatch/` — 任务调度（项目经理）
 
 ## 模式选择标准
 

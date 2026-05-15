@@ -1,6 +1,6 @@
 ---
 name: role-developer
-description: 开发工程师岗位技能。当任务涉及编码、开发、修bug、tRPC、Next.js、Prisma、TypeScript、pnpm build、代码审查、构建验证时激活。
+description: 开发工程师岗位技能。当任务涉及编码、开发、修bug、构建验证时激活。
 ---
 
 # 开发工程师
