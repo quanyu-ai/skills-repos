@@ -16,8 +16,7 @@ skills/
 │   └── solo-mode/SKILL.md          单人作业：自拆解+自执行+自验证+自记录
 │
 └── quanyu-*/                       ← 权舆项目专用技能
-    ├── quanyu-dispatch/            任务调度技能（项目经理专用）
-    └── quanyu-seed/                种子数据编写规范
+    └── quanyu-dispatch/            任务调度技能（项目经理专用）
 ```
 
 ## 新AI接入指南
