@@ -4,15 +4,17 @@
 
 ```
 skills/
-├── quanyu-tech-*/                  ← 权舆科技技能（按角色/模式装）
+├── role/                           ← 岗位技能（按角色装）
 │   ├── quanyu-tech-director/       软件研发总监：任务调度、进度跟踪、超时处理
 │   ├── quanyu-tech-developer/      开发工程师：代码提交4步闭环、数据库红线
 │   ├── quanyu-tech-reviewer/       代码审查员：审查清单、报告格式
 │   ├── quanyu-tech-deployer/       部署运维：部署4步闭环、一键脚本
 │   ├── quanyu-tech-product-designer/ 产品设计：PRD→原型→评审→交付
-│   ├── quanyu-tech-tester/         测试工程师：测试流程、验收检查
-│   ├── quanyu-tech-team/           团队协作：调度者+多Agent，任务台账+超时处理
-│   └── quanyu-tech-solo/           单人作业：自拆解+自执行+自验证+自记录
+│   └── quanyu-tech-tester/         测试工程师：测试流程、验收检查
+│
+└── mode/                           ← 工作模式（按场景装）
+    ├── quanyu-tech-team/           团队协作：调度者+多Agent，任务台账+超时处理
+    └── quanyu-tech-solo/           单人作业：自拆解+自执行+自验证+自记录
 ```
 
 ## 命名规则
@@ -23,17 +25,17 @@ skills/
 
 ## 新AI接入指南
 
-1. **按岗位装**：`quanyu-tech-*` 下选对应的岗位技能
-2. **按模式装**：`quanyu-tech-*` 下选 team 或 solo
+1. **按岗位装**：`role/` 下选对应的岗位技能
+2. **按模式装**：`mode/` 下选 team 或 solo
 
 ### 示例：晨曦学园AI接入
-- ✅ `quanyu-tech-developer/` — 开发工程师
-- ✅ `quanyu-tech-solo/` — 单人作业
-- ❌ `quanyu-tech-team/` — 不需要（不受小缺调度）
+- ✅ `role/quanyu-tech-developer/` — 开发工程师
+- ✅ `mode/quanyu-tech-solo/` — 单人作业
+- ❌ `mode/quanyu-tech-team/` — 不需要（不受小缺调度）
 
 ### 示例：新增权舆团队开发成员
-- ✅ `quanyu-tech-developer/` — 开发工程师
-- ✅ `quanyu-tech-team/` — 团队协作（受小缺调度）
+- ✅ `role/quanyu-tech-developer/` — 开发工程师
+- ✅ `mode/quanyu-tech-team/` — 团队协作（受小缺调度）
 
 ## 模式选择标准
 
