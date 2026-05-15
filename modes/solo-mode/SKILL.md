@@ -42,7 +42,7 @@ description: 单人作业模式。适用于一个AI独立完成开发任务。�
 
 ## 与团队协作
 
-- 遵守 `shared/` 目录下的所有共用规范
+- 遵守 `knowledge-repos/knowledge/general/` 下的所有规范文档
 - 代码推送到 GitHub 后，可由团队模式的审查员进行代码审查
 - 踩坑经验通过 `knowledge-repos` 与团队共享
 
