@@ -60,3 +60,4 @@ Agent超时 → 检查中间产物 → 更新台账(status: timed_out) → 评�
 - 产品开发流程：`knowledge-repos/guides/product-dev-workflow.md`
 - 踩坑登记册：`knowledge-repos/knowledge/internal/pitfall-registry.md`
 - Git 提交规范：`knowledge-repos/knowledge/general/git-commit-spec.md`
+- **技能管理规范**：`knowledge-repos/guides/skill-management.md`（创建/编辑技能必读）
