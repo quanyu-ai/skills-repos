@@ -12,16 +12,18 @@ skills/
 │   ├── reviewer/SKILL.md           代码审查员：审查清单、报告格式
 │   ├── deployer/SKILL.md           部署运维：部署4步闭环、端口规则
 │   ├── product-designer/SKILL.md   产品设计：需求文档规范、MVP原则
-│   └── tester/SKILL.md           测试工程师：功能测试、验收检查、bug验证
+│   └── tester/SKILL.md             测试工程师：功能测试、验收检查、bug验证
 │
 ├── modes/                          ← 工作模式技能（怎么管理任务）
 │   ├── team-mode/SKILL.md          团队协作：调度者+多Agent，任务台账+超时处理
 │   └── solo-mode/SKILL.md          单人作业：自拆解+自执行+自验证+自记录
 │
-└── quanyu-dev/                     ← 项目专用技能（特定技术栈约束）
-    quanyu-deploy/                    权舆项目的 Next.js+tRPC+Prisma 特有规则
-    quanyu-dispatch/
-    quanyu-kb/
+└── quanyu-*/                       ← 权舆项目专用技能
+    ├── quanyu-dispatch/            任务调度技能
+    ├── quanyu-deploy/              部署技能
+    ├── quanyu-prototype/           原型设计规范
+    ├── quanyu-seed/                种子数据编写规范
+    └── quanyu-test/                测试验证规范
 ```
 
 ## 新AI接入指南
@@ -29,20 +31,21 @@ skills/
 1. **必装**：`shared/`（共用规范）
 2. **按岗位装**：`roles/` 下选对应的岗位技能
 3. **按模式装**：`modes/` 下选团队模式或单人模式
-4. **按项目装**：如参与权舆项目，加装 `quanyu-dev` 等项目专用技能
+4. **按项目装**：如参与权舆项目，加装 `quanyu-*` 等项目专用技能
 
 ### 示例：晨曦学园AI接入
 - ✅ `shared/` — 共用规范
 - ✅ `roles/developer/` — 开发工程师
 - ✅ `modes/solo-mode/` — 单人作业
 - ❌ `modes/team-mode/` — 不需要（不受小缺调度）
-- ❌ `quanyu-dev/` — 不需要（不同技术栈）
+- ❌ `quanyu-*` — 不需要（不同技术栈）
 
 ### 示例：新增权舆团队开发成员
 - ✅ `shared/` — 共用规范
 - ✅ `roles/developer/` — 开发工程师
 - ✅ `modes/team-mode/` — 团队协作（受小缺调度）
-- ✅ `quanyu-dev/` — 权舆技术栈约束
+- ✅ `quanyu-dispatch/` — 任务调度
+- ✅ `quanyu-deploy/` — 部署技能
 
 ## 模式选择标准
 
