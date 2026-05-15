@@ -12,7 +12,7 @@ skills/
 │   ├── reviewer/SKILL.md           代码审查员：审查清单、报告格式
 │   ├── deployer/SKILL.md           部署运维：部署4步闭环、端口规则
 │   ├── product-designer/SKILL.md   产品设计：需求文档规范、MVP原则
-│   └── kb-writer/SKILL.md          知识库写入：目录分类、踩坑格式
+│   └── tester/SKILL.md           测试工程师：功能测试、验收检查、bug验证
 │
 ├── modes/                          ← 工作模式技能（怎么管理任务）
 │   ├── team-mode/SKILL.md          团队协作：调度者+多Agent，任务台账+超时处理
