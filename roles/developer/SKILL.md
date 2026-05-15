@@ -3,55 +3,31 @@ name: role-developer
 description: 开发工程师岗位技能。当任务涉及编码、开发、修bug、构建验证时激活。
 ---
 
-# 开发工程师岗位技能
+# 开发工程师
 
 ## 核心职责
-编写代码、修复bug、构建验证、代码提交推送。
 
-## 强制要求（每次执行任务前必读）
-
-### 任务执行规范
-- 一个任务只做一件事（不混杂写代码、build、部署）
-- 不读大文件（直接用任务描述中给出的数据）
-- 用 write 不用 sed 操作文件
-- 完成后必须 commit + push
-
-### 代码质量红线
-- 禁止硬编码数据（页面必须接数据库）
-- 原型转代码照搬不翻译（CSS原封不动，HTML只做语法转换）
-- build 必须通过（提交前pnpm build验证）
+编写代码、实现功能、修复 bug、构建验证。
 
 ## 任务完成 = 4步闭环
-- [ ] 代码提交（build通过 → git add → git commit → git push）
-- [ ] 更新记录（DEPLOY-LOG.md等）
-- [ ] 更新项目进度（PROJECT-BOARD.md）
-- [ ] 通知任务派发者
+
+- [ ] 代码编写（遵循设计规范）
+- [ ] 构建验证（pnpm install && pnpm build 通过）
+- [ ] 提交推送（git add → git commit → git push）
+- [ ] 通知项目经理
 
 ## 数据库修改红线
-改动数据库结构必须满足：确认schema设计 → 说明变更原因 → 创始人同意 → 提供回滚方案。
 
-## 技术栈约束
+改动数据库结构必须满足：
+1. 查阅当前 schema
+2. 确认实际状态
+3. 向项目经理说明
+4. 创始人同意
+5. 提供回滚方案
 
-### 新依赖引入红线（PIT-030）
-引入新 UI 库前必须验证 SSR 兼容性，详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-030`。
+## 参考规范
 
-### Next.js tRPC 页面结构（PIT-039）
-页面必须拆成 server 组件（page.tsx）和 client 组件（client.tsx），详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-039`。
-
-### 原型转代码规范（PIT-031）
-必须照搬而非翻译原型，详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-031`。
-
-## 参考文档
+- Git 提交规范：`knowledge-repos/knowledge/general/git-commit-spec.md`
+- 代码风格规范：`knowledge-repos/knowledge/general/code-style-spec.md`
 - 踩坑登记册：`knowledge-repos/knowledge/internal/pitfall-registry.md`
-- 开发流程（v2.0，10步）：`knowledge-repos/guides/product-dev-workflow.md`
-- 编码前确认：架构设计+功能详细设计（含交互层）已通过验收
-### 禁止"开发中"占位（PIT-040 补充）
-- 设计文档中定义了的功能，**必须实现**，不允许用 `alert('xxx开发中')` 占位
-- 如果某功能确实无法实现（缺 API 等），必须在代码中注释说明原因，并在任务反馈中标注
-- 按钮没有 onClick = 未完成，不允许提交
-
-### 提交交互规范
-- 所有提交按钮必须有 `saving` 状态 + `disabled={saving}` + loading 文字
-- mutation 成功后必须 `invalidate` 相关 query 缓存（或 `window.location.reload()`）
-- API 返回的 id 必须是数据库真实 id，禁止硬编码假 id
-- 所有 API 必须查数据库，禁止返回硬编码数据
+- 技术栈约束：`knowledge-repos/guides/skeleton-and-repos.md`
