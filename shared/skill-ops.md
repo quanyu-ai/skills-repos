@@ -31,4 +31,4 @@ git pull skills-repos → cp 对应目录到 workspace/skills/
 
 ## 完整规范
 
-详见 `guides/skill-management.md`
+详见 `knowledge-repos/guides/skill-management.md`

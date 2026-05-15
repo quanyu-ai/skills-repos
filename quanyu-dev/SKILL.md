@@ -77,9 +77,9 @@ catch 块统一 `catch (error: any)` 或类型守卫，访问 error 属性前：
 
 ## 参考文档
 - 踩坑登记册：`knowledge-repos/knowledge/internal/pitfall-registry.md`
-- 开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
+- 开发流程（v2.0，10步）：`knowledge-repos/guides/product-dev-workflow.md`
 - 关键变化：Phase 3 架构设计、Phase 7 设计验收门禁、Phase 4 必须含交互层+数据层
-- 骨架模板：`guides/skeleton-and-repos.md`
+- 骨架模板：`knowledge-repos/guides/skeleton-and-repos.md`
 ### 专业领域严谨原则（PIT-041）
 - 涉及财税/法律/医疗等专业领域的功能，**不能拍脑袋，必须从权威渠道研究后再做**
 - 权威渠道包括：国家税务总局官网、财政部官网、用友/金蝶等专业财务平台、会计准则文件、大量网络资源中可信度权重高的素材

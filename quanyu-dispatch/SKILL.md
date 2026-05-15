@@ -67,7 +67,7 @@ Agent超时 → 检查中间产物 → 更新台账(status: timed_out) → 评�
 确保新产品按7步流程推进：PRD → 原型 → 功能设计 → 数据库设计 → API设计 → 编码 → 测试部署
 
 ## 参考文档
-- 完整规范：`guides/task-dispatch-mechanism.md`
-- 产品开发流程（v2.0，10步）：`guides/product-dev-workflow.md`
+- 完整规范：`knowledge-repos/guides/task-dispatch-mechanism.md`
+- 产品开发流程（v2.0，10步）：`knowledge-repos/guides/product-dev-workflow.md`
 - 派发编码任务前必须确认 Phase 7 设计验收通过
 - 踩坑登记册：`knowledge-repos/knowledge/internal/pitfall-registry.md`

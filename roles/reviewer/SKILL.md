@@ -43,4 +43,4 @@ description: 代码审查员岗位技能。当任务涉及代码审查、架构�
 
 ## 参考文档
 - 踩坑登记册：`knowledge-repos/knowledge/internal/pitfall-registry.md`
-- 代码规范：`guides/coding-standards.md`
+- 代码规范：`knowledge-repos/guides/coding-standards.md`

@@ -22,7 +22,7 @@ description: 知识库写入岗位技能。当任务涉及写文档、记录经�
 | `knowledge-repos/knowledge/general/` | 通用知识 |
 | `knowledge-repos/knowledge/templates/` | 复用模板 |
 | `knowledge-repos/knowledge/inbox/` | 待整理 |
-| `guides/` | 职责手册、流程规范 |
+| `knowledge-repos/guides/` | 职责手册、流程规范 |
 
 ## 踩坑登记格式
 

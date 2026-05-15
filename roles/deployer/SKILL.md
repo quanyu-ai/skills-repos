@@ -36,5 +36,5 @@ description: 部署运维岗位技能。当任务涉及部署、Docker、启停�
 禁止手动执行零散部署命令，必须用一键部署脚本，详见 `knowledge-repos/knowledge/internal/pitfall-registry.md#PIT-032`。
 
 ## 参考文档
-- 部署流程：`guides/deployment-process.md`
+- 部署流程：`knowledge-repos/guides/deployment-process.md`
 - 基础设施台账：`INFRA-LEDGER.md`

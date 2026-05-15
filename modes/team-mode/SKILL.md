@@ -31,7 +31,7 @@ description: 团队协作模式。适用于有调度者+多Agent的团队。调�
 
 ## 任务类型与预估
 
-详见 `guides/task-dispatch-mechanism.md` 第二章「任务类型清单」，此处不重复定义。
+详见 `knowledge-repos/guides/task-dispatch-mechanism.md` 第二章「任务类型清单」，此处不重复定义。
 
 **核心规则：预估超过5分钟 → 必须拆分。**
 

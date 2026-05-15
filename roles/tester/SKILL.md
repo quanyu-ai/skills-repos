@@ -75,7 +75,7 @@ echo "列表: $(curl -s "$BASE/record.list?input=%7B%22json%22%3A%7B%22page%22%3
 - ❌ 不检查硬编码就说"无问题"
 - ❌ 不做用户流程测试就出报告
 
-详见 `guides/product-dev-workflow.md` Phase 9
+详见 `knowledge-repos/guides/product-dev-workflow.md` Phase 9
 
 ### 边界测试（必做）
 核心操作必须测以下边界情况：

@@ -177,7 +177,7 @@ bash skills/quanyu-deploy/scripts/check-deploy.sh /opt/demo/<project>
 - PIT-011：edit 重试死循环
 
 详见 `knowledge-repos/knowledge/internal/pitfall-registry.md`。
-完整规范见 `guides/demo-deployment.md`。
+完整规范见 `knowledge-repos/guides/demo-deployment.md`。
 
 ## 部署包方案
 
@@ -195,7 +195,7 @@ deploy-package-<项目名>-v<版本号>.tar.gz
 ```
 
 部署包版本号必须与 git tag、package.json、镜像标签一致。
-详见 `guides/skeleton-and-repos.md` 第四节。
+详见 `knowledge-repos/guides/skeleton-and-repos.md` 第四节。
 
 ## 部署后必须清理（2026-05-12 新增）
 
