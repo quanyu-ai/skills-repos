@@ -1,6 +1,6 @@
 ---
-name: mode-team
-description: 团队协作模式。适用于有调度者+多Agent的团队。调度者派发任务、跟踪进度、处理超时、汇报结果。
+name: quanyu-mode-team
+description: 权舆科技团队协作模式。适用于有调度者+多Agent的团队。调度者派发任务、跟踪进度、处理超时、汇报结果。
 ---
 
 # 团队协作模式

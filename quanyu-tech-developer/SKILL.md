@@ -1,6 +1,6 @@
 ---
-name: role-developer
-description: 开发工程师岗位技能。当任务涉及编码、开发、修bug、构建验证时激活。
+name: quanyu-tech-developer
+description: 权舆科技开发工程师技能。当任务涉及编码、开发、修bug、构建验证时激活。
 ---
 
 # 开发工程师

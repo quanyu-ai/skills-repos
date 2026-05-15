@@ -1,9 +1,9 @@
 ---
-name: quanyu-dispatch
-description: 权舆科技任务调度技能。项目经理(小缺)在派发任务、跟踪进度、处理超时、汇报结果时激活。
+name: quanyu-tech-director
+description: 权舆科技软件研发总监技能。项目经理(小缺)在派发任务、跟踪进度、处理超时、汇报结果时激活。
 ---
 
-# 任务调度技能
+# 软件研发总监
 
 ## 核心原则
 

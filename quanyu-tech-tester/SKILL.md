@@ -1,6 +1,6 @@
 ---
-name: role-tester
-description: 测试工程师岗位技能。当任务涉及功能测试、验收检查、bug验证、部署验证、健康检查、数据验证时激活。
+name: quanyu-tech-tester
+description: 权舆科技测试工程师技能。当任务涉及功能测试、验收检查、bug验证、部署验证、健康检查、数据验证时激活。
 ---
 
 # 测试工程师

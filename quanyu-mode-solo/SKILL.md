@@ -1,6 +1,6 @@
 ---
-name: mode-solo
-description: 单人作业模式。适用于一个AI独立完成开发任务。自己拆解、执行、验证、记录。
+name: quanyu-mode-solo
+description: 权舆科技单人作业模式。适用于一个AI独立完成开发任务。自己拆解、执行、验证、记录。
 ---
 
 # 单人作业模式

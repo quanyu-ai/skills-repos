@@ -1,6 +1,6 @@
 ---
-name: role-reviewer
-description: 代码审查员岗位技能。当任务涉及代码审查、架构评审、安全审计时激活。
+name: quanyu-tech-reviewer
+description: 权舆科技代码审查员技能。当任务涉及代码审查、架构评审、安全审计时激活。
 ---
 
 # 代码审查员

@@ -1,6 +1,6 @@
 ---
-name: role-product-designer
-description: 产品设计岗位技能。当任务涉及产品需求、战略分析、UI/UX设计、原型设计、线框图、Wireframe、HTML原型、文案撰写时激活。
+name: quanyu-tech-product-designer
+description: 权舆科技产品设计技能。当任务涉及产品需求、战略分析、UI/UX设计、原型设计、线框图、Wireframe、HTML原型、文案撰写时激活。
 ---
 
 # 产品设计

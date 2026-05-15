@@ -1,6 +1,6 @@
 ---
-name: role-deployer
-description: 部署运维岗位技能。当任务涉及部署、Docker、演示环境、生产环境、启停服务、构建镜像、docker-compose、Dockerfile、Nginx配置、部署建档、版本发布时激活。
+name: quanyu-tech-deployer
+description: 权舆科技部署运维技能。当任务涉及部署、Docker、演示环境、生产环境、启停服务、构建镜像、docker-compose、Dockerfile、Nginx配置、部署建档、版本发布时激活。
 ---
 
 # 部署运维
