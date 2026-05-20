@@ -105,6 +105,7 @@ bash guides/scripts/deployment/deploy-prototype.sh <项目名> <html文件路径
 | 3300-3399 | 测试环境 | 待分配 |
 
 > ✅ 新项目分配端口时，必须从 `knowledge-repos/management/INFRA-LEDGER.md` 按顺序取用
+> ⚠️ **端口号管理核心原则：端口号一旦分配，永不回收。服务器资源不足时停止服务释放内存，但不要清除端口号。只有当整个项目在 PROJECT-BOARD.md 中标记为删除状态时，才可以考虑释放端口。**
 
 ## 部署验证标准（必须全部通过）
 
