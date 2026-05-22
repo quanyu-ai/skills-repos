@@ -1,0 +1,4 @@
+apps.json
+environments.json
+environments.local.json
+*.local.json

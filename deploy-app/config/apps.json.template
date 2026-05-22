@@ -1,0 +1,14 @@
+{
+  "$schema": "./schema.md",
+  "apps": {
+    "console": {
+      "display_name": "权舆系统展示控制台",
+      "repo_url": "git@github.com:quanyu/console.git",
+      "project_path": "/var/lib/openclaw/.openclaw/workspace/projects/quanyu-console",
+      "build_cmd": "pnpm install --frozen-lockfile && pnpm build",
+      "start_cmd": "pnpm start",
+      "health_path": "/api/health",
+      "framework": "nextjs"
+    }
+  }
+}

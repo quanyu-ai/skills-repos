@@ -1,0 +1,141 @@
+# Schema — apps.json & environments.json
+
+deploy-app skill 的两份核心配置 schema 说明。**字段名严格按本表，不要私自改名。**
+
+---
+
+## apps.json
+
+记录"应用本身"的元数据，与环境无关。
+
+```jsonc
+{
+  "apps": {
+    "<app_key>": {
+      "display_name": "<string, required> 中文展示名",
+      "repo_url":     "<string, required> git 仓库 URL（ssh 格式）",
+      "project_path": "<string, required> 本机工作区内的绝对路径",
+      "build_cmd":    "<string, required> 构建命令（一行 shell）",
+      "start_cmd":    "<string, required> 启动命令（PM2 模式用）",
+      "health_path":  "<string, required> 健康检查路径，如 /api/health",
+      "framework":    "<enum, required> nextjs|nestjs|static|docker-only",
+      "node_version": "<string, optional> 如 20.x",
+      "env_files":    "<string[], optional> 需要额外加载的 .env 路径列表"
+    }
+  }
+}
+```
+
+### `<app_key>` 命名规则
+
+- 小写英文 + 短横线，如 `console`、`chenxi-web`、`sme-api`
+- 必须在所有环境中唯一
+- 不能与 PM2 已有进程名冲突
+
+### `framework` 取值
+
+| 值 | 说明 | 默认部署模式 |
+|----|------|------|
+| `nextjs` | Next.js 应用 | PM2 |
+| `nestjs` | NestJS 后端 | PM2 |
+| `static` | 纯静态文件（Vite/CRA build 产物） | 复制到 Nginx 目录 |
+| `docker-only` | 仅支持 Docker 部署（如 prod） | Docker |
+
+---
+
+## environments.json
+
+记录"环境 × 应用"的部署参数。
+
+```jsonc
+{
+  "environments": {
+    "<env_name>": {
+      "host":             "<string, required> 目标主机 IP 或 localhost",
+      "ssh_user":         "<string, required> SSH 登录用户，规范=deploy",
+      "ssh_key":          "<string, required> 私钥路径，~ 会自动展开",
+      "deploy_mode":      "<enum, required> pm2|docker",
+      "deploy_base_path": "<string, required> 源码根目录（git pull 用），如 /var/lib/openclaw/.openclaw/workspace/code-repos",
+      "deploy_root":      "<string, optional, Phase 3+> 版本化部署根目录，按 <root>/<app>/releases/<sha> 组织；未配置则回退到原地部署（旧行为）",
+      "releases_to_keep": "<int, optional, Phase 3+> 保留的历史版本数（含当前），默认 3。部署成功后清理多余版本目录",
+      "nginx_conf_dir":   "<string, optional> Nginx 配置目录",
+      "apps": {
+        "<app_key>": {
+          "port":     "<int, required> 监听端口（必须与 INFRA-LEDGER 一致）",
+          "pm2_name": "<string, conditional> deploy_mode=pm2 时必填",
+          "docker_image":  "<string, conditional> deploy_mode=docker 时必填",
+          "docker_compose": "<string, optional> 自定义 compose 路径",
+          "domain":   "<string, optional> 对外域名（用于 verify 健康检查）",
+          "extra_env": "<object, optional> 部署时注入的额外环境变量"
+        }
+      }
+    }
+  }
+}
+```
+
+### `<env_name>` 必须为以下之一
+
+| 值 | 用途 | 推荐 deploy_mode |
+|----|------|------|
+| `demo` | 演示环境（给客户/老板看） | `pm2` |
+| `test` | 集成测试环境 | `pm2` |
+| `prod` | 生产环境 | `docker` |
+
+### `port` 分配规则（与 INFRA-LEDGER 对齐）
+
+- demo: `3100–3199`
+- test: `3200–3299`
+- prod: `3000–3099`（容器内端口，对外通过 Nginx 反代）
+
+详见 `knowledge-repos/guides/deployment-standard.md §2.0`。
+
+---
+
+## 校验
+
+- JSON 格式校验：`jq empty <file>`（doctor.sh 自动执行）
+- Phase 2 将增加字段级 schema 校验（required / type / enum）
+
+---
+
+## Phase 3：版本化部署目录结构
+
+当 `environments.<env>.deploy_root` 配置后，部署脚本会按下面结构组织产物，实现真正的版本回滚：
+
+```
+<deploy_root>/<app_key>/
+  ├── current -> releases/<sha>           # 原子 symlink，PM2 的 cwd 指向这里
+  └── releases/
+      ├── <sha1>/                         # 按 git short sha 命名（无 git 时用时间戳）
+      │   ├── .next/                      # build 产物
+      │   ├── public/                     # 静态资源（如有）
+      │   ├── package.json
+      │   ├── node_modules -> <shared>    # symlink 到源码 node_modules，避免每版本重复占用磁盘
+      │   └── ecosystem.config.cjs        # PM2 配置（cwd 指向自身目录）
+      └── <sha2>/                         # 上一版本，rollback 用
+<deploy_root>/shared/node_modules/
+  └── <app_key> -> <project_path or monorepo_root>/node_modules
+```
+
+部署流程关键点：
+1. 源码目录依旧用 `deploy_base_path`（git pull 在原位）；build 也在源码目录
+2. build 完成后，把产物 **复制** 到 `releases/<sha>/`
+3. node_modules 通过 symlink 共享，不复制
+4. 原子切换 `current` symlink 后再 PM2 reload
+5. 部署成功 → 保留最近 `releases_to_keep` 个版本，清理更旧的
+
+回滚流程：
+1. 找到 `releases/` 下排除 `current` 指向的最新一份
+2. 原子切换 `current` symlink
+3. PM2 reload（按 `current/ecosystem.config.cjs`）
+4. 健康检查不过 → 退出非零，并保留 symlink 现状以便人工介入
+
+
+---
+
+## 安全提示
+
+- ❌ 不要把真实 `apps.json` / `environments.json` 提交 git（已被 `.gitignore` 拦截）
+- ✅ 模板文件 `*.template` 可以入库（仅含示例，无敏感信息）
+- ✅ 任何含密码 / token 的字段不要进 environments.json，改走 OpenClaw env 注入

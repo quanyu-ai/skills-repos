@@ -1,0 +1,34 @@
+{
+  "$schema": "./schema.md",
+  "environments": {
+    "demo": {
+      "host": "localhost",
+      "ssh_user": "deploy",
+      "ssh_key": "~/.ssh/deploy_local",
+      "deploy_mode": "pm2",
+      "deploy_base_path": "/var/www/demo",
+      "apps": {
+        "console": {
+          "port": 3101,
+          "pm2_name": "demo-console"
+        }
+      }
+    },
+    "test": {
+      "host": "localhost",
+      "ssh_user": "deploy",
+      "ssh_key": "~/.ssh/deploy_local",
+      "deploy_mode": "pm2",
+      "deploy_base_path": "/var/www/test",
+      "apps": {}
+    },
+    "prod": {
+      "host": "PLACEHOLDER_PROD_HOST",
+      "ssh_user": "deploy",
+      "ssh_key": "~/.ssh/deploy_prod",
+      "deploy_mode": "docker",
+      "deploy_base_path": "/var/www/prod",
+      "apps": {}
+    }
+  }
+}

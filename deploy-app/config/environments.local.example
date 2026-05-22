@@ -1,0 +1,20 @@
+{
+  "_comment": "环境覆盖文件示例。复制为 environments.local.json 后会被 deploy.sh 合并到 environments.json 之上（deep merge）。环境配置如 ssh_key、host、port 等敏感/机器相关字段建议放这里，主仓只留模板。该文件已加入 .gitignore，不会进版本控制。",
+  "environments": {
+    "demo": {
+      "_comment_example": "例如本机演示环境的 ssh_key 替换：",
+      "ssh_key": "~/.ssh/deploy_local_localmachine"
+    },
+    "prod": {
+      "_comment_example": "例如生产环境真实 host / 密钥 / chenxi-backend 真实端口：",
+      "default_host": "prod.example.com",
+      "ssh_key": "~/.ssh/deploy_prod_real",
+      "apps": {
+        "chenxi-backend": {
+          "host": "43.139.53.121",
+          "port": 3001
+        }
+      }
+    }
+  }
+}
