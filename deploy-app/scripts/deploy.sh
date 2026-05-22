@@ -601,13 +601,15 @@ ECO
         log "pm2 reload-or-start: $ENVAPP_PM2_NAME (cwd=$PM2_CWD)"
         PM2_SCRIPT_REMOTE=$(cat <<RSCRIPT
 DESIRED_CWD='$PM2_CWD'
+DESIRED_PORT='$ENVAPP_PORT'
 if pm2 describe '$ENVAPP_PM2_NAME' >/dev/null 2>&1; then
     CURRENT_CWD=\$(pm2 jlist 2>/dev/null | node -e "let d=JSON.parse(require('fs').readFileSync(0,'utf8'));let a=d.find(x=>x.name==='$ENVAPP_PM2_NAME');process.stdout.write((a&&a.pm2_env&&a.pm2_env.pm_cwd)||'')" 2>/dev/null || echo '')
-    if [ "\$CURRENT_CWD" = "\$DESIRED_CWD" ]; then
-        echo "[deploy] cwd unchanged (\$DESIRED_CWD), reloading"
+    CURRENT_PORT=\$(pm2 jlist 2>/dev/null | node -e "let d=JSON.parse(require('fs').readFileSync(0,'utf8'));let a=d.find(x=>x.name==='$ENVAPP_PM2_NAME');let args=a&&a.pm2_env&&a.pm2_env.args? a.pm2_env.args.join(' '):'';let m=args.match(/\\-l\\s+tcp:\\/\\/0\\.0\\.0\\.0:(\\d+)/);process.stdout.write(m? m[1]:(a&&a.pm2_env&&a.pm2_env.env&&a.pm2_env.env.PORT)||'')" 2>/dev/null || echo '')
+    if [ "\$CURRENT_CWD" = "\$DESIRED_CWD" ] && [ "\$CURRENT_PORT" = "\$DESIRED_PORT" ]; then
+        echo "[deploy] cwd and port unchanged (\$DESIRED_CWD:\$DESIRED_PORT), reloading"
         pm2 reload '$ENVAPP_PM2_NAME' --update-env
     else
-        echo "[deploy] cwd changed: \$CURRENT_CWD -> \$DESIRED_CWD; recreating PM2 entry"
+        echo "[deploy] config changed: cwd=\$CURRENT_CWD->\$DESIRED_CWD, port=\$CURRENT_PORT->\$DESIRED_PORT; recreating PM2 entry"
         pm2 delete '$ENVAPP_PM2_NAME' || true
         pm2 start '$REMOTE_ECO' --only '$ENVAPP_PM2_NAME'
     fi
