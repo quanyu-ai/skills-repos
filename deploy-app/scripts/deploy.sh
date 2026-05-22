@@ -78,24 +78,30 @@ _app_get() {
     local env_val=$(jq -r --arg k "$key" --arg e "$ENV_NAME" ".apps[\$k].env_config[\$e]${path} // empty" "$APPS_JSON")
     if [ -n "$env_val" ] && [ "$env_val" != "null" ]; then
         echo "$env_val"
-    else
-        # 尝试读取项目代码路径或原型路径（根据环境）
+        return
+    fi
+
+    # 仅当请求 .project_path 时，才尝试从 project_proto_path / project_code_path fallback。
+    # 注意：project_proto_path / project_code_path 在 apps.json 里是字符串，对它再做 .build_cmd / .monorepo
+    # 这类索引会产生 jq stderr 噪音；因此用 path == ".project_path" 作为前置门禁。
+    if [ "$path" = ".project_path" ]; then
         if [ "$ENV_NAME" = "proto" ]; then
-            local proto_path=$(jq -r --arg k "$key" ".apps[\$k].project_proto_path${path} // empty" "$APPS_JSON")
-            if [ -n "$proto_path" ] && [ "$proto_path" != "null" ] && [ "$path" = ".project_path" ]; then
+            local proto_path=$(jq -r --arg k "$key" ".apps[\$k].project_proto_path // empty" "$APPS_JSON")
+            if [ -n "$proto_path" ] && [ "$proto_path" != "null" ]; then
                 echo "$proto_path"
-            else
-                jq -r --arg k "$key" ".apps[\$k]${path} // empty" "$APPS_JSON"
+                return
             fi
         else
-            local code_path=$(jq -r --arg k "$key" ".apps[\$k].project_code_path${path} // empty" "$APPS_JSON")
-            if [ -n "$code_path" ] && [ "$code_path" != "null" ] && [ "$path" = ".project_path" ]; then
+            local code_path=$(jq -r --arg k "$key" ".apps[\$k].project_code_path // empty" "$APPS_JSON")
+            if [ -n "$code_path" ] && [ "$code_path" != "null" ]; then
                 echo "$code_path"
-            else
-                jq -r --arg k "$key" ".apps[\$k]${path} // empty" "$APPS_JSON"
+                return
             fi
         fi
     fi
+
+    # 兜底：直接从 app 顶层取（如 build_cmd / start_cmd / monorepo 等都在顶层）
+    jq -r --arg k "$key" ".apps[\$k]${path} // empty" "$APPS_JSON"
 }
 _env_get() {
     local env="$1"; local path="$2"
