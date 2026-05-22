@@ -1,0 +1,11 @@
+{
+  "projects": {
+    "smart-college": {
+      "display_name": "智院",
+      "modules": ["学院领导", "教师", "辅导员", "学生", "校友", "管理员"],
+      "style": "wireframe",
+      "initialized": false,
+      "notes": "学院数字化管理平台，对应需求文档 V3.0"
+    }
+  }
+}

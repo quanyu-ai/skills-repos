@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "project": "<project_name>",
+  "generated_at": "<ISO8601>",
+  "stats": {
+    "total": 0,
+    "by_status": {},
+    "by_phase": {},
+    "by_priority": {},
+    "by_role": {}
+  },
+  "requirements": {}
+}

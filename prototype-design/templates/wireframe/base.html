@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}} - {{PROJECT}} 原型 [线框图]</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="../../_shared/styles.css">
+    <style>
+        body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    </style>
+</head>
+<body class="bg-white text-gray-900">
+
+<!-- Header -->
+<header class="wireframe-header border-b border-gray-300 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-4">
+        <div class="text-lg font-semibold">{{PROJECT}}</div>
+        <span class="text-gray-400">/</span>
+        <span class="text-gray-700">{{ROLE}}</span>
+        <span class="text-gray-400">/</span>
+        <span class="text-gray-900">{{TITLE}}</span>
+    </div>
+    <div class="text-sm text-gray-500">
+        <span class="mr-4">REQ: {{REQ_ID}}</span>
+        <span>风格: {{STYLE}}</span>
+    </div>
+</header>
+
+<div class="flex" style="min-height: calc(100vh - 56px);">
+
+    <!-- Sidebar -->
+    <aside class="wireframe-sidebar w-56 border-r border-gray-300 p-4">
+        <nav class="space-y-2 text-sm">
+            <div class="text-gray-500 text-xs uppercase mb-2">{{ROLE}} 菜单</div>
+            <a href="#" class="block py-2 px-3 bg-gray-100 border border-gray-300 text-gray-900">▶ {{TITLE}}</a>
+            <a href="#" class="block py-2 px-3 text-gray-600 hover:bg-gray-50">■ 模块二</a>
+            <a href="#" class="block py-2 px-3 text-gray-600 hover:bg-gray-50">■ 模块三</a>
+            <a href="#" class="block py-2 px-3 text-gray-600 hover:bg-gray-50">■ 模块四</a>
+        </nav>
+    </aside>
+
+    <!-- Main content -->
+    <main class="flex-1 p-6">
+
+        <!-- Breadcrumb -->
+        <div class="wireframe-breadcrumb text-sm text-gray-500 mb-4">
+            首页 → {{ROLE}} → {{TITLE}}
+        </div>
+
+        <!-- Page title -->
+        <h1 class="text-xl font-semibold mb-4">{{TITLE}}</h1>
+        <p class="text-sm text-gray-500 mb-6">[关联需求 {{REQ_ID}}]  本页为 Phase 1 示例占位，完整业务页面待 Phase 2 实装。</p>
+
+        <!-- KPI cards -->
+        <section class="wireframe-section grid grid-cols-4 gap-4 mb-6">
+            <div class="kpi-card border border-gray-300 p-4">
+                <div class="text-xs text-gray-500">KPI 1</div>
+                <div class="text-2xl font-semibold mt-1">[数值]</div>
+            </div>
+            <div class="kpi-card border border-gray-300 p-4">
+                <div class="text-xs text-gray-500">KPI 2</div>
+                <div class="text-2xl font-semibold mt-1">[数值]</div>
+            </div>
+            <div class="kpi-card border border-gray-300 p-4">
+                <div class="text-xs text-gray-500">KPI 3</div>
+                <div class="text-2xl font-semibold mt-1">[数值]</div>
+            </div>
+            <div class="kpi-card border border-gray-300 p-4">
+                <div class="text-xs text-gray-500">KPI 4</div>
+                <div class="text-2xl font-semibold mt-1">[数值]</div>
+            </div>
+        </section>
+
+        <!-- Chart placeholder -->
+        <section class="wireframe-section border border-gray-300 p-4 mb-6">
+            <div class="text-sm font-medium mb-2">图表区域</div>
+            <div class="chart-placeholder bg-gray-100 border border-dashed border-gray-400 h-48 flex items-center justify-center text-gray-400">
+                [图表占位 / Chart Placeholder]
+            </div>
+        </section>
+
+        <!-- Data table -->
+        <section class="wireframe-section border border-gray-300 p-4">
+            <div class="flex items-center justify-between mb-3">
+                <div class="text-sm font-medium">数据列表</div>
+                <div class="space-x-2">
+                    <button class="wireframe-btn border border-gray-400 px-3 py-1 text-sm">筛选</button>
+                    <button class="wireframe-btn border border-gray-900 bg-gray-900 text-white px-3 py-1 text-sm">新增</button>
+                </div>
+            </div>
+            <table class="wireframe-table w-full text-sm border-collapse">
+                <thead>
+                    <tr class="border-b border-gray-300 bg-gray-50">
+                        <th class="text-left py-2 px-3">字段一</th>
+                        <th class="text-left py-2 px-3">字段二</th>
+                        <th class="text-left py-2 px-3">字段三</th>
+                        <th class="text-left py-2 px-3">状态</th>
+                        <th class="text-left py-2 px-3">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="border-b border-gray-200 hover:bg-gray-50">
+                        <td class="py-2 px-3">[占位]</td>
+                        <td class="py-2 px-3">[占位]</td>
+                        <td class="py-2 px-3">[占位]</td>
+                        <td class="py-2 px-3"><span class="border border-gray-400 px-2 py-0.5 text-xs">待处理</span></td>
+                        <td class="py-2 px-3"><a href="#" class="underline">查看</a></td>
+                    </tr>
+                    <tr class="border-b border-gray-200 hover:bg-gray-50">
+                        <td class="py-2 px-3">[占位]</td>
+                        <td class="py-2 px-3">[占位]</td>
+                        <td class="py-2 px-3">[占位]</td>
+                        <td class="py-2 px-3"><span class="border border-gray-400 px-2 py-0.5 text-xs">已完成</span></td>
+                        <td class="py-2 px-3"><a href="#" class="underline">查看</a></td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+    </main>
+</div>
+
+<!-- Footer -->
+<footer class="wireframe-footer border-t border-gray-300 px-6 py-3 text-xs text-gray-500 text-center">
+    {{PROJECT}} 原型 [线框图] · 关联需求 {{REQ_ID}}
+</footer>
+
+<script>
+    // 模块切换 JS（占位）
+    document.querySelectorAll('aside a').forEach(a => {
+        a.addEventListener('click', function(e) {
+            e.preventDefault();
+            console.log('切换到模块:', this.textContent.trim());
+        });
+    });
+</script>
+
+</body>
+</html>

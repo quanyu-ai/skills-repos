@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{PROJECT}} 原型导航 - {{COMPANY_NAME}}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="_shared/styles.css">
+    <style>
+        body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    </style>
+</head>
+<body class="bg-white text-gray-900">
+
+<!-- Header -->
+<header class="border-b border-gray-300 px-8 py-4">
+    <div class="flex items-center justify-between max-w-6xl mx-auto">
+        <div>
+            <div class="text-xl font-semibold">{{PROJECT}} 原型</div>
+            <div class="text-xs text-gray-500 mt-1">{{COMPANY_NAME}} · {{SLOGAN}}</div>
+        </div>
+        <div class="text-sm text-gray-500">线框图版本</div>
+    </div>
+</header>
+
+<!-- Main -->
+<main class="max-w-6xl mx-auto px-8 py-10">
+
+    <h1 class="text-2xl font-semibold mb-2">选择角色查看原型</h1>
+    <p class="text-sm text-gray-600 mb-8">点击下方角色卡片，进入该角色的功能模块原型。</p>
+
+    <!-- 6 角色入口卡片 -->
+    <section class="grid grid-cols-3 gap-6">
+
+        <a href="modules/学院领导/workspace" class="role-card block border border-gray-300 p-6 hover:bg-gray-50">
+            <div class="text-xs text-gray-500 mb-2">ROLE 01</div>
+            <div class="text-lg font-semibold mb-2">学院领导</div>
+            <div class="text-sm text-gray-600">工作台、驾驶舱、督办、审批、考核、一张表</div>
+        </a>
+
+        <a href="modules/教师/workspace" class="role-card block border border-gray-300 p-6 hover:bg-gray-50">
+            <div class="text-xs text-gray-500 mb-2">ROLE 02</div>
+            <div class="text-lg font-semibold mb-2">教师</div>
+            <div class="text-sm text-gray-600">工作台、考核、科研统计、学生指导、个人中心</div>
+        </a>
+
+        <a href="modules/辅导员/workspace" class="role-card block border border-gray-300 p-6 hover:bg-gray-50">
+            <div class="text-xs text-gray-500 mb-2">ROLE 03</div>
+            <div class="text-lg font-semibold mb-2">辅导员 / 班主任</div>
+            <div class="text-sm text-gray-600">班级看板、违纪管理、请假审批、就业推送</div>
+        </a>
+
+        <a href="modules/学生/workspace" class="role-card block border border-gray-300 p-6 hover:bg-gray-50">
+            <div class="text-xs text-gray-500 mb-2">ROLE 04</div>
+            <div class="text-lg font-semibold mb-2">学生</div>
+            <div class="text-sm text-gray-600">学业成绩、考勤、请假、竞赛报名、招聘信息</div>
+        </a>
+
+        <a href="modules/校友/workspace" class="role-card block border border-gray-300 p-6 hover:bg-gray-50">
+            <div class="text-xs text-gray-500 mb-2">ROLE 05</div>
+            <div class="text-lg font-semibold mb-2">校友</div>
+            <div class="text-sm text-gray-600">个人中心、校友资讯</div>
+        </a>
+
+        <a href="modules/管理员/workspace" class="role-card block border border-gray-300 p-6 hover:bg-gray-50">
+            <div class="text-xs text-gray-500 mb-2">ROLE 06</div>
+            <div class="text-lg font-semibold mb-2">系统管理员</div>
+            <div class="text-sm text-gray-600">用户权限、数据汇聚、可视化、消息通知、审批管理</div>
+        </a>
+
+    </section>
+
+    <!-- Meta -->
+    <section class="mt-10 border-t border-gray-200 pt-6 text-sm text-gray-500">
+        <div>项目：{{PROJECT}}</div>
+        <div>生成自 <code class="bg-gray-100 px-1">prototype-design skill</code> · 风格：wireframe</div>
+        <div class="mt-2">需求映射查看：<a href="meta/requirements-map.json" class="underline">meta/requirements-map.json</a></div>
+        <div>变更日志查看：<a href="meta/revisions.md" class="underline">meta/revisions.md</a></div>
+    </section>
+
+</main>
+
+<!-- Footer -->
+<footer class="border-t border-gray-300 px-8 py-3 text-xs text-gray-500 text-center mt-10">
+    {{COMPANY_NAME}} · {{PROJECT}} 原型 · 仅供评审使用
+</footer>
+
+</body>
+</html>

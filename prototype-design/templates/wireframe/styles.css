@@ -1,0 +1,238 @@
+/* prototype-design wireframe 通用样式
+ * 规范：黑白灰配色 / 无 emoji / 极小圆角 / 无阴影
+ */
+
+:root {
+    --wf-bg: #ffffff;
+    --wf-bg-alt: #f5f5f5;
+    --wf-border: #cccccc;
+    --wf-border-strong: #999999;
+    --wf-text: #1a1a1a;
+    --wf-text-muted: #666666;
+    --wf-text-faint: #999999;
+    --wf-radius: 2px;
+}
+
+body.wireframe,
+body {
+    color: var(--wf-text);
+    background: var(--wf-bg);
+}
+
+.wireframe-page {
+    border: 1px solid var(--wf-border);
+    border-radius: var(--wf-radius);
+    padding: 16px;
+    background: var(--wf-bg);
+}
+
+.wireframe-section {
+    border-radius: var(--wf-radius);
+}
+
+.wireframe-header,
+.wireframe-footer,
+.wireframe-sidebar {
+    background: var(--wf-bg);
+}
+
+.wireframe-table {
+    border-radius: var(--wf-radius);
+}
+
+.wireframe-table th {
+    color: var(--wf-text-muted);
+    font-weight: 500;
+}
+
+.wireframe-table tr:hover {
+    background: var(--wf-bg-alt);
+}
+
+.wireframe-btn {
+    border-radius: var(--wf-radius);
+    transition: background-color 0.15s ease;
+}
+
+.wireframe-btn:hover {
+    background: var(--wf-bg-alt);
+}
+
+.wireframe-breadcrumb {
+    color: var(--wf-text-muted);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--wf-border);
+    border-radius: var(--wf-radius);
+    background: var(--wf-bg-alt);
+}
+
+.wireframe-breadcrumb a {
+    color: var(--wf-text-muted);
+    text-decoration: none;
+    border-bottom: 1px dashed transparent;
+}
+
+.wireframe-breadcrumb a:hover {
+    color: var(--wf-text);
+    border-bottom-color: var(--wf-text);
+}
+
+.wireframe-breadcrumb .sep {
+    color: var(--wf-text-faint);
+}
+
+.wireframe-breadcrumb .current {
+    color: var(--wf-text);
+    font-weight: 500;
+}
+
+/* 进度条（线性） */
+.wireframe-progress-wrap {
+    width: 100%;
+}
+
+.wireframe-progress {
+    width: 100%;
+    height: 10px;
+    border: 1px solid var(--wf-border-strong);
+    border-radius: var(--wf-radius);
+    background: var(--wf-bg-alt);
+    overflow: hidden;
+}
+
+.wireframe-progress-fill {
+    height: 100%;
+    background: var(--wf-text);
+    background-image: repeating-linear-gradient(
+        45deg,
+        var(--wf-text) 0,
+        var(--wf-text) 4px,
+        #333333 4px,
+        #333333 8px
+    );
+    transition: width 0.2s ease;
+}
+
+.wireframe-progress-label {
+    color: var(--wf-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 进度条（分段步骤） */
+.wireframe-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 0;
+}
+
+.wireframe-step-item {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    color: var(--wf-text-faint);
+    font-size: 13px;
+}
+
+.wireframe-step-item + .wireframe-step-item::before {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--wf-border);
+    margin-right: 8px;
+}
+
+.wireframe-step-index {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--wf-border-strong);
+    border-radius: var(--wf-radius);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    background: var(--wf-bg);
+}
+
+.wireframe-step-item.done {
+    color: var(--wf-text-muted);
+}
+
+.wireframe-step-item.done .wireframe-step-index {
+    background: var(--wf-text);
+    color: var(--wf-bg);
+    border-color: var(--wf-text);
+}
+
+.wireframe-step-item.done + .wireframe-step-item::before {
+    background: var(--wf-text);
+}
+
+.wireframe-step-item.active {
+    color: var(--wf-text);
+    font-weight: 500;
+}
+
+.wireframe-step-item.active .wireframe-step-index {
+    border-color: var(--wf-text);
+    border-width: 2px;
+}
+
+.kpi-card {
+    border-radius: var(--wf-radius);
+}
+
+.chart-placeholder {
+    border-radius: var(--wf-radius);
+    color: var(--wf-text-faint);
+}
+
+/* Tab 切换 */
+.wireframe-tab {
+    border-bottom: 1px solid var(--wf-border);
+}
+
+.wireframe-tab-item {
+    padding: 8px 16px;
+    border-bottom: 2px solid transparent;
+    color: var(--wf-text-muted);
+    cursor: pointer;
+}
+
+.wireframe-tab-item.active {
+    color: var(--wf-text);
+    border-bottom-color: var(--wf-text);
+}
+
+/* Modal */
+.wireframe-modal {
+    background: var(--wf-bg);
+    border: 1px solid var(--wf-border-strong);
+    border-radius: var(--wf-radius);
+}
+
+/* 表单 */
+.wireframe-input,
+.wireframe-select,
+.wireframe-textarea {
+    border: 1px solid var(--wf-border);
+    border-radius: var(--wf-radius);
+    padding: 6px 10px;
+    background: var(--wf-bg);
+}
+
+.wireframe-input:focus,
+.wireframe-select:focus,
+.wireframe-textarea:focus {
+    outline: none;
+    border-color: var(--wf-text);
+}

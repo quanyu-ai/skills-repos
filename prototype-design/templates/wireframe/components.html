@@ -1,0 +1,173 @@
+<!-- prototype-design wireframe 通用组件库
+     使用方式：复制需要的组件到目标 HTML 文件，或通过 fetch 注入
+-->
+
+<!-- ===== Navbar ===== -->
+<template id="component-navbar">
+<header class="wireframe-header border-b border-gray-300 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-4">
+        <div class="text-lg font-semibold">{{PROJECT}}</div>
+        <span class="text-gray-400">/</span>
+        <span class="text-gray-700">{{ROLE}}</span>
+    </div>
+    <div class="text-sm text-gray-500">{{USER_NAME}}</div>
+</header>
+</template>
+
+<!-- ===== Sidebar ===== -->
+<template id="component-sidebar">
+<aside class="wireframe-sidebar w-56 border-r border-gray-300 p-4">
+    <nav class="space-y-2 text-sm">
+        <div class="text-gray-500 text-xs uppercase mb-2">{{ROLE}} 菜单</div>
+        <!-- a 标签列表 -->
+    </nav>
+</aside>
+</template>
+
+<!-- ===== Breadcrumb =====
+     用法：通过 <a> 链接组装层级路径，最后一项不带链接代表当前页
+     参数：每一节点为「文字」或「<a href>文字</a>」
+     示例：
+       <nav class="wireframe-breadcrumb">
+         <a href="/">首页</a>
+         <span class="sep">/</span>
+         <a href="/modules/教师/workspace">教师工作台</a>
+         <span class="sep">/</span>
+         <span class="current">作业批改</span>
+       </nav>
+-->
+<template id="component-breadcrumb">
+<nav class="wireframe-breadcrumb text-sm mb-4" aria-label="面包屑">
+    <a href="#">首页</a>
+    <span class="sep">/</span>
+    <a href="#">{{ROLE}}</a>
+    <span class="sep">/</span>
+    <span class="current">{{MODULE}}</span>
+</nav>
+</template>
+
+<!-- ===== Progress Bar =====
+     用法：通过设置 .wireframe-progress-fill 的 width 控制进度
+     参数：
+       - data-value：当前进度（0-100），用于无障碍语义
+       - style="width: NN%"：填充宽度
+       - 可选 .wireframe-progress-label 显示数值
+     示例（65%）：
+       <div class="wireframe-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="65">
+         <div class="wireframe-progress-fill" style="width: 65%"></div>
+       </div>
+-->
+<template id="component-progress">
+<div class="wireframe-progress-wrap">
+    <div class="flex items-center justify-between mb-1 text-xs text-gray-600">
+        <span class="wireframe-progress-title">课程完成度</span>
+        <span class="wireframe-progress-label">65 / 100</span>
+    </div>
+    <div class="wireframe-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="65">
+        <div class="wireframe-progress-fill" style="width: 65%"></div>
+    </div>
+</div>
+</template>
+
+<!-- ===== Progress Bar · 分段步骤式 =====
+     用法：用于多阶段流程进度（如：报名 → 审核 → 缴费 → 完成）
+     参数：
+       - .wireframe-step-item.done    已完成
+       - .wireframe-step-item.active  当前步骤
+       - 其他为待办
+-->
+<template id="component-progress-steps">
+<ol class="wireframe-steps">
+    <li class="wireframe-step-item done">
+        <span class="wireframe-step-index">1</span>
+        <span class="wireframe-step-label">提交报名</span>
+    </li>
+    <li class="wireframe-step-item done">
+        <span class="wireframe-step-index">2</span>
+        <span class="wireframe-step-label">资料审核</span>
+    </li>
+    <li class="wireframe-step-item active">
+        <span class="wireframe-step-index">3</span>
+        <span class="wireframe-step-label">缴费确认</span>
+    </li>
+    <li class="wireframe-step-item">
+        <span class="wireframe-step-index">4</span>
+        <span class="wireframe-step-label">入学完成</span>
+    </li>
+</ol>
+</template>
+
+<!-- ===== Data Table ===== -->
+<template id="component-data-table">
+<table class="wireframe-table w-full text-sm border-collapse">
+    <thead>
+        <tr class="border-b border-gray-300 bg-gray-50">
+            <th class="text-left py-2 px-3">字段一</th>
+            <th class="text-left py-2 px-3">字段二</th>
+            <th class="text-left py-2 px-3">操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr class="border-b border-gray-200 hover:bg-gray-50">
+            <td class="py-2 px-3">[占位]</td>
+            <td class="py-2 px-3">[占位]</td>
+            <td class="py-2 px-3"><a href="#" class="underline">查看</a></td>
+        </tr>
+    </tbody>
+</table>
+</template>
+
+<!-- ===== Form ===== -->
+<template id="component-form">
+<form class="wireframe-form space-y-4">
+    <div>
+        <label class="block text-sm text-gray-700 mb-1">字段名 *</label>
+        <input type="text" class="wireframe-input w-full" placeholder="请输入">
+    </div>
+    <div>
+        <label class="block text-sm text-gray-700 mb-1">下拉选择</label>
+        <select class="wireframe-select w-full">
+            <option>选项一</option>
+            <option>选项二</option>
+        </select>
+    </div>
+    <div>
+        <label class="block text-sm text-gray-700 mb-1">备注</label>
+        <textarea class="wireframe-textarea w-full" rows="3" placeholder="请输入"></textarea>
+    </div>
+    <div class="flex space-x-2">
+        <button type="button" class="wireframe-btn border border-gray-400 px-4 py-1.5 text-sm">取消</button>
+        <button type="submit" class="wireframe-btn border border-gray-900 bg-gray-900 text-white px-4 py-1.5 text-sm">提交</button>
+    </div>
+</form>
+</template>
+
+<!-- ===== Modal ===== -->
+<template id="component-modal">
+<div class="wireframe-modal-mask fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center hidden">
+    <div class="wireframe-modal w-96 p-6">
+        <div class="text-lg font-semibold mb-3">弹窗标题</div>
+        <div class="text-sm text-gray-700 mb-4">弹窗内容占位。</div>
+        <div class="flex justify-end space-x-2">
+            <button class="wireframe-btn border border-gray-400 px-4 py-1.5 text-sm">取消</button>
+            <button class="wireframe-btn border border-gray-900 bg-gray-900 text-white px-4 py-1.5 text-sm">确认</button>
+        </div>
+    </div>
+</div>
+</template>
+
+<!-- ===== Chart Placeholder ===== -->
+<template id="component-chart-placeholder">
+<div class="chart-placeholder bg-gray-100 border border-dashed border-gray-400 h-48 flex items-center justify-center text-gray-400">
+    [图表占位 / Chart Placeholder]
+</div>
+</template>
+
+<!-- ===== KPI Card ===== -->
+<template id="component-kpi-card">
+<div class="kpi-card border border-gray-300 p-4">
+    <div class="text-xs text-gray-500">指标名</div>
+    <div class="text-2xl font-semibold mt-1">[数值]</div>
+    <div class="text-xs text-gray-400 mt-1">较上期 ↑ [N%]</div>
+</div>
+</template>
