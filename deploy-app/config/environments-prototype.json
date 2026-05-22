@@ -1,0 +1,52 @@
+{
+  "$schema": "./schema.md",
+  "_comment": "原型环境专门化配置。针对快速原型部署优化，采用轻量级部署策略。",
+  "environments": {
+    "proto": {
+      "_comment": "原型环境（专属原型部署）。快速原型验证，轻量级部署。",
+      "host": "localhost",
+      "ssh_user": "openclaw",
+      "ssh_key": "~/.ssh/deploy_local",
+      "deploy_mode": "pm2",
+      "deploy_base_path": "/var/lib/openclaw/.openclaw/workspace/docs-repos",
+      "deploy_root": "/var/lib/openclaw/deploy-proto",
+      "releases_to_keep": 3,
+      "use_https_cookies": false,
+      "node_env": "development",
+      "apps": {
+        "quanyu-console": { "port": 3001, "pm2_name": "proto-quanyu-console" },
+        "quanyu-website": { "port": 3000, "pm2_name": "proto-quanyu-website" },
+        "paiji":          { "port": 3011, "pm2_name": "proto-paiji" },
+        "cst":            { "port": 3012, "pm2_name": "proto-cst" },
+        "dake":           { "port": 3013, "pm2_name": "proto-dake" },
+        "kfchat":         { "port": 3014, "pm2_name": "proto-kfchat" },
+        "qicha":          { "port": 3015, "pm2_name": "proto-qicha" },
+        "hetongtong":     { "port": 3016, "pm2_name": "proto-hetongtong" },
+        "test-demo":      { "port": 3020, "pm2_name": "proto-test-demo" },
+        "smart-college-prototype": { "port": 3021, "pm2_name": "proto-smart-college-prototype" }
+      },
+      "deploy_strategy": {
+        "skip_build": true,
+        "skip_git": true,
+        "fast_mode": true,
+        "auto_redeploy": true
+      },
+      "resource_limits": {
+        "memory": "256M",
+        "cpu": "1",
+        "instances": 1
+      },
+      "health_check": {
+        "interval": 30000,
+        "timeout": 5000,
+        "retries": 3
+      },
+      "logging": {
+        "level": "debug",
+        "rotate": true,
+        "max_size": "10M",
+        "max_files": 5
+      }
+    }
+  }
+}

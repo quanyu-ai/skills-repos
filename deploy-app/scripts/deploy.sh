@@ -38,7 +38,7 @@ die()     { log_err "$*"; exit 1; }
 usage() {
     cat <<USAGE
 Usage: $(basename "$0") <env> <app> [--version <ref>] [--approved-by <user>] [--skip-build] [--dry-run]
-  <env>             环境名: test | demo | prod
+  <env>             环境名: proto | test | demo | prod
   <app>             应用 key (apps.json 中定义)
   --version <ref>   指定 git tag/sha (默认: 当前默认分支 HEAD)
   --approved-by <user>  审批人 (prod 必需)
@@ -74,7 +74,14 @@ done
 # ============================================================
 _app_get() {
     local key="$1"; local path="$2"
-    jq -r --arg k "$key" ".apps[\$k]${path} // empty" "$APPS_JSON"
+    # 先尝试读取环境特定的配置（env_config.<ENV_NAME>）
+    local env_val=$(jq -r --arg k "$key" --arg e "$ENV_NAME" ".apps[\$k].env_config[\$e]${path} // empty" "$APPS_JSON")
+    if [ -n "$env_val" ] && [ "$env_val" != "null" ]; then
+        echo "$env_val"
+    else
+        # 如果环境特定配置不存在，则返回全局配置
+        jq -r --arg k "$key" ".apps[\$k]${path} // empty" "$APPS_JSON"
+    fi
 }
 _env_get() {
     local env="$1"; local path="$2"
