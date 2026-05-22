@@ -79,8 +79,22 @@ _app_get() {
     if [ -n "$env_val" ] && [ "$env_val" != "null" ]; then
         echo "$env_val"
     else
-        # 如果环境特定配置不存在，则返回全局配置
-        jq -r --arg k "$key" ".apps[\$k]${path} // empty" "$APPS_JSON"
+        # 尝试读取项目代码路径或原型路径（根据环境）
+        if [ "$ENV_NAME" = "proto" ]; then
+            local proto_path=$(jq -r --arg k "$key" ".apps[\$k].project_proto_path${path} // empty" "$APPS_JSON")
+            if [ -n "$proto_path" ] && [ "$proto_path" != "null" ] && [ "$path" = ".project_path" ]; then
+                echo "$proto_path"
+            else
+                jq -r --arg k "$key" ".apps[\$k]${path} // empty" "$APPS_JSON"
+            fi
+        else
+            local code_path=$(jq -r --arg k "$key" ".apps[\$k].project_code_path${path} // empty" "$APPS_JSON")
+            if [ -n "$code_path" ] && [ "$code_path" != "null" ] && [ "$path" = ".project_path" ]; then
+                echo "$code_path"
+            else
+                jq -r --arg k "$key" ".apps[\$k]${path} // empty" "$APPS_JSON"
+            fi
+        fi
     fi
 }
 _env_get() {
@@ -276,6 +290,44 @@ APP_MONO_WS="$(_app_get "$APP_KEY" ".monorepo.workspace")"
 log_ok "app: $APP_DISPLAY ($APP_FRAMEWORK)"
 
 # ============================================================
+# 2.5/10. Layer 1: 项目路径前置校验（强制，dry-run 也跑）
+# ============================================================
+log "Step 2.5/10: Layer 1 - 项目路径前置校验"
+if [ ! -d "$APP_PATH" ]; then
+    log_err "部署中止: $APP_DISPLAY 在 $ENV_NAME 环境的项目路径不存在"
+    cat >&2 <<EOM
+   期望路径: $APP_PATH
+   配置位置: apps.json → ${APP_KEY}.env_config.${ENV_NAME}.project_path
+            或 apps.json → ${APP_KEY}.project_code_path / project_proto_path
+   可能原因:
+     1. 原型/代码尚未创建（需要先生成）
+     2. 路径配置错误（请检查 apps.json）
+     3. 仓库未 clone（需要先 git clone）
+   修复建议:
+     - 检查 apps.json 中该 app 的路径配置
+     - 或运行 \`bash skills/deploy-app/scripts/doctor.sh --check-apps\` 查看全局
+EOM
+    exit 1
+fi
+log_ok "项目路径存在: $APP_PATH"
+
+# Layer 2: framework 与路径一致性校验（warn 不中止）
+case "$APP_FRAMEWORK" in
+    static)
+        [ -f "$APP_PATH/index.html" ] || log_warn "framework=static 但目录无 index.html ($APP_PATH)"
+        ;;
+    nextjs)
+        [ -f "$APP_PATH/package.json" ] || log_warn "framework=nextjs 但目录无 package.json ($APP_PATH)"
+        ;;
+    nestjs)
+        [ -f "$APP_PATH/package.json" ] || log_warn "framework=nestjs 但目录无 package.json ($APP_PATH)"
+        ;;
+    express|node)
+        [ -f "$APP_PATH/package.json" ] || log_warn "framework=$APP_FRAMEWORK 但目录无 package.json ($APP_PATH)"
+        ;;
+esac
+
+# ============================================================
 # 5. 读 environments.json
 # ============================================================
 log "Step 3/10: 读 environments.json -> env=$ENV_NAME"
@@ -329,11 +381,8 @@ if [ "$DRY_RUN" != "true" ]; then
         "$SSH_USER@$HOST" true 2>/dev/null \
         || die "SSH 连通失败: $SSH_USER@$HOST (key=$SSH_KEY_EXPANDED)"
     log_ok "SSH ok"
-
-    [ -d "$APP_PATH" ] || die "项目路径不存在: $APP_PATH"
-    log_ok "项目路径存在: $APP_PATH"
 else
-    log_warn "dry-run: 跳过 SSH 实际握手与目录检查"
+    log_warn "dry-run: 跳过 SSH 实际握手"
 fi
 
 # ============================================================

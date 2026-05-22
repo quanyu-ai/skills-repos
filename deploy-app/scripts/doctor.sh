@@ -1,12 +1,16 @@
 #!/bin/bash
 # doctor.sh - deploy-app skill 自检脚本
-# 输出格式：最后一行 READY 或 NEED_SETUP: <原因>
-# 退出码：0 = READY, 1 = NEED_SETUP
+# 用法:
+#   doctor.sh                  常规自检（输出 READY 或 NEED_SETUP）
+#   doctor.sh --check-apps     全量预扫描所有 app × env 的路径合法性（矩阵表）
+# 退出码：0 = READY / 全部 OK, 1 = NEED_SETUP / 发现路径错误
 
 set -e
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG_DIR="$SKILL_DIR/config"
+APPS_JSON="$CONFIG_DIR/apps.json"
+ENVS_JSON="$CONFIG_DIR/environments.json"
 
 fail() {
     echo "NEED_SETUP: $1"
@@ -15,6 +19,76 @@ fail() {
 
 # 前置：jq 必装（否则后面的 JSON 校验跑不动）
 command -v jq >/dev/null 2>&1 || fail "jq not installed - run: sudo apt-get install -y jq"
+
+# ============================================================
+# --check-apps: 全量预扫描所有 app × env 的路径合法性
+# ============================================================
+if [ "${1:-}" = "--check-apps" ]; then
+    [ -f "$APPS_JSON" ] || fail "apps.json missing"
+    jq empty "$APPS_JSON" 2>/dev/null || fail "apps.json invalid JSON"
+
+    ENVS_LIST=(proto test demo prod)
+
+    # 计算 app 名最大宽度，做粗略对齐
+    MAX_NAME=10
+    while IFS= read -r app_key; do
+        L=${#app_key}
+        [ "$L" -gt "$MAX_NAME" ] && MAX_NAME=$L
+    done < <(jq -r '.apps | keys[]' "$APPS_JSON")
+
+    # 表头
+    printf "%-${MAX_NAME}s" "应用"
+    for e in "${ENVS_LIST[@]}"; do
+        printf "  %-22s" "$e"
+    done
+    printf "\n"
+    printf '%.0s-' $(seq 1 $((MAX_NAME + 24 * ${#ENVS_LIST[@]}))); printf "\n"
+
+    TOTAL_APPS=0
+    TOTAL_ERRORS=0
+
+    while IFS= read -r app_key; do
+        TOTAL_APPS=$((TOTAL_APPS + 1))
+        printf "%-${MAX_NAME}s" "$app_key"
+        for e in "${ENVS_LIST[@]}"; do
+            # env_config.<e> 是否存在
+            HAS_ENV=$(jq -r --arg k "$app_key" --arg e "$e" '.apps[$k].env_config | has($e)' "$APPS_JSON")
+            if [ "$HAS_ENV" != "true" ]; then
+                printf "  %-22s" "—(未配置)"
+                continue
+            fi
+
+            # 取实际路径：优先 env_config.<e>.project_path
+            ACT_PATH=$(jq -r --arg k "$app_key" --arg e "$e" '.apps[$k].env_config[$e].project_path // ""' "$APPS_JSON")
+            # fallback：proto 用 project_proto_path，其它用 project_code_path
+            if [ -z "$ACT_PATH" ] || [ "$ACT_PATH" = "null" ]; then
+                if [ "$e" = "proto" ]; then
+                    ACT_PATH=$(jq -r --arg k "$app_key" '.apps[$k].project_proto_path // ""' "$APPS_JSON")
+                else
+                    ACT_PATH=$(jq -r --arg k "$app_key" '.apps[$k].project_code_path // ""' "$APPS_JSON")
+                fi
+            fi
+
+            if [ -z "$ACT_PATH" ] || [ "$ACT_PATH" = "null" ]; then
+                printf "  %-22s" "❌(无路径)"
+                TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+            elif [ -d "$ACT_PATH" ]; then
+                printf "  %-22s" "✅"
+            else
+                printf "  %-22s" "❌(路径不存在)"
+                TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+            fi
+        done
+        printf "\n"
+    done < <(jq -r '.apps | keys[]' "$APPS_JSON")
+
+    echo
+    echo "扫描完成，共 $TOTAL_APPS 个应用，发现 $TOTAL_ERRORS 个路径错误"
+    if [ "$TOTAL_ERRORS" -gt 0 ]; then
+        exit 1
+    fi
+    exit 0
+fi
 
 # 检查项 1：apps.json 存在
 [ -f "$CONFIG_DIR/apps.json" ] || fail "apps.json missing - run setup.md step 2"
