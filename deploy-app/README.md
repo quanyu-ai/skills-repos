@@ -1,58 +1,61 @@
-# deploy-app — 标准化部署 Skill 🚀
+# deploy-app - 标准化部署 Skill 🚀
 
-> 把"部署"做成一个可复用、可审计、可回滚的标准流程。主 Agent 不准再手撕 `pm2 / scp / ssh / rsync`，所有部署动作必须通过本 skill 完成。
+> 把"部署"做成一个可复用、可审计、可回滚的标准流程。主 Agent 不准再手撕 `pm2 / scp / ssh / rsync`,所有部署动作必须通过本 skill 完成。
 
 ---
 
 ## 项目简介
 
-deploy-app 是 OpenClaw 的标准化部署 Skill，旨在将部署过程变成一个参数化、可审计、可回滚的标准流程。支持三级环境（demo/test/prod），强制自检机制，防止"手撕部署"导致的不可追溯问题。
+deploy-app 是 OpenClaw 的标准化部署 Skill,旨在将部署过程变成一个参数化、可审计、可回滚的标准流程。支持四级环境(proto/test/demo/prod),强制自检机制,防止"手撕部署"导致的不可追溯问题。
 
 ## 设计理念
 
 ### 核心问题
 
-1. **部署不规范**：不同项目有不同的部署脚本和命令
-2. **无审计记录**：手动部署无法追踪历史版本和操作人
-3. **回滚困难**：出问题时无法快速回退到稳定版本
-4. **权限混乱**：直接用 root 或个人账号部署，缺乏权限控制
-5. **环境不一致**：演示、测试、生产环境配置未隔离
+1. **部署不规范**:不同项目有不同的部署脚本和命令
+2. **无审计记录**:手动部署无法追踪历史版本和操作人
+3. **回滚困难**:出问题时无法快速回退到稳定版本
+4. **权限混乱**:直接用 root 或个人账号部署,缺乏权限控制
+5. **环境不一致**:演示、测试、生产环境配置未隔离
 
 ### 解决方案
 
-- **参数化配置**：`apps.json`（应用元数据）+ `environments.json`（环境参数）
-- **强制自检**：`doctor.sh` 在每次部署前验证环境
-- **版本化部署**：`releases/` 目录 + `current` symlink，支持一键回滚
-- **门禁机制**：prod 环境 5 道门禁，防止误操作
-- **权限隔离**：使用 openclaw 用户 + 限定密钥的 SSH 连接
+- **参数化配置**:`apps.json`(应用元数据)+ `environments.json`(环境参数)
+- **强制自检**:`doctor.sh` 在每次部署前验证环境
+- **版本化部署**:`releases/` 目录 + `current` symlink,支持一键回滚
+- **门禁机制**:prod 环境 5 道门禁,防止误操作
+- **权限隔离**:使用 openclaw 用户 + 限定密钥的 SSH 连接
 
 ## 能力清单
 
 ### 核心功能
 
-- ✅ **标准化部署**：统一的 deploy.sh 接口，支持所有应用
-- ✅ **环境隔离**：demo/test/prod 三级环境配置
-- ✅ **强制自检**：doctor.sh 每次部署前验证
-- ✅ **版本化**：releases/ + current symlink + 自动清理旧版本
-- ✅ **回滚**：rollback.sh 一键回退到上一版本
-- ✅ **健康检查**：verify.sh 支持宽松/严格双模式
-- ✅ **部署锁**：flock 防止并发部署同一应用
-- ✅ **配置分层**：environments.json + environments.local.json（deep merge）
-- ✅ **自动化日志**：每次部署自动写入 DEPLOY-LOG.md
-- ✅ **prod 门禁**：5 道门禁防止生产环境误操作
+- ✅ **标准化部署**:统一的 deploy.sh 接口,支持所有应用
+- ✅ **环境隔离**:proto/test/demo/prod 四级环境配置
+- ✅ **强制自检**:doctor.sh 每次部署前验证
+- ✅ **版本化**:releases/ + current symlink + 自动清理旧版本
+- ✅ **回滚**:rollback.sh 一键回退到上一版本
+- ✅ **健康检查**:verify.sh 支持宽松/严格双模式
+- ✅ **环境差异化配置**:apps.json 支持 env_config,按环境覆盖框架/命令等配置
+- ✅ **端口变化检测**:自动检测端口变化,执行 delete+start 而非 reload
+- ✅ **原型部署**:支持 static 框架快速部署,无需构建
+- ✅ **部署锁**:flock 防止并发部署同一应用
+- ✅ **配置分层**:environments.json + environments.local.json(deep merge)
+- ✅ **自动化日志**:每次部署自动写入 DEPLOY-LOG.md
+- ✅ **prod 门禁**:5 道门禁防止生产环境误操作
 
 ### 部署模式
 
-- ✅ PM2 模式（默认）
-- ⏳ Docker 模式（待 Phase 2.5 实现）
-- ⏳ Nginx 静态部署（待 Phase 2.5 实现）
+- ✅ PM2 模式(默认)
+- ⏳ Docker 模式(待 Phase 2.5 实现)
+- ⏳ Nginx 静态部署(待 Phase 2.5 实现)
 
 ### 支持的框架
 
 - ✅ Next.js
 - ✅ Express/NestJS
 - ✅ Node.js 原生
-- ✅ Static（待实现）
+- ✅ Static(待实现)
 
 ## 架构图
 
@@ -61,9 +64,9 @@ deploy-app 是 OpenClaw 的标准化部署 Skill，旨在将部署过程变成�
 │                  deploy-app Skill                       │
 ├─────────────────────────────────────────────────────────┤
 │  📚 配置层                                               │
-│  - apps.json          (应用元数据，与环境无关)            │
-│  - environments.json  (环境参数，三级配置)                │
-│  - environments.local.json (本地覆盖，gitignore)         │
+│  - apps.json          (应用元数据,与环境无关)            │
+│  - environments.json  (环境参数,三级配置)                │
+│  - environments.local.json (本地覆盖,gitignore)         │
 │  - schema.md          (配置字段说明)                     │
 ├─────────────────────────────────────────────────────────┤
 │  🛠️  执行层                                               │
@@ -98,17 +101,17 @@ deploy-app 是 OpenClaw 的标准化部署 Skill，旨在将部署过程变成�
 │   ├── environments.local.example  # 本地覆盖示例
 │   └── schema.md             # 配置字段说明文档
 ├── scripts/
-│   ├── deploy.sh             # 主部署脚本（723行）
-│   ├── rollback.sh           # 回滚脚本（295行）
-│   ├── verify.sh             # 健康检查（88行）
-│   ├── doctor.sh             # 自检脚本（6项检查）
+│   ├── deploy.sh             # 主部署脚本(723行)
+│   ├── rollback.sh           # 回滚脚本(295行)
+│   ├── verify.sh             # 健康检查(88行)
+│   ├── doctor.sh             # 自检脚本(6项检查)
 │   └── init.sh               # 交互式初始化向导
 └── templates/                # 预留目录
 ```
 
 ## 参数化使用
 
-### deploy.sh（部署）
+### deploy.sh(部署)
 
 ```bash
 bash scripts/deploy.sh <env> <app> [--version <ref>] [--approved-by <user>] [--skip-build] [--dry-run]
@@ -116,14 +119,14 @@ bash scripts/deploy.sh <env> <app> [--version <ref>] [--approved-by <user>] [--s
 
 | 参数 | 说明 |
 |------|------|
-| `<env>` | 环境名：`demo` / `test` / `prod` |
-| `<app>` | 应用 key（apps.json 中定义） |
-| `--version` | 指定 git tag/sha（默认：当前分支 HEAD） |
-| `--approved-by` | 审批人（prod 环境必需） |
-| `--skip-build` | 跳过构建步骤（用于快速重部署） |
-| `--dry-run` | 只打印操作，不实际执行 |
+| `<env>` | 环境名:`proto` / `test` / `demo` / `prod` |
+| `<app>` | 应用 key(apps.json 中定义) |
+| `--version` | 指定 git tag/sha(默认:当前分支 HEAD) |
+| `--approved-by` | 审批人(prod 环境必需) |
+| `--skip-build` | 跳过构建步骤(用于快速重部署) |
+| `--dry-run` | 只打印操作,不实际执行 |
 
-### verify.sh（健康检查）
+### verify.sh(健康检查)
 
 ```bash
 bash scripts/verify.sh <env> <app> [--strict]
@@ -131,9 +134,9 @@ bash scripts/verify.sh <env> <app> [--strict]
 
 | 参数 | 说明 |
 |------|------|
-| `--strict` | 严格模式：仅 2xx/3xx 视为健康（默认宽松模式：2xx/3xx/401/403 均视为健康） |
+| `--strict` | 严格模式:仅 2xx/3xx 视为健康(默认宽松模式:2xx/3xx/401/403 均视为健康) |
 
-### rollback.sh（回滚）
+### rollback.sh(回滚)
 
 ```bash
 bash scripts/rollback.sh <env> <app>
@@ -141,47 +144,80 @@ bash scripts/rollback.sh <env> <app>
 
 回滚到上一个稳定版本。
 
-### doctor.sh（自检）
+### doctor.sh(自检)
 
 ```bash
 bash scripts/doctor.sh
 ```
 
-输出 `READY` 表示可以部署，`NEED_SETUP` 表示需要先执行 setup.md。
+输出 `READY` 表示可以部署,`NEED_SETUP` 表示需要先执行 setup.md。
 
-### init.sh（初始化）
+### init.sh(初始化)
 
 ```bash
 bash scripts/init.sh
 ```
 
-交互式向导，帮助生成 apps.json 和 environments.json 草稿。
+交互式向导,帮助生成 apps.json 和 environments.json 草稿。
 
 ## 配置说明
 
-### apps.json（应用元数据）
+### apps.json(应用元数据)
 
-记录应用本身的信息，与环境无关：
+记录应用本身的信息,与环境无关。支持 `env_config` 字段,按环境覆盖配置:
 
 ```json
 {
   "apps": {
-    "quanyu-console": {
-      "display_name": "权舆系统展示控制台",
-      "project_path": "/var/lib/openclaw/.openclaw/workspace/code-repos/quanyu-console",
-      "repo_url": "git@github.com:quanyu-ai/quanyu-console.git",
-      "build_cmd": "pnpm install --frozen-lockfile && pnpm build",
-      "start_cmd": "pnpm start",
-      "health_path": "/api/health",
-      "framework": "nextjs"
+    "smart-college-prototype": {
+      "display_name": "智能学院原型",
+      "project_path": "/var/lib/openclaw/.openclaw/workspace/docs-repos/smart-college/prototype",
+      "repo_url": "",
+      "build_cmd": "",
+      "start_cmd": "node server.js",
+      "health_path": "/",
+      "framework": "static",
+      "env_config": {
+        "proto": {
+          "display_name": "原型智能学院",
+          "framework": "static",
+          "start_cmd": "node server.js"
+        },
+        "test": {
+          "display_name": "测试智能学院",
+          "framework": "static",
+          "start_cmd": "node server.js"
+        },
+        "demo": {
+          "display_name": "演示智能学院",
+          "framework": "static",
+          "start_cmd": "node server.js"
+        },
+        "prod": {
+          "display_name": "生产智能学院",
+          "framework": "static",
+          "start_cmd": "node server.js"
+        }
+      }
     }
   }
 }
 ```
 
-### environments.json（环境配置）
+**env_config 优先级**:`env_config.<env>` > 全局配置
 
-记录环境 × 应用的部署参数：
+**支持覆盖的字段**:display_name, framework, build_cmd, start_cmd, health_path 等
+
+### environments.json(环境配置)
+
+记录环境 × 应用的部署参数。支持四环境号段:
+
+| 环境 | 号段 | 用途 |
+|------|------|------|
+| **proto** | 3000-3099 | 原型部署,快速验证 |
+| **test** | 3100-3199 | 功能/集成测试 |
+| **demo** | 3200-3299 | 对外展示/客户演示 |
+| **prod** | 3900-3999 | 生产环境 |
 
 ```json
 {
@@ -213,9 +249,9 @@ bash scripts/init.sh
 }
 ```
 
-### environments.local.json（本地覆盖）
+### environments.local.json(本地覆盖)
 
-本地机器的个性化配置，会合并到 environments.json 之上：
+本地机器的个性化配置,会合并到 environments.json 之上:
 
 ```json
 {
@@ -227,28 +263,28 @@ bash scripts/init.sh
 }
 ```
 
-**优先级**：`environments.local.json` > `environments.json`
+**优先级**:`environments.local.json` > `environments.json`
 
-**注意**：该文件已被 gitignore，不会进入版本控制。
+**注意**:该文件已被 gitignore,不会进入版本控制。
 
-## 部署门禁（prod 环境）
+## 部署门禁(prod 环境)
 
-prod 环境有 5 道门禁，必须全部通过才能部署：
+prod 环境有 5 道门禁,必须全部通过才能部署:
 
-1. **必须指定版本**：--version 参数不能为空
-2. **语义化 tag**：必须是 v*.*.* 格式
-3. **tag 存在**：git rev-parse 验证 tag 真实存在
-4. **审批人**：--approved-by 参数必须是授权用户（longge/龙哥/dengyunlong）
-5. **demo 先行**：该版本必须已在 demo 环境部署过（检查 DEPLOY-LOG.md）
+1. **必须指定版本**:--version 参数不能为空
+2. **语义化 tag**:必须是 v*.*.* 格式
+3. **tag 存在**:git rev-parse 验证 tag 真实存在
+4. **审批人**:--approved-by 参数必须是授权用户(longge/龙哥/dengyunlong)
+5. **demo 先行**:该版本必须已在 demo 环境部署过(检查 DEPLOY-LOG.md)
 
 ## 版本化部署
 
-当配置了 `deploy_root` 时，部署流程会：
+当配置了 `deploy_root` 时,部署流程会:
 
 1. 构建产物复制到 `releases/<sha>/` 目录
 2. 原子切换 `current` symlink 指向新版本
 3. PM2 reload 读取新的 cwd
-4. 自动清理旧版本（保留 releases_to_keep 个）
+4. 自动清理旧版本(保留 releases_to_keep 个)
 
 ```
 <deploy_root>/<app>/
@@ -259,14 +295,31 @@ prod 环境有 5 道门禁，必须全部通过才能部署：
     └── ghi789/  (更旧版本)
 ```
 
+## 原型部署
+
+proto 环境专为原型部署优化:
+
+- **静态站点**:无需构建,直接部署
+- **轻量级**:256MB 内存限制,单实例
+- **快速响应**:跳过 git 拉取和构建步骤
+- **端口段**:3000-3099
+
+```bash
+# 部署原型
+bash scripts/deploy.sh proto smart-college-prototype
+
+# 访问
+open http://localhost:3021
+```
+
 ## 与其他系统的关系
 
 | 系统 | 关系 |
 |------|------|
 | `knowledge-repos/management/DEPLOY-LOG.md` | 每次部署自动写入一条记录 |
 | `knowledge-repos/management/INFRA-LEDGER.md` | 记录服务器资源、端口分配、域名管理 |
-| `daidai-guardrail 插件` | 硬拦截主Agent 直接部署，强制通过 deploy-app skill |
-| `AGENTS.md` | 明确主Agent 调度角色，禁止直接写代码/部署 |
+| `daidai-guardrail 插件` | 硬拦截主Agent 直接部署,强制通过 deploy-app skill |
+| `AGENTS.md` | 明确主Agent 调度角色,禁止直接写代码/部署 |
 
 ## Phase 路线图
 
@@ -276,21 +329,22 @@ prod 环境有 5 道门禁，必须全部通过才能部署：
 | **Phase 2** | ✅ 完成 | 实现 deploy.sh / verify.sh / rollback.sh 主逻辑 |
 | **Phase 3** | ✅ 完成 | 版本化部署 + 自动回滚 + 健康检查 |
 | **Phase 4** | ✅ 完成 | prod 门禁 + 部署锁 + 分层配置 |
-| **Phase 5** | ⏳ 待实现 | Docker 部署模式 |
-| **Phase 6** | ⏳ 待实现 | Nginx 静态部署模式 |
+| **Phase 5** | ✅ 完成 | 四环境号段 + 环境差异化配置 + 端口变化检测 |
+| **Phase 6** | ⏳ 待实现 | Docker 部署模式 |
+| **Phase 7** | ⏳ 待实现 | Nginx 静态部署模式 |
 
 ## 已知限制
 
 - ❌ Docker 部署模式未实现
 - ❌ Nginx 静态部署模式未实现
-- ❌ git ls-remote tag 验证待做（当前仅本地 git rev-parse）
+- ❌ git ls-remote tag 验证待做(当前仅本地 git rev-parse)
 - ❌ 增量部署支持待实现
 
 ## 维护人
 
-- 主要：龙哥（邓云龙）
-- AI 调度：呆呆
-- 文档：本 README.md 和 setup.md
+- 主要:龙哥(邓云龙)
+- AI 调度:呆呆
+- 文档:本 README.md 和 setup.md
 
 ---
 
@@ -299,5 +353,6 @@ prod 环境有 5 道门禁，必须全部通过才能部署：
 1. 首次使用：阅读 `setup.md` 完成初始化
 2. 检查环境：`bash scripts/doctor.sh`
 3. 部署应用：`bash scripts/deploy.sh demo quanyu-console`
-4. 健康检查：`bash scripts/verify.sh demo quanyu-console`
-5. 回滚：`bash scripts/rollback.sh demo quanyu-console`
+4. 部署原型：`bash scripts/deploy.sh proto smart-college-prototype`
+5. 健康检查：`bash scripts/verify.sh demo quanyu-console`
+6. 回滚：`bash scripts/rollback.sh demo quanyu-console`
