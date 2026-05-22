@@ -16,7 +16,7 @@ description: 权舆科技软件研发总监技能。项目经理(小缺)在派�
 ## 任务派发流程
 
 1. 分析指令，确定任务类型和粒度
-2. 【强制】写入 TASK-TRACKER.json(status: dispatched)
+2. 【强制】写入 `../../knowledge-repos/management/TASK-TRACKER.json`(status: dispatched)
 3. 派发给Agent(设置对应timeout)
 4. 向创始人汇报："已安排XX做YY,预计Z分钟"
 5. 等待结果(不做其他长操作)

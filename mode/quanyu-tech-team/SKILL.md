@@ -37,7 +37,7 @@ description: 权舆科技团队协作模式。适用于有调度者+多Agent的�
 
 ## 任务台账
 
-文件：`TASK-TRACKER.json`
+文件：`../../knowledge-repos/management/TASK-TRACKER.json`
 
 每次派发/完成/超时/失败都必须更新台账。
 

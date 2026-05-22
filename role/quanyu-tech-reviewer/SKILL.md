@@ -11,7 +11,7 @@ description: 权舆科技代码审查员技能。当任务涉及代码审查、�
 
 ## 审查流程
 
-1. 接收审查任务（从项目经理或 TASK-TRACKER）
+1. 接收审查任务（从项目经理或 `../../knowledge-repos/management/TASK-TRACKER.json`）
 2. 阅读代码变更（git diff）
 3. 对照审查清单逐项检查
 4. 输出审查报告（通过/不通过 + 问题列表）

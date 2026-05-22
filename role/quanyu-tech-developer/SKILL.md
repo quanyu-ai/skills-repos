@@ -19,7 +19,7 @@ description: 权舆科技开发工程师技能。当任务涉及编码、开发�
 
 - [ ] 代码提交（pnpm build 通过 → git add → git commit → git push）
 - [ ] 更新版本记录（DEPLOY-LOG.md等）
-- [ ] 更新项目进度（PROJECT-BOARD.md）
+- [ ] 更新项目进度（`../../knowledge-repos/management/PROJECT-BOARD.md`）
 - [ ] 通知项目经理
 
 ## 数据库修改红线
