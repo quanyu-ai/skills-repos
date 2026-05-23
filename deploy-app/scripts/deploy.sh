@@ -512,6 +512,19 @@ if [ "$USE_RELEASES" = "true" ]; then
                     --exclude='*.log' --exclude='server.js' \
                     --exclude='_archive' \
                     "$APP_PATH/" "$RELEASE_DIR/"
+                # 生成 serve.json：禁用 cleanUrls / trailingSlash，避免 .html 被 301 去后缀导致路径 fallback 问题
+                # （serve@14 默认 cleanUrls=true 会将 /xxx.html 301 到 /xxx）
+                if [ ! -f "$RELEASE_DIR/serve.json" ]; then
+                    cat > "$RELEASE_DIR/serve.json" <<'SERVE_JSON'
+{
+  "cleanUrls": false,
+  "trailingSlash": false,
+  "renderSingle": false,
+  "directoryListing": false
+}
+SERVE_JSON
+                    log_ok "生成 serve.json (cleanUrls=false)"
+                fi
             fi
             ;;
         express|nestjs|node)
@@ -589,7 +602,9 @@ case "$DEPLOY_MODE" in
                 # 静态站点：用 npx serve -l <port> . 跑（PM2 守护进程）
                 # serve 全局或临时安装均可；npx 第一次会自动下载到缓存
                 PM2_SCRIPT="$(command -v npx 2>/dev/null || echo /usr/bin/npx)"
-                PM2_ARGS="-y serve@14 -l tcp://0.0.0.0:$ENVAPP_PORT -s ."
+                # 多页面静态站点：不要加 -s (SPA fallback)，否则所有非根路径都会被路由到 index.html
+                # 导致 .html 资源拿到 HTML 内容（MIME 错误）、子页面 301 去后缀等问题
+                PM2_ARGS="-y serve@14 -l tcp://0.0.0.0:$ENVAPP_PORT ."
                 ;;
             express|nestjs|node)
                 # 这些直接用 app 的 start_cmd（拆为 script + 空 args）
