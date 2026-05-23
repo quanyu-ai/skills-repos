@@ -504,7 +504,7 @@ if [ "$USE_RELEASES" = "true" ]; then
             fi
             ;;
         static)
-            log "复制静态站点 (排除 .git/node_modules/server.js/*.log) -> $RELEASE_DIR"
+            log "复制静态站点 (排除 .git/node_modules/server.js/*.log/_archive，保留 archive/) -> $RELEASE_DIR"
             if [ "$DRY_RUN" != "true" ]; then
                 [ -d "$APP_PATH" ] || die "static 源目录不存在: $APP_PATH"
                 rsync -a --delete \
@@ -512,6 +512,15 @@ if [ "$USE_RELEASES" = "true" ]; then
                     --exclude='*.log' --exclude='server.js' \
                     --exclude='_archive' \
                     "$APP_PATH/" "$RELEASE_DIR/"
+                # 多版本原型：archive/ 子目录不排除，与当前版同站点并存
+                if [ -d "$APP_PATH/archive" ]; then
+                    ARCHIVE_VER_COUNT=$(find "$APP_PATH/archive" -mindepth 1 -maxdepth 1 -type d | wc -l)
+                    DEPLOYED_VER_COUNT=$(find "$RELEASE_DIR/archive" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+                    log_ok "历史版本: src=$ARCHIVE_VER_COUNT 个 / deployed=$DEPLOYED_VER_COUNT 个"
+                    if [ "$ARCHIVE_VER_COUNT" -ne "$DEPLOYED_VER_COUNT" ]; then
+                        die "archive/ 版本数不一致 src=$ARCHIVE_VER_COUNT deployed=$DEPLOYED_VER_COUNT"
+                    fi
+                fi
                 # 生成 serve.json：禁用 cleanUrls / trailingSlash，避免 .html 被 301 去后缀导致路径 fallback 问题
                 # （serve@14 默认 cleanUrls=true 会将 /xxx.html 301 到 /xxx）
                 if [ ! -f "$RELEASE_DIR/serve.json" ]; then

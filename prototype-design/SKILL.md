@@ -149,6 +149,20 @@ bash {{SKILL_DIR}}/scripts/generate-mapping.sh <project>
 - 数据源：`requirements/requirements-map.json` + `prototype/meta/requirements-map.json`，以 REQ-id 为 key 合并
 - 通用脚本，任意项目（smart-college、chenxi-study 等）只要两份 json 按约定位置存在即可调用
 
+### 场景 8：原型版本发布（多版本并存）
+
+```bash
+bash {{SKILL_DIR}}/scripts/publish-version.sh <project> <version>
+# 例：bash publish-version.sh smart-college v3.0
+```
+
+- 作用：把 `prototype/_archive/<version>-*` 下的归档快照，发布到 `prototype/archive/<version>/`，让历史版本与当前版本**同站点共存**可访问
+- 自动维护 `prototype/meta/versions.json`（追加 `{version, published_at, archive_dir, file_count}`）
+- 自带 assertion：源/目标文件数必须一致；versions.json 字段必须完整
+- 配合 `init.sh` 注入的「版本切换器」自动出现在导航下拉；旧项目若 `index.html` 没有该区块，脚本会 WARN 提示
+- 发布后需重跑 `deploy-app/scripts/deploy.sh proto <project>` 才能对外可访问
+
+
 ---
 
 ## 📦 参数化设计

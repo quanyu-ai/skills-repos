@@ -1,0 +1,36 @@
+<!-- 版本切换器（由 prototype-design skill 注入；publish-version.sh 会读取 meta/versions.json 动态填充） -->
+<div id="version-switcher" style="position:fixed;top:8px;right:8px;z-index:9999;background:#fff;border:1px solid #d1d5db;padding:4px 10px;font-size:12px;border-radius:2px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
+  <span style="color:#6b7280;">版本：</span>
+  <select id="version-select" style="background:#fff;border:0;color:#374151;font-size:12px;outline:none;cursor:pointer;" onchange="(function(v){if(v==='current'){location.href=(window.__VS_BASE__||'/')+'';}else{location.href=(window.__VS_BASE__||'/')+'archive/'+v+'/index.html';}})(this.value)">
+    <option value="current">当前版本</option>
+  </select>
+</div>
+<script>
+(function(){
+  // 1. 推断 base：若当前路径含 /archive/<v>/ 则 base 是其前缀，否则 '/'
+  var p = location.pathname;
+  var m = p.match(/^(.*?)\/archive\/[^\/]+\//);
+  window.__VS_BASE__ = m ? (m[1] + '/') : '/';
+
+  // 2. 拉取 versions.json
+  var metaUrl = window.__VS_BASE__ + 'meta/versions.json';
+  fetch(metaUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
+    if(!data || !data.versions) return;
+    var sel = document.getElementById('version-select');
+    if(!sel) return;
+    // 标记当前所在版本
+    var curArchiveMatch = p.match(/\/archive\/([^\/]+)\//);
+    var curVer = curArchiveMatch ? curArchiveMatch[1] : 'current';
+    // 按版本号倒序
+    var versions = data.versions.slice().sort(function(a,b){ return (a.version<b.version)?1:-1; });
+    versions.forEach(function(v){
+      var opt = document.createElement('option');
+      opt.value = v.version;
+      opt.textContent = '历史版本 ' + v.version;
+      sel.appendChild(opt);
+    });
+    sel.value = curVer;
+  }).catch(function(){});
+})();
+</script>
+<!-- /版本切换器 -->
