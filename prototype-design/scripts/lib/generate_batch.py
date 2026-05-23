@@ -74,8 +74,8 @@ def slug_for_module(role, title):
     ]
     for cn, en in table:
         name = name.replace(cn, en + '-')
-    # 保留 ascii，去掉中文、空格、斜杠
-    name = re.sub(r'[\u4e00-\u9fff\s/\\]+', '-', name)
+        # 只保留 ASCII 字母、数字、连字号和下划线；其余一律转为 -（避免引号、中文引号等協讯字符进文件名）
+    name = re.sub(r'[^A-Za-z0-9_-]+', '-', name)
     name = re.sub(r'-+', '-', name).strip('-').lower()
     if not name:
         name = 'page'
@@ -106,10 +106,49 @@ def load_template(tpl_name):
         return None
     return p.read_text(encoding='utf-8')
 
+def _collect_role_pages(role, role_dir, role_pages_arg):
+    """合并 3 个数据源得到该角色目录下的完整页面列表。
+    源 A：本次过滤匹配的 REQ（role_pages_arg：[(filename, title), ...]）
+    源 B：扫描 PROTOTYPE_DIR/modules/<role_dir>/*.html
+    源 C：meta/requirements-map.json 中 role 等于该角色的所有条目 files
+    返回 [(filename, title), ...]，按文件名字母序排序，url 去重。
+    """
+    # key: filename -> title
+    merged = {}
+    # 源 A
+    for fn, title in (role_pages_arg or []):
+        if fn and fn not in merged:
+            merged[fn] = title
+    # 源 B：扫目录
+    dir_path = PROTOTYPE_DIR / 'modules' / role_dir
+    if dir_path.is_dir():
+        for p in dir_path.iterdir():
+            if p.is_file() and p.suffix == '.html':
+                merged.setdefault(p.name, p.stem)
+    # 源 C：mapping —— 仅用于为已存在 fname 美化 title，不引入未生成的页面（避免 404）
+    META_MAP_LOCAL = PROTOTYPE_DIR / 'meta' / 'requirements-map.json'
+    if META_MAP_LOCAL.is_file():
+        try:
+            meta_local = json.loads(META_MAP_LOCAL.read_text(encoding='utf-8'))
+            for entry in meta_local.get('mappings', []):
+                if entry.get('role') != role:
+                    continue
+                for rel in entry.get('files', []):
+                    if rel.startswith(f'modules/{role_dir}/'):
+                        fn = os.path.basename(rel)
+                        if fn in merged:
+                            merged[fn] = entry.get('title', merged[fn])
+        except Exception:
+            pass
+    # 排序
+    return sorted(merged.items(), key=lambda x: x[0])
+
+
 def render_sidebar(role, role_dir, all_pages, current_file):
-    """生成 sidebar HTML，列出该角色所有页面"""
+    """生成 sidebar HTML，列出该角色所有页面（合并扫目录 + mapping 去重）"""
+    full_pages = _collect_role_pages(role, role_dir, all_pages)
     items = []
-    for fname, title in all_pages:
+    for fname, title in full_pages:
         active = (fname == current_file)
         cls = 'sidebar-active block py-2 px-3 bg-gray-100 border border-gray-300 text-gray-900' if active else 'sidebar-inactive block py-2 px-3 text-gray-600 hover:bg-gray-50'
         label = re.sub(r'^.*?-', '', title, count=1) if '-' in title else title
