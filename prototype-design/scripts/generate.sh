@@ -82,3 +82,10 @@ export GEN_WORKSPACE_ROOT="$WORKSPACE_ROOT"
 export GEN_SKILL_DIR="$SKILL_DIR"
 
 python3 "$SKILL_DIR/scripts/lib/generate_batch.py"
+
+# === 联动更新门户页（如存在 index-config.json 或包含默认模板就生成）===
+if [ "$DRY_RUN" != "1" ] && [ -f "$SKILL_DIR/scripts/generate-index.sh" ]; then
+  echo "[generate] linked: bash generate-index.sh $PROJECT"
+  bash "$SKILL_DIR/scripts/generate-index.sh" "$PROJECT" || \
+    echo "[generate] WARN: generate-index.sh 失败，请检查门户页生成是否缺少 meta" >&2
+fi

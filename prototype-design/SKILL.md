@@ -162,6 +162,21 @@ bash {{SKILL_DIR}}/scripts/publish-version.sh <project> <version>
 - 配合 `init.sh` 注入的「版本切换器」自动出现在导航下拉；旧项目若 `index.html` 没有该区块，脚本会 WARN 提示
 - 发布后需重跑 `deploy-app/scripts/deploy.sh proto <project>` 才能对外可访问
 
+### 场景 9：项目门户页生成（index.html）
+
+```bash
+bash {{SKILL_DIR}}/scripts/generate-index.sh <project>
+# 例：bash generate-index.sh smart-college
+```
+
+- **作用**：根据 `requirements-map.json` + `prototype/meta/requirements-map.json` + `prototype/meta/versions.json` + `prototype/meta/index-config.json`，自动生成项目门户页 `prototype/index.html`
+- **输出内容**：顶部 sticky 头部（项目名 + 实时数字 + 按角色跳转）/ 4 张统计卡片（总需求 / 总原型 / 状态分布 / 当前版本）/ 按角色分块的页面卡片网格（含状态色块、页面描述）/ 版本切换器 / footer 友链
+- **触发时机**：需求或原型变更后必跑；`generate.sh` 和 `generate-mapping.sh` 末尾会自动调用（如 `index-config.json` 存在）
+- **配置文件**：`docs-repos/<project>/prototype/meta/index-config.json`（可选，从 `templates/shared/index-config.template.json` 复制，可覆盖：`display_name` / `slogan` / `role_order` / `role_icons` / `role_dir_map` / `role_aliases` / `footer_links` / `exclude_dirs`）
+- **升级背景**：以前智院的 index.html 是 v3 手写的静态快照，数字与实际脱节（显示 45，实际 116）。本场景让所有项目的门户页 100% 随需求联动、不再手改。
+- **自带 assertion**：生成后文件 > 8KB、含版本切换器、至少 1 个角色块、总需求数与 source-of-truth 一致
+- **默认行为**：无 `index-config.json` 时，脱落到 `templates/shared/index-config.template.json` 中的默认值；`display_name` 默认为 `<project>` ID
+
 
 ---
 

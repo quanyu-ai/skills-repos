@@ -46,3 +46,10 @@ if [[ "${LINES}" -lt 100 ]]; then
 fi
 
 echo "[generate-mapping] DONE"
+
+# === 联动更新门户页 ===
+if [ -f "${SCRIPT_DIR}/generate-index.sh" ]; then
+  echo "[generate-mapping] linked: bash generate-index.sh ${PROJECT}"
+  bash "${SCRIPT_DIR}/generate-index.sh" "${PROJECT}" || \
+    echo "[generate-mapping] WARN: generate-index.sh 失败" >&2
+fi

@@ -58,6 +58,14 @@ sed -e "s|{{PROJECT}}|$PROJECT|g" \
     -e "s|{{SLOGAN}}|$SLOGAN|g" \
     "$SKILL_DIR/templates/shared/index.template.html" > "$PROTOTYPE_DIR/index.html"
 
+# 复制 index-config.template.json → meta/index-config.json（如不存在）
+INDEX_CFG_OUT="$PROTOTYPE_DIR/meta/index-config.json"
+INDEX_CFG_TPL="$SKILL_DIR/templates/shared/index-config.template.json"
+if [ ! -f "$INDEX_CFG_OUT" ] && [ -f "$INDEX_CFG_TPL" ]; then
+  echo "[init] 创建 meta/index-config.json..."
+  sed -e "s|{{PROJECT}}|$PROJECT|g" "$INDEX_CFG_TPL" > "$INDEX_CFG_OUT"
+fi
+
 # 创建空 requirements-map.json
 echo "[init] 创建 meta/requirements-map.json..."
 cat > "$PROTOTYPE_DIR/meta/requirements-map.json" <<JSONEOF
