@@ -1,0 +1,132 @@
+<!-- BUSINESS TEMPLATE: detail (详情页) -->
+<!-- 主要区块：标题+操作 / 左主信息 + 右属性面板 / 历史&评论 -->
+
+<!-- Page header -->
+<div class="flex items-start justify-between mb-4">
+    <div>
+        <div class="text-xs text-gray-500 mb-1">编号 2026-0001 · 关联需求 {{REQ_ID}}</div>
+        <h1 class="text-xl font-semibold">{{TITLE}} - 示例条目</h1>
+        <p class="text-sm text-gray-500 mt-1">由 张明远 于 2026-05-23 10:21 创建</p>
+    </div>
+    <div class="space-x-2">
+        <button class="border border-gray-400 px-3 py-1 text-sm">编辑</button>
+        <button class="border border-gray-400 px-3 py-1 text-sm">导出</button>
+        <button class="border border-gray-900 bg-gray-900 text-white px-3 py-1 text-sm">提交审批</button>
+    </div>
+</div>
+
+<!-- 状态条 -->
+<div class="border border-gray-300 bg-gray-50 p-3 mb-4 flex items-center justify-between text-sm">
+    <div>
+        <span class="text-gray-500 mr-2">当前状态</span>
+        <span class="border border-gray-500 bg-gray-100 px-2 py-0.5 text-xs">进行中</span>
+    </div>
+    <div class="flex items-center space-x-2 text-xs text-gray-500">
+        <span>① 提交</span><span>›</span>
+        <span class="text-gray-900 font-medium">② 处理中</span><span>›</span>
+        <span>③ 审批</span><span>›</span>
+        <span>④ 完成</span>
+    </div>
+</div>
+
+<!-- 主区两列 -->
+<div class="grid grid-cols-3 gap-4 mb-4">
+    <!-- 左：主信息（占 2 列）-->
+    <div class="col-span-2 border border-gray-300 p-4">
+        <h2 class="text-sm font-medium mb-3 pb-2 border-b border-gray-200">基本信息</h2>
+        <div class="space-y-3 text-sm">
+            <div>
+                <div class="text-xs text-gray-500 mb-1">标题</div>
+                <div>{{TITLE}} - 示例条目一</div>
+            </div>
+            <div>
+                <div class="text-xs text-gray-500 mb-1">描述</div>
+                <div class="text-gray-700 leading-relaxed">
+                    这里是详细描述区，展示该条目的完整业务描述、背景说明、关键事项等。本占位文本约两到三行，
+                    用于让线框图体现真实页面的视觉密度，便于评审。
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <div class="text-xs text-gray-500 mb-1">分类</div>
+                    <div>业务分类一</div>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-500 mb-1">优先级</div>
+                    <div><span class="border border-gray-500 px-2 py-0.5 text-xs">高</span></div>
+                </div>
+            </div>
+        </div>
+
+        <h2 class="text-sm font-medium mb-3 pb-2 border-b border-gray-200 mt-6">附件</h2>
+        <ul class="text-sm space-y-1">
+            <li class="flex items-center justify-between border border-gray-200 px-3 py-2">
+                <span>2026Q2-工作总结.docx <span class="text-gray-400 text-xs">(124 KB)</span></span>
+                <a href="#" class="text-xs underline">下载</a>
+            </li>
+            <li class="flex items-center justify-between border border-gray-200 px-3 py-2">
+                <span>佐证材料.pdf <span class="text-gray-400 text-xs">(2.3 MB)</span></span>
+                <a href="#" class="text-xs underline">下载</a>
+            </li>
+        </ul>
+    </div>
+
+    <!-- 右：属性面板 -->
+    <div class="border border-gray-300 p-4">
+        <h2 class="text-sm font-medium mb-3 pb-2 border-b border-gray-200">属性</h2>
+        <dl class="text-sm space-y-3">
+            <div>
+                <dt class="text-xs text-gray-500">提交人</dt>
+                <dd>张明远</dd>
+            </div>
+            <div>
+                <dt class="text-xs text-gray-500">所属部门</dt>
+                <dd>计算机学院</dd>
+            </div>
+            <div>
+                <dt class="text-xs text-gray-500">创建时间</dt>
+                <dd>2026-05-23 10:21</dd>
+            </div>
+            <div>
+                <dt class="text-xs text-gray-500">截止时间</dt>
+                <dd>2026-05-30 18:00</dd>
+            </div>
+            <div>
+                <dt class="text-xs text-gray-500">参与者</dt>
+                <dd class="flex flex-wrap gap-1 mt-1">
+                    <span class="border border-gray-400 px-2 py-0.5 text-xs">李雯</span>
+                    <span class="border border-gray-400 px-2 py-0.5 text-xs">王思琪</span>
+                </dd>
+            </div>
+        </dl>
+    </div>
+</div>
+
+<!-- 历史 + 评论 -->
+<section class="border border-gray-300 p-4">
+    <div class="border-b border-gray-200 mb-3 pb-2 flex items-center space-x-4 text-sm">
+        <span class="font-medium text-gray-900 pb-1 border-b-2 border-gray-900">操作历史</span>
+        <span class="text-gray-500">评论 (3)</span>
+        <span class="text-gray-500">流程</span>
+    </div>
+    <ul class="text-sm space-y-3">
+        <li class="flex">
+            <div class="w-32 text-xs text-gray-500">2026-05-23 10:21</div>
+            <div class="flex-1">
+                <span class="text-gray-900 font-medium">张明远</span> 创建了该条目
+            </div>
+        </li>
+        <li class="flex">
+            <div class="w-32 text-xs text-gray-500">2026-05-23 14:08</div>
+            <div class="flex-1">
+                <span class="text-gray-900 font-medium">李雯</span> 添加附件 <span class="underline">佐证材料.pdf</span>
+            </div>
+        </li>
+        <li class="flex">
+            <div class="w-32 text-xs text-gray-500">2026-05-23 15:30</div>
+            <div class="flex-1">
+                <span class="text-gray-900 font-medium">王思琪</span> 修改了状态：待处理 → 进行中
+            </div>
+        </li>
+    </ul>
+</section>

@@ -1,0 +1,108 @@
+<!-- BUSINESS TEMPLATE: form (表单/申请/上报/编辑页) -->
+<!-- 主要区块：步骤条 + 分组表单 + 校验提示 + 底部提交 -->
+
+<div class="flex items-start justify-between mb-4">
+    <div>
+        <h1 class="text-xl font-semibold">{{TITLE}}</h1>
+        <p class="text-xs text-gray-500 mt-1">关联需求 {{REQ_ID}} · 带 <span class="text-gray-900">*</span> 为必填</p>
+    </div>
+    <div class="space-x-2">
+        <button class="border border-gray-400 px-3 py-1 text-sm">取消</button>
+        <button class="border border-gray-400 px-3 py-1 text-sm">保存草稿</button>
+    </div>
+</div>
+
+<!-- 步骤条 -->
+<div class="border border-gray-300 bg-gray-50 p-3 mb-4 flex items-center justify-around text-sm">
+    <div class="text-gray-900 font-medium">① 填写信息</div>
+    <span class="text-gray-300">———</span>
+    <div class="text-gray-500">② 上传材料</div>
+    <span class="text-gray-300">———</span>
+    <div class="text-gray-500">③ 确认提交</div>
+</div>
+
+<form class="space-y-6">
+    <!-- 分组 1: 基本信息 -->
+    <section class="border border-gray-300 p-4">
+        <h2 class="text-sm font-medium mb-4 pb-2 border-b border-gray-200">基本信息</h2>
+        <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">标题 <span class="text-gray-900">*</span></label>
+                <input type="text" placeholder="请输入标题" class="w-full border border-gray-400 px-2 py-1.5">
+                <div class="text-xs text-gray-400 mt-1">2-50 个字符</div>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">分类 <span class="text-gray-900">*</span></label>
+                <select class="w-full border border-gray-400 px-2 py-1.5">
+                    <option value="">请选择</option>
+                    <option>分类一</option>
+                    <option>分类二</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">优先级</label>
+                <div class="space-x-4 mt-1.5 text-sm">
+                    <label><input type="radio" name="p" checked> 普通</label>
+                    <label><input type="radio" name="p"> 重要</label>
+                    <label><input type="radio" name="p"> 紧急</label>
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">截止时间 <span class="text-gray-900">*</span></label>
+                <input type="text" placeholder="YYYY-MM-DD HH:mm" class="w-full border border-gray-400 px-2 py-1.5">
+            </div>
+            <div class="col-span-2">
+                <label class="block text-xs text-gray-500 mb-1">详细描述 <span class="text-gray-900">*</span></label>
+                <textarea rows="4" placeholder="请详细描述..." class="w-full border border-gray-400 px-2 py-1.5"></textarea>
+                <!-- 校验提示 -->
+                <div class="text-xs text-gray-600 mt-1 border border-gray-400 bg-gray-50 px-2 py-1 inline-block">
+                    ⓘ 描述不少于 20 个字
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 分组 2: 关联信息 -->
+    <section class="border border-gray-300 p-4">
+        <h2 class="text-sm font-medium mb-4 pb-2 border-b border-gray-200">关联信息</h2>
+        <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">关联人员</label>
+                <input type="text" placeholder="搜索并选择..." class="w-full border border-gray-400 px-2 py-1.5">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">所属部门</label>
+                <select class="w-full border border-gray-400 px-2 py-1.5">
+                    <option>计算机学院</option>
+                    <option>软件学院</option>
+                </select>
+            </div>
+        </div>
+    </section>
+
+    <!-- 分组 3: 附件 -->
+    <section class="border border-gray-300 p-4">
+        <h2 class="text-sm font-medium mb-4 pb-2 border-b border-gray-200">附件材料</h2>
+        <div class="border border-dashed border-gray-400 p-8 text-center text-sm text-gray-500">
+            <div class="mb-2">[ 拖拽文件至此 或 点击选择 ]</div>
+            <div class="text-xs">支持 .pdf .docx .xlsx，单个不超过 20MB</div>
+            <button type="button" class="mt-3 border border-gray-900 bg-gray-900 text-white px-3 py-1 text-sm">选择文件</button>
+        </div>
+        <!-- 已上传列表占位 -->
+        <ul class="mt-3 text-sm">
+            <li class="flex items-center justify-between border border-gray-200 px-3 py-2">
+                <span>示例附件.pdf <span class="text-gray-400 text-xs">(1.2 MB)</span></span>
+                <button type="button" class="text-xs underline text-gray-500">删除</button>
+            </li>
+        </ul>
+    </section>
+
+    <!-- 底部操作 -->
+    <div class="flex items-center justify-between sticky bottom-0 bg-white border-t border-gray-300 -mx-6 px-6 py-3">
+        <div class="text-xs text-gray-500">提交后将进入审批流程，无法直接修改</div>
+        <div class="space-x-2">
+            <button type="button" class="border border-gray-400 px-4 py-1.5 text-sm">上一步</button>
+            <button type="submit" class="border border-gray-900 bg-gray-900 text-white px-4 py-1.5 text-sm">下一步 →</button>
+        </div>
+    </div>
+</form>

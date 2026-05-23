@@ -75,8 +75,26 @@ bash {{SKILL_DIR}}/scripts/generate.sh <style> <project> \
 - 更新 `prototype/meta/requirements-map.json`（正向映射）
 - **自动反向回填** 到对应 REQ 文件的 `frontmatter.related_files.prototype`（脚本内置强制 + assertion，失败会 exit 1）
 
-> ⚠️ Phase 1：仅跑通参数解析 + 读取需求 + 生成 1 个示例文件。
-> 完整业务页面生成是 Phase 2 的事。
+> ✅ **Phase 2 已实装**：
+> - 批量生成（不再 head -1），assertion 验证 meta mapping 数量 == 过滤后 REQ 数量
+> - 按 REQ 标题智能选业务模板：`workspace` / `dashboard` / `list` / `detail` / `form` / `base`
+> - 业务模板位于 `templates/wireframe/business/`，基于 01-leader 黑白灰风格
+> - 已有原型文件 + 已在 meta mapping 中的，默认不覆盖（保护存量页面）
+> - 同一角色下多页会自动渲染完整 sidebar（含该角色所有页面链接）
+
+### 场景 2.5：检测需求 ↔ 原型 差异
+
+```bash
+bash {{SKILL_DIR}}/scripts/diff-against-requirements.sh <project>
+# 退出码：0=无差异，1=有差异（CI 可据此报警）
+```
+
+输出三块报告：
+- ❶ 缺原型的 REQ（需新建）——含建议命令
+- ❷ 应归档的原型（REQ 已 deprecated/删除）
+- ❸ 可能过时的原型（REQ.updated > 原型.generated_at）
+
+适用于 v3 → v4 大变更后一键看哪些原型该补/该砍/该改。
 
 ### 场景 3：增量加新模块
 

@@ -1,9 +1,14 @@
 #!/bin/bash
-# generate.sh - 主生成脚本
+# generate.sh - 主生成脚本 (Phase 2)
 # 用法: bash generate.sh <style> <project> [--modules m1,m2] [--role <role>] [--req <REQ-id>] [--phase <一阶段|二阶段>] [--dry-run]
-# Phase 1: 跑通参数解析 + 读取需求 + 生成 1 个示例文件
+#
+# Phase 2 升级：
+#   - 批量生成所有过滤后 REQ（不再 head -1）
+#   - 按 REQ 标题智能选业务模板（workspace / list / detail / form / dashboard / base）
+#   - 填充真实占位数据
+#   - 自动反向回填 + assertion 数量一致
 
-set -e
+set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKSPACE_ROOT="$(cd "$SKILL_DIR/../.." && pwd)"
@@ -13,7 +18,7 @@ if [ $# -lt 2 ]; then
     echo ""
     echo "  <style>           wireframe / highfi / interactive"
     echo "  <project>         项目名"
-    echo "  --modules <list>  仅生成指定模块（逗号分隔）"
+    echo "  --modules <list>  仅生成指定模块（逗号分隔）（保留参数，暂未使用）"
     echo "  --role <role>     仅生成指定角色"
     echo "  --req <REQ-id>    仅生成指定 REQ"
     echo "  --phase <phase>   仅生成指定阶段（一阶段/二阶段）"
@@ -42,7 +47,6 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# 风格校验
 case "$STYLE" in
     wireframe|highfi|interactive) ;;
     *) echo "ERROR: <style> 必须是 wireframe / highfi / interactive"; exit 2 ;;
@@ -52,135 +56,29 @@ PROJECT_DOCS="$WORKSPACE_ROOT/docs-repos/$PROJECT"
 PROTOTYPE_DIR="$PROJECT_DOCS/prototype"
 REQ_MAP="$PROJECT_DOCS/requirements/requirements-map.json"
 
-# 校验项目已初始化
 [ -d "$PROTOTYPE_DIR" ] || { echo "ERROR: 原型目录不存在，请先运行 init.sh: $PROTOTYPE_DIR"; exit 1; }
-
-# 校验需求映射可读
 [ -f "$REQ_MAP" ] || { echo "ERROR: requirements-map.json 不存在: $REQ_MAP"; exit 1; }
 
-# 模板路径
-BASE_TEMPLATE="$SKILL_DIR/templates/$STYLE/base.html"
-[ -f "$BASE_TEMPLATE" ] || { echo "ERROR: 模板不存在: $BASE_TEMPLATE"; exit 1; }
+TPL_DIR="$SKILL_DIR/templates/$STYLE"
+BASE_TEMPLATE="$TPL_DIR/base.html"
+[ -f "$BASE_TEMPLATE" ] || { echo "ERROR: base 模板不存在: $BASE_TEMPLATE"; exit 1; }
 
-# 过滤需求
-echo "[generate] 读取需求映射: $REQ_MAP"
+# 业务模板目录（仅 wireframe 有，其他风格走 base）
+BUSINESS_DIR="$TPL_DIR/business"
 
-JQ_FILTER='.requirements | to_entries | .[]'
+# 调用 python 主生成器
+export GEN_STYLE="$STYLE"
+export GEN_PROJECT="$PROJECT"
+export GEN_DRY_RUN="$DRY_RUN"
+export GEN_FILTER_ROLE="$FILTER_ROLE"
+export GEN_FILTER_REQ="$FILTER_REQ"
+export GEN_FILTER_PHASE="$FILTER_PHASE"
+export GEN_REQ_MAP="$REQ_MAP"
+export GEN_PROTOTYPE_DIR="$PROTOTYPE_DIR"
+export GEN_PROJECT_DOCS="$PROJECT_DOCS"
+export GEN_BASE_TEMPLATE="$BASE_TEMPLATE"
+export GEN_BUSINESS_DIR="$BUSINESS_DIR"
+export GEN_WORKSPACE_ROOT="$WORKSPACE_ROOT"
+export GEN_SKILL_DIR="$SKILL_DIR"
 
-# 增加过滤条件
-if [ -n "$FILTER_ROLE" ]; then
-    JQ_FILTER="$JQ_FILTER | select(.value.role == \"$FILTER_ROLE\")"
-fi
-if [ -n "$FILTER_PHASE" ]; then
-    JQ_FILTER="$JQ_FILTER | select(.value.phase == \"$FILTER_PHASE\")"
-fi
-if [ -n "$FILTER_REQ" ]; then
-    JQ_FILTER="$JQ_FILTER | select(.key == \"$FILTER_REQ\")"
-fi
-
-FILTERED=$(jq -r "$JQ_FILTER | \"\\(.key)|\\(.value.title)|\\(.value.role)\"" "$REQ_MAP")
-
-if [ -z "$FILTERED" ]; then
-    echo "WARN: 过滤后无匹配需求"
-    exit 0
-fi
-
-COUNT=$(echo "$FILTERED" | wc -l)
-echo "[generate] 风格: $STYLE  项目: $PROJECT  匹配需求: $COUNT 条"
-
-if [ "$DRY_RUN" = "yes" ]; then
-    echo ""
-    echo "[dry-run] 将生成的需求:"
-    echo "$FILTERED" | while IFS='|' read -r req_id title role; do
-        echo "  - $req_id  [$role]  $title"
-    done
-    exit 0
-fi
-
-# Phase 1: 仅生成第 1 条作为示例
-FIRST_LINE=$(echo "$FILTERED" | head -1)
-REQ_ID=$(echo "$FIRST_LINE" | cut -d'|' -f1)
-TITLE=$(echo "$FIRST_LINE" | cut -d'|' -f2)
-ROLE=$(echo "$FIRST_LINE" | cut -d'|' -f3)
-
-# 推断模块名（从 title 提取，去掉角色前缀；保留中英文，删除空格和斜杠）
-MODULE=$(echo "$TITLE" | sed "s|^${ROLE}-||" | tr -d ' /\\\t')
-[ -z "$MODULE" ] && MODULE="example"
-
-OUTPUT_DIR="$PROTOTYPE_DIR/modules/$ROLE"
-mkdir -p "$OUTPUT_DIR"
-
-# 用 sed 填充模板占位符（Phase 1 极简实现）
-OUTPUT_FILE="$OUTPUT_DIR/${MODULE}"
-sed -e "s|{{REQ_ID}}|$REQ_ID|g" \
-    -e "s|{{TITLE}}|$TITLE|g" \
-    -e "s|{{ROLE}}|$ROLE|g" \
-    -e "s|{{PROJECT}}|$PROJECT|g" \
-    -e "s|{{STYLE}}|$STYLE|g" \
-    "$BASE_TEMPLATE" > "$OUTPUT_FILE"
-
-echo "[generate] ✅ 生成示例文件: $OUTPUT_FILE"
-
-# === 反向回填 REQ.related_files.prototype （强制，有 assertion）===
-BACK_REF="$SKILL_DIR/scripts/lib/back_ref.py"
-REQ_FILE="$PROJECT_DOCS/requirements/${REQ_ID}.md"
-PROTOTYPE_REL_PATH="modules/$ROLE/${MODULE}"
-
-if [ ! -f "$REQ_FILE" ]; then
-    echo "ERROR: REQ 文件不存在，无法反向回填: $REQ_FILE"
-    exit 1
-fi
-
-if [ ! -f "$BACK_REF" ]; then
-    echo "ERROR: back_ref.py 不存在: $BACK_REF"
-    exit 1
-fi
-
-echo "[generate] 反向回填 REQ.related_files.prototype: $REQ_FILE"
-python3 "$BACK_REF" write "$REQ_FILE" "$PROTOTYPE_REL_PATH" || {
-    echo "ERROR: 反向回填失败: $REQ_FILE"
-    exit 1
-}
-
-# Assertion：再 check 一次确认真的写进去了
-python3 "$BACK_REF" check "$REQ_FILE" "$PROTOTYPE_REL_PATH" || {
-    echo "ERROR: ASSERTION FAILED - $REQ_FILE 的 related_files.prototype 仍未包含 $PROTOTYPE_REL_PATH"
-    echo "       请手动检查 REQ 文件 frontmatter 结构，或跑：bash scripts/sync-back-refs.sh $PROJECT"
-    exit 1
-}
-echo "[generate] ✅ 反向回填成功: REQ $REQ_ID -> $PROTOTYPE_REL_PATH"
-
-# 更新 revisions.md
-REVISIONS="$PROTOTYPE_DIR/meta/revisions.md"
-cat >> "$REVISIONS" <<MDEOF
-
-## $(date -Iseconds) - 生成 [$STYLE]
-
-- 过滤条件: role=$FILTER_ROLE, phase=$FILTER_PHASE, req=$FILTER_REQ, modules=$FILTER_MODULES
-- 匹配需求: $COUNT 条（Phase 1 仅生成首条）
-- 新增文件: modules/$ROLE/${MODULE}
-
-MDEOF
-
-# 更新 meta/requirements-map.json（追加 mapping）
-META_MAP="$PROTOTYPE_DIR/meta/requirements-map.json"
-TMP_MAP="$META_MAP.tmp"
-jq --arg req "$REQ_ID" \
-   --arg title "$TITLE" \
-   --arg role "$ROLE" \
-   --arg file "modules/$ROLE/${MODULE}" \
-   --arg style "$STYLE" \
-   --arg now "$(date -Iseconds)" \
-   '.style = $style
-    | .updated = $now
-    | .mappings += [{
-        req_id: $req,
-        title: $title,
-        role: $role,
-        files: [$file],
-        generated_at: $now
-      }]' "$META_MAP" > "$TMP_MAP" && mv "$TMP_MAP" "$META_MAP"
-
-echo "[generate] ✅ 已更新 meta/requirements-map.json"
-echo ""
-echo "⚠️  Phase 1 仅生成首条匹配需求作为示例。完整生成请等 Phase 2 实装。"
+python3 "$SKILL_DIR/scripts/lib/generate_batch.py"
