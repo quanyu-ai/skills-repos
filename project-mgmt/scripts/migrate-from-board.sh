@@ -1,4 +1,8 @@
 #!/bin/bash
+# ⚠️ 历史迁移工具，一次性使用。
+# ⚠️ 不要扩充 decision/incident 关键字，不要把它当成日常入口。
+# ⚠️ 决策 / 事故 / 里程碑请走对应的 add-*.sh 主动登记，禁止后置反向扫描。
+#
 # migrate-from-board.sh - 把 PROJECT-BOARD.md 的历史条目映射到对应项目档案
 # Usage:
 #   migrate-from-board.sh              # dry-run（默认）
@@ -16,6 +20,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/_lib.sh"
+
+# 批量场景：禁用 add-*.sh 的自动 refresh，避免 N 次重复刷新。结束后统一调用一次。
+export PROJECT_MGMT_AUTO_REFRESH=0
 
 BOARD_FILE="$WORKSPACE_ROOT/knowledge-repos/management/PROJECT-BOARD.md"
 APPLY=0
@@ -198,4 +205,10 @@ if [ "$APPLY" != "1" ]; then
     done
     echo
     echo "确认无误后跑：$0 --apply"
+else
+    # 批量写入完成后统一刷新一次 PROJECTS-CONTEXT.md
+    unset PROJECT_MGMT_AUTO_REFRESH
+    bash "$SCRIPT_DIR/refresh-context.sh" >/dev/null 2>&1 || true
+    echo
+    echo "✓ 已统一刷新 PROJECTS-CONTEXT.md"
 fi

@@ -99,5 +99,30 @@ done
 
 shopt -u nullglob
 
+echo "## 🌐 最近全局里程碑（tail 5）"
+echo
+GMF="$WORKSPACE_ROOT/knowledge-repos/management/GLOBAL-MILESTONES.md"
+if [ -f "$GMF" ]; then
+    # 表体行：以 | 开头，排除表头与分隔。按日期倒序取 5 条。
+    rows=$(grep "^|" "$GMF" \
+        | grep -v -E "^\| *日期 *\|" \
+        | grep -v -E "^\| *-+ *\|" \
+        | sort -r -t'|' -k2,2 \
+        | head -5)
+    if [ -n "$rows" ]; then
+        echo "$rows" | awk -F'|' '{
+            d=$2; gsub(/^ +| +$/,"",d);
+            c=$3; gsub(/^ +| +$/,"",c);
+            t=$4; gsub(/^ +| +$/,"",t);
+            printf("- %s [%s] %s\n", d, c, t);
+        }'
+    else
+        echo "_（暂无全局里程碑，添加：bash skills/project-mgmt/scripts/add-global-milestone.sh ...）_"
+    fi
+else
+    echo "_（GLOBAL-MILESTONES.md 未初始化）_"
+fi
+echo
+
 echo "---"
 echo "_共 $(jq -r '.projects | length' "$REGISTRY") 个项目，下次刷新跑 \`bash skills/project-mgmt/scripts/refresh-context.sh\`_"

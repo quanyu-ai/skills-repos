@@ -32,3 +32,4 @@ else
 fi
 
 echo "✓ $ID + decision: [$DATE] $TITLE${REF:+ ($REF)}"
+auto_refresh_context

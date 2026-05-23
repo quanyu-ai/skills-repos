@@ -54,3 +54,4 @@ echo "| $TODAY | STAGE | $MSG |" >> "$PROJECTS_ROOT/$ID/milestones.md"
 registry_upsert "$ID" "$NEW" "$DISPLAY" "$PRIO"
 
 echo "✓ $ID: $OLD → $NEW"
+auto_refresh_context

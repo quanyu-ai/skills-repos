@@ -18,6 +18,12 @@ user-invocable: true
 1. **禁止跳过编号**：项目 id 必须是 kebab-case（小写字母 + 数字 + `-`），与 `docs-repos/<id>/` 同名
 2. **禁止散落记录**：决策 / 里程碑 / 事故 **必须**走对应脚本写到结构化文件，禁止零散塞到 README 或随手 echo
 3. **禁止直接编辑 `_registry.json`**：维护必须通过 `new-project.sh` / `update-status.sh`，避免破坏索引
+4. **决策 / 事故 / 里程碑必须主动登记，禁止后置反向迁移或关键字自动识别**：
+   - 决策（decision）触发：技术选型 / 架构变更 / 工具替换 / 关键流程拍板 → 当场跑 `add-decision.sh`
+   - 事故（incident）触发：线上故障 / 用户报错 / 部署失败 / 数据问题 → 当场跑 `add-incident.sh`
+   - 里程碑（milestone）触发：阶段性交付 / 重要节点 / 客户验收 → 当场跑 `add-milestone.sh`
+   - **不要事后用脚本从 README / PROJECT-BOARD / Git log 反向扫关键字**，关键字误判率高、上下文丢失、容易污染档案。`migrate-from-board.sh` 是历史一次性工具，已冻结，不再扩充关键字。
+   - 跨项目 / 平台级 / 战略类用 `add-global-milestone.sh` 而不是塞到某个项目里。
 
 ---
 
@@ -136,9 +142,19 @@ bash {{SKILL_DIR}}/scripts/refresh-context.sh
 ```
 - 读所有 `profile.json` + 里程碑 + 决策，输出到 `knowledge-repos/management/PROJECTS-CONTEXT.md`。
 - AGENTS.md 已引用 PROJECTS-CONTEXT.md，主 Agent 启动即看到。
-- **何时跑**：运行了 update-status / add-milestone / add-decision 之后手动刷一次；也可接入定时任务。
+- **何时跑**：`add-milestone` / `add-decision` / `add-incident` / `update-status` / `add-global-milestone` 已自动调一次，无需手动。批量场景请 `PROJECT_MGMT_AUTO_REFRESH=0` 跳过、结束后再手动刷一次。
 
-### 场景 9：从老 PROJECT-BOARD.md 迁移历史（一次性）
+### 场景 8.5：全局里程碑（无项目归属）
+```bash
+bash {{SKILL_DIR}}/scripts/add-global-milestone.sh "<title>" --category skill|infra|strategy|platform|process [--date YYYY-MM-DD]
+```
+- 适合：skill 升级 / 基建变更 / 公司战略 / 跨项目平台 / 流程改造。
+- 写入 `knowledge-repos/management/GLOBAL-MILESTONES.md`，并自动 refresh PROJECTS-CONTEXT.md 末尾的「最近全局里程碑」节。
+- 非法 category 直接 exit 1。
+
+### 场景 9：从老 PROJECT-BOARD.md 迁移历史（⚠️ 一次性历史工具）
+
+> ⚠️ **一次性历史工具**，已冻结。不要扩充 decision/incident 关键字、不要把它当成日常入口。新事项请走 add-milestone / add-decision / add-incident / add-global-milestone。
 ```bash
 bash {{SKILL_DIR}}/scripts/migrate-from-board.sh           # dry-run
 bash {{SKILL_DIR}}/scripts/migrate-from-board.sh --apply   # 真写入

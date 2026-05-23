@@ -92,3 +92,10 @@ stage_color() {
     esac
 }
 RESET=$'\033[0m'
+
+# auto_refresh_context — 由 add-*/update-status 等脚本在成功后调用。
+# 失败不阻塞主流程；可用 PROJECT_MGMT_AUTO_REFRESH=0 关闭（批量场景）。
+auto_refresh_context() {
+    [ "${PROJECT_MGMT_AUTO_REFRESH:-1}" = "0" ] && return 0
+    bash "$SKILL_DIR/scripts/refresh-context.sh" >/dev/null 2>&1 || true
+}

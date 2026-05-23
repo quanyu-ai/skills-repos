@@ -26,3 +26,4 @@ require_project_exists "$ID"
 echo "| $DATE | $TYPE | $SEV | $TITLE |" >> "$PROJECTS_ROOT/$ID/incidents.md"
 jq_inplace "$PROJECTS_ROOT/$ID/profile.json" --arg t "$(now_iso)" '.updated_at=$t'
 echo "✓ $ID + incident: [$DATE][$TYPE][$SEV] $TITLE"
+auto_refresh_context
