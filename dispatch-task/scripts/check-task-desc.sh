@@ -68,6 +68,25 @@ if echo "$CONTENT" | grep -E "(生成|创建|新建|写).*\.(html|md|json|tsx|ts
     fi
 fi
 
+# ⚠️ 防呆：没有「完成后」或「回报清单」
+if ! echo "$CONTENT" | grep -E "(完成后必含|完成后回报|回报清单|回报真实产出|回报：)" -q; then
+    score=$((score - 10))
+    issues+=("${RED}❌ -10 任务描述缺「完成后必含/回报清单」，子 Agent 会交「已完成」代替产出详情${NC}")
+fi
+
+# ⚠️ 防呆：没有 ls/wc/du/git 验证命令
+if ! echo "$CONTENT" | grep -E "\bls\b|\bwc\b|\bdu\b|\bgit\s+(status|log|rev-parse)\b" -q; then
+    score=$((score - 10))
+    issues+=("${RED}❌ -10 任务描述未要求跱 ls / wc / du / git 验证命令，无法验证真实产出${NC}")
+fi
+
+# ⚠️ 防呆：没有明示「不允许思考代替行动」
+if ! echo "$CONTENT" | grep -E "(思考代替行动|只规划不|模糊表达|不允许.*设计|不要只写方案)" -q; then
+    # 轻量警告，不严重扣分
+    score=$((score - 5))
+    issues+=("${YELLOW}⚠️  -5 未明示「不允许思考代替行动」，建议加反-以思考代替行动约束${NC}")
+fi
+
 # 输出
 echo "═══════════════════════════════════════"
 echo "  任务描述合规性校验"
