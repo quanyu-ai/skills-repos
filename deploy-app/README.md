@@ -388,3 +388,177 @@ open http://localhost:3021
 - 末尾打印 "扫描完成，共 X 个应用，发现 Y 个路径错误"，发现错误时退出码为 1。
 
 适合在每天/每次新增 app 后跑一次，提前发现路径配置漂移。
+
+---
+
+## 🆕 补充：未提及脚本与机制（2026-05-23）
+
+### 1. `deploy-prototype.sh` —— 原型专门化部署
+
+虽然 `deploy.sh proto <app>` 可以部署原型，但原型有自己的"专用快道"：
+
+```bash
+bash scripts/deploy-prototype.sh <app> [--skip-build] [--dry-run]
+```
+
+**与 `deploy.sh proto` 的差异：**
+
+| 维度 | `deploy.sh proto` | `deploy-prototype.sh` |
+|------|------------------|----------------------|
+| 配置文件 | `environments.json` | `environments-prototype.json`（专用） |
+| 流程 | 完整 10 步（含 git pull / 健康检查 / 失败回滚） | 精简快道（跳过 git 拉取 / 极简健康检查） |
+| 适用 | 通用 proto 环境 | 高频迭代的原型仓库（如 smart-college-prototype） |
+| 端口段 | 3000-3099 | 同段，但常用 30xx |
+| 写日志 | 写 DEPLOY-LOG.md | 同样写 DEPLOY-LOG.md |
+
+**何时用：**
+- ✅ 原型源是 `docs-repos/<project>/prototype/` 这种"无构建"目录，每次小改频繁部署 → 用 `deploy-prototype.sh`
+- ✅ 走标准 proto 环境配置 / 需要 git 拉取 / 有构建步骤 → 用 `deploy.sh proto <app>`
+
+> 两条路最终都会用 `pm2 serve` 或等价静态服务托管，但 `deploy-prototype.sh` 的关键优势是"跳过仓库 git 操作"，特别适合 `docs-repos` 内 in-place 修改后立即上线。
+
+### 2. `init-app.sh` —— 智能应用初始化向导
+
+`init.sh` 是"通用交互式初始化"，而 `init-app.sh` 是"针对一个应用的智能向导版"。
+
+```bash
+# 已在 apps.json 的 app：交互确认补全
+bash scripts/init-app.sh <app_key>
+
+# 全新项目目录：自动探测 framework + 推荐配置
+bash scripts/init-app.sh /abs/path/to/project
+
+# 预览不写入
+bash scripts/init-app.sh --dry-run <app_key>
+
+# CI/批量场景，不弹交互
+bash scripts/init-app.sh --no-interactive <app_key>
+```
+
+**智能推荐能力：**
+- 探测 `package.json` 是否存在 → 推断 framework（next/nest/express/node/static）
+- 探测 `next.config.{js,ts}` → 命中 `nextjs`
+- 探测 `index.html` 且无 `package.json` → 命中 `static`
+- 自动建议端口段（proto: 30xx / test: 32xx / demo: 34xx / prod: 36xx）
+
+**输出：** 直接写入 `config/apps.json`（dry-run 模式仅打印 diff）。
+
+**与 `init.sh` 的区别：**
+
+| 脚本 | 目标 | 交互层级 |
+|------|------|---------|
+| `init.sh` | 初始化整套 deploy-app（apps.json + environments.json + 目录结构） | 重量级，一次性 |
+| `init-app.sh` | 在已初始化的 deploy-app 里**新增/校准一个 app**条目 | 轻量级，可反复跑 |
+
+### 3. Static framework 部署机制（serve.json + cleanUrls）
+
+针对 static framework，今日（2026-05-23, TASK-009）补齐了三个坑：
+
+#### 坑 1：`.html` URL 触发 301 重定向
+
+`serve` 默认开 `cleanUrls`，访问 `/admin.html` 会 301 跳到 `/admin`，原型站常出现"链接全挂"。
+
+#### 坑 2：SPA fallback 让所有 404 走 `index.html`
+
+原 `serve -s` 模式（`--single`）会把所有未命中路径都返回 index.html，原型多页面场景全错。
+
+#### 解决方案：自动写 `serve.json` + 去掉 `-s`
+
+`deploy.sh` 在 static framework 部署时，自动在 `current/` 根目录生成：
+
+```json
+{
+  "cleanUrls": false,
+  "trailingSlash": false,
+  "rewrites": []
+}
+```
+
+启动命令也从：
+
+```bash
+pm2 start serve --name <app> -- -s . -l <port>
+```
+
+改为：
+
+```bash
+pm2 start serve --name <app> -- . -l <port>
+```
+
+> 去掉 `-s`，让 `.html` 真实命中文件、404 真实返回 404、`serve.json` 显式控制行为。
+
+### 4. 多版本支持（与 prototype-design 联动）
+
+当 `prototype-design` 的 `publish-version.sh` 把 `_archive/v3.0/` 发布到 `prototype/archive/v3.0/`，static 部署会自动一起带上：
+
+```
+<deploy_root>/<app>/current/
+├── index.html              # 当前版本门户页（含版本切换器）
+├── mapping.html
+├── wireframe/...
+├── highfi/...
+└── archive/
+    ├── v3.0/               # 历史版本可在线访问
+    ├── v2.0/
+    └── v1.0/
+```
+
+**关键点：**
+- 不需要任何额外配置，`deploy.sh` 复制整个 `prototype/` 目录到 `current/` 即可
+- 浏览器内的版本切换器（由 `generate-index.sh` 渲染）直接路径跳到 `archive/<v>/`
+- `serve.json` 的 `cleanUrls:false` 让 `archive/v3.0/wireframe/admin.html` 也能直接命中
+
+### 5. `doctor.sh --check-apps` 详解
+
+补全 v1.1 Layer 3 的用法：
+
+```bash
+# 全量扫描所有 app × env 的路径配置
+bash scripts/doctor.sh --check-apps
+
+# 输出示例：
+# 应用             | proto | test  | demo  | prod
+# ----------------+-------+-------+-------+------
+# smart-college   |  ✅   |  ✅   |  ✅   |  —
+# quanyu-website  |  ✅   |  ❌   |  —    |  —
+# ...
+# 扫描完成：共 8 个应用，发现 1 个路径错误
+# 退出码：1
+```
+
+**回退规则（优先级递减）：**
+1. `apps.<app>.env_config.<env>.project_path`（精确配置）
+2. proto 环境：`apps.<app>.project_proto_path`
+3. test/demo/prod 环境：`apps.<app>.project_code_path`
+4. 都没有 → `—`（不算错误）
+
+**典型用途：**
+- 🌅 每天上班第一件事跑一次，发现夜里被人改动的项目目录
+- 🆕 新增 app 进 `apps.json` 后跑一次，确认路径都对
+- 🚨 CI 定时任务，发现错误 → 钉钉/飞书报警
+
+---
+
+## 📋 v1.1+ 完整脚本能力矩阵（更新）
+
+| 脚本 | 用途 | 何时用 |
+|------|------|-------|
+| `deploy.sh` | 主部署入口（10 步） | 95% 场景 |
+| `deploy-prototype.sh` | 原型快道部署 | 高频迭代的原型仓库 |
+| `rollback.sh` | 版本回滚 | 部署后发现问题 |
+| `verify.sh` | 健康检查 | 部署后 / 定时巡检 |
+| `doctor.sh` | 6 项自检 | 配置变更后 |
+| `doctor.sh --check-apps` | app × env 路径矩阵扫描 | 每天 / 新增 app 后 |
+| `init.sh` | 整套 deploy-app 初始化 | 第一次落地 |
+| `init-app.sh` | 单 app 智能添加/校准 | 新增 app 或修配置 |
+
+---
+
+## 🔗 与其他 skill 的关系（更新）
+
+- **`prototype-design`** → 生成的 `prototype/` 目录（含 `index.html` / `mapping.html` / `archive/`）直接被 `deploy.sh proto static` 整目录拷贝部署
+- **`requirement`** → 不直接联动，但通过 prototype-design 间接消费需求
+- **`dispatch-task`** → 派部署任务时必须带 env（proto/test/demo/prod）+ app + （prod 需 --version + --approved-by）
+- **`skill: quanyu-tech-deployer`** → 角色 skill，负责调用本 skill 的脚本
+
