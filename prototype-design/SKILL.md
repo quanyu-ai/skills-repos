@@ -119,6 +119,18 @@ bash {{SKILL_DIR}}/scripts/sync-back-refs.sh <project>
 - doctor.sh 报 INCONSISTENT 时按提示手动修复
 - 手动修过 REQ 后想重新同步
 
+### 场景 7：生成需求-原型映射可视化页面
+
+```bash
+bash {{SKILL_DIR}}/scripts/generate-mapping.sh <project>
+```
+
+- 输出：`docs-repos/<project>/prototype/mapping.html`
+- 内容：统计卡片（总需求 / 已映射 / 状态分布 / 阶段分布 / 优先级分布 / 角色分布）+ 按角色分组的 REQ-原型对照表（含状态色块、可点击原型链接、来源章节）
+- 用途：客户 / 团队 review 时一眼看出需求完成度
+- 数据源：`requirements/requirements-map.json` + `prototype/meta/requirements-map.json`，以 REQ-id 为 key 合并
+- 通用脚本，任意项目（smart-college、chenxi-study 等）只要两份 json 按约定位置存在即可调用
+
 ---
 
 ## 📦 参数化设计
