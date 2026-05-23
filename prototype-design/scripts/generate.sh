@@ -121,6 +121,35 @@ sed -e "s|{{REQ_ID}}|$REQ_ID|g" \
 
 echo "[generate] ✅ 生成示例文件: $OUTPUT_FILE"
 
+# === 反向回填 REQ.related_files.prototype （强制，有 assertion）===
+BACK_REF="$SKILL_DIR/scripts/lib/back_ref.py"
+REQ_FILE="$PROJECT_DOCS/requirements/${REQ_ID}.md"
+PROTOTYPE_REL_PATH="modules/$ROLE/${MODULE}"
+
+if [ ! -f "$REQ_FILE" ]; then
+    echo "ERROR: REQ 文件不存在，无法反向回填: $REQ_FILE"
+    exit 1
+fi
+
+if [ ! -f "$BACK_REF" ]; then
+    echo "ERROR: back_ref.py 不存在: $BACK_REF"
+    exit 1
+fi
+
+echo "[generate] 反向回填 REQ.related_files.prototype: $REQ_FILE"
+python3 "$BACK_REF" write "$REQ_FILE" "$PROTOTYPE_REL_PATH" || {
+    echo "ERROR: 反向回填失败: $REQ_FILE"
+    exit 1
+}
+
+# Assertion：再 check 一次确认真的写进去了
+python3 "$BACK_REF" check "$REQ_FILE" "$PROTOTYPE_REL_PATH" || {
+    echo "ERROR: ASSERTION FAILED - $REQ_FILE 的 related_files.prototype 仍未包含 $PROTOTYPE_REL_PATH"
+    echo "       请手动检查 REQ 文件 frontmatter 结构，或跑：bash scripts/sync-back-refs.sh $PROJECT"
+    exit 1
+}
+echo "[generate] ✅ 反向回填成功: REQ $REQ_ID -> $PROTOTYPE_REL_PATH"
+
 # 更新 revisions.md
 REVISIONS="$PROTOTYPE_DIR/meta/revisions.md"
 cat >> "$REVISIONS" <<MDEOF

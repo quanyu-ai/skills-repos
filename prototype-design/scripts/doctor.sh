@@ -54,5 +54,42 @@ for proj in $PROJECT_NAMES; do
     fi
 done
 
+# 检查项 10：双向一致性扫描（阻塞）
+# 对每个项目：如果 prototype/meta/requirements-map.json 存在，
+# 则验证 mapping 中每条 file 都在对应 REQ 的 related_files.prototype 中
+BACK_REF="$SKILL_DIR/scripts/lib/back_ref.py"
+INCONSISTENT=0
+for proj in $PROJECT_NAMES; do
+    META_MAP="$WORKSPACE_ROOT/docs-repos/$proj/prototype/meta/requirements-map.json"
+    REQ_DIR="$WORKSPACE_ROOT/docs-repos/$proj/requirements"
+    [ -f "$META_MAP" ] || continue
+    [ -d "$REQ_DIR" ] || continue
+    [ -f "$BACK_REF" ] || continue
+
+    # 提取 req_id + files
+    MAPPING_LINES=$(jq -r '.mappings[]? | "\(.req_id)\t\(.files | join(","))"' "$META_MAP" 2>/dev/null || true)
+    [ -z "$MAPPING_LINES" ] && continue
+
+    while IFS=$'\t' read -r REQ_ID FILES_CSV; do
+        [ -z "$REQ_ID" ] && continue
+        REQ_FILE="$REQ_DIR/${REQ_ID}.md"
+        if [ ! -f "$REQ_FILE" ]; then
+            echo "WARN: [$proj] mapping 指向不存在的 REQ: $REQ_ID"
+            continue
+        fi
+        IFS=',' read -ra PATHS_ARR <<< "$FILES_CSV"
+        for p in "${PATHS_ARR[@]}"; do
+            if ! python3 "$BACK_REF" check "$REQ_FILE" "$p" >/dev/null 2>&1; then
+                echo "INCONSISTENT: [$proj] $REQ_ID 的 related_files.prototype 缺 $p"
+                INCONSISTENT=$((INCONSISTENT + 1))
+            fi
+        done
+    done <<< "$MAPPING_LINES"
+done
+
+if [ "$INCONSISTENT" -gt 0 ]; then
+    fail "发现 $INCONSISTENT 个双向不一致项 - 请跑: bash scripts/sync-back-refs.sh <project>"
+fi
+
 echo "READY"
 exit 0

@@ -36,6 +36,7 @@ bash {{SKILL_DIR}}/scripts/doctor.sh
 4. ⛔ **禁止越权写入项目代码**：本 skill 只在 `docs-repos/<project>/prototype/**` 下写文件
 5. ⛔ **禁止改动他人已 done 的原型**：变更必须新建模块文件或走 `revise-module.sh`
 6. ⛔ **wireframe 风格禁用彩色/emoji/阴影**：违反规范要求请走 highfi 风格
+7. ⛔ **禁止只更新正向 map**：每次 `generate.sh` 生成 HTML 后，必须反向回写 `REQ.related_files.prototype`，由脚本内置 assertion 强制。人工补救请走 `sync-back-refs.sh`
 
 ---
 
@@ -69,7 +70,10 @@ bash {{SKILL_DIR}}/scripts/generate.sh <style> <project> \
 | `--req` | 仅生成指定 REQ-id 的页面 |
 | `--phase` | 仅生成指定阶段的需求 |
 
-读取 `docs-repos/<project>/requirements/requirements-map.json`，按角色/模块拆文件生成，并更新 `meta/revisions.md`。
+读取 `docs-repos/<project>/requirements/requirements-map.json`，按角色/模块拆文件生成，同时：
+- 更新 `meta/revisions.md`
+- 更新 `prototype/meta/requirements-map.json`（正向映射）
+- **自动反向回填** 到对应 REQ 文件的 `frontmatter.related_files.prototype`（脚本内置强制 + assertion，失败会 exit 1）
 
 > ⚠️ Phase 1：仅跑通参数解析 + 读取需求 + 生成 1 个示例文件。
 > 完整业务页面生成是 Phase 2 的事。
@@ -97,6 +101,23 @@ bash {{SKILL_DIR}}/scripts/upgrade.sh <project> <from> <to>
 ```
 
 > Phase 1：占位脚本，仅打印提示。Phase 3/4 实现。
+
+### 场景 6：补救反向回填（历史遺留 / 人工表不一致）
+
+```bash
+# 干跑预览
+bash {{SKILL_DIR}}/scripts/sync-back-refs.sh <project> --dry-run
+
+# 真补救
+bash {{SKILL_DIR}}/scripts/sync-back-refs.sh <project>
+```
+
+作用：以 `prototype/meta/requirements-map.json` 为准，把所有 mapping 的 files 路径都回写到对应 REQ 文件的 `related_files.prototype`。幂等（已存在跳过），完成后有 post-check assertion。
+
+何时走：
+- 旧项目正向 map 完备但 REQ 没同步
+- doctor.sh 报 INCONSISTENT 时按提示手动修复
+- 手动修过 REQ 后想重新同步
 
 ---
 
@@ -131,8 +152,9 @@ bash {{SKILL_DIR}}/scripts/upgrade.sh <project> <from> <to>
 
 ## 📌 Phase 路线
 
-- **Phase 1（当前）**：框架 + 自检 + 模板 + 脚本骨架 + 1 个示例输出
+- **Phase 1（完成）**：框架 + 自检 + 模板 + 脚本骨架 + 1 个示例输出
 - **Phase 2**：wireframe 风格完整业务页面生成（按角色/模块拆文件）
-- **Phase 3**：highfi 风格（品牌色 + 真实数据 + 完整视觉）
-- **Phase 4**：interactive 风格（Tab/Modal/Chart 完整交互 + 弹窗联动）
-- **Phase 5**：与 deploy-app skill 集成（一键 static 部署到 demo）
+- **Phase 3（完成）**：REQ 反向回填闭环（generate.sh 内置 + sync-back-refs.sh 补救 + doctor.sh 双向一致性扫描，全部 assertion 硬执行）
+- **Phase 4**：highfi 风格（品牌色 + 真实数据 + 完整视觉）
+- **Phase 5**：interactive 风格（Tab/Modal/Chart 完整交互 + 弹窗联动）
+- **Phase 6**：与 deploy-app skill 集成（一键 static 部署到 demo）
