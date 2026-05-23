@@ -265,3 +265,134 @@ bash skills/requirement/scripts/promote.sh <project> <new-version>
 `docs-repos/<project>/requirements/CHANGELOG.md`
 
 每次 archive/promote 会自动在顶部 prepend 一条记录。
+
+---
+
+## 🆕 v2 新增能力（2026-05-23）
+
+### 完整状态机定义
+
+需求 status 严格遵循以下状态机：
+
+```
+draft → reviewing → approved → implementing → done
+                                            ↘ deprecated（终态）
+```
+
+- **draft**：新建/草稿态
+- **reviewing**：评审中
+- **approved**：评审通过、等待开发
+- **implementing**：开发中
+- **done**：实现完成（终态）
+- **deprecated**：废弃/合并（终态，不可再流转）
+
+> 终态意味着不可逆，进入 done/deprecated 后只能新建新 REQ 替代。
+
+### 新增脚本
+
+#### 1. `set-status.sh` —— 状态机流转
+
+统一入口修改 REQ 的 status，自动更新 `history` 与 `updated`，并触发 `sync-map`。
+
+```bash
+# 单条
+bash scripts/set-status.sh <project> <REQ-id> <new-status>
+
+# 按角色批量（如所有 frontend 需求一起进入 implementing）
+bash scripts/set-status.sh <project> --role frontend implementing
+
+# 按阶段批量
+bash scripts/set-status.sh <project> --phase phase-1 approved
+
+# 全部
+bash scripts/set-status.sh <project> --all reviewing
+```
+
+**deprecated 强制参数（二选一即可）：**
+
+```bash
+# 合并到新 REQ
+bash scripts/set-status.sh <project> <REQ-id> deprecated --merged-to REQ-20260523-001
+
+# 或写明废弃原因
+bash scripts/set-status.sh <project> <REQ-id> deprecated --reason "客户撤回"
+```
+
+> deprecated 不允许"裸废弃"，必须留下溯源信息（合并去向或原因）。
+
+**关键参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `--role <role>` | 按 frontmatter.role 批量筛选 |
+| `--phase <phase>` | 按 frontmatter.phase 批量筛选 |
+| `--all` | 整项目批量 |
+| `--merged-to <REQ-ID>` | deprecated 时指定合并去向 |
+| `--reason "..."` | deprecated 时填写原因 |
+
+**输出：** 修改后的 REQ 文件 + 自动调用 `sync-map.sh` 刷新映射。
+
+#### 2. `gen-changes.sh` —— 版本变更对照
+
+对比两个版本的需求集合（基于 `_archive/<version>/requirements-map.json` 与当前 map），输出 markdown 变更报告。
+
+```bash
+bash scripts/gen-changes.sh <project> <from-version> <to-version>
+# 例: bash scripts/gen-changes.sh smart-college v3.0 v4.0
+```
+
+**对比维度：** `deprecated` / `added` / `modified` / `unchanged`
+
+**输出：** `docs-repos/<project>/requirements/reviews/CHANGES-<from>-to-<to>.md`
+
+适用场景：版本发布说明、客户评审材料、回顾会议。
+
+#### 3. `lint.sh` —— frontmatter 校验
+
+CI 友好的需求一致性校验器，全部通过返回 0，任一失败返回 1。
+
+```bash
+bash scripts/lint.sh <project>
+```
+
+**检查项：**
+
+1. 必填字段齐全：`id` / `title` / `status` / `phase` / `priority` / `category` / `created` / `updated`
+2. `id` 格式必须为 `REQ-YYYYMMDD-NNN`
+3. `status` 必须 ∈ `draft|reviewing|approved|implementing|done|deprecated`
+4. 文件名与 `id` 一致
+5. `deprecated` 必须有 `merged_to` 或 `deprecated_reason`（或 history 中的 reason）
+6. `updated >= created`
+
+可放进 pre-commit、CI、或 doctor 阶段批量调用。
+
+### 新增 frontmatter 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `source_review` | string | 该需求来源的评审会议/文档（如 "review-2026-05-23"） |
+| `merged_to` | string (REQ-ID) | 被合并到哪条新 REQ（deprecated 专用） |
+| `deprecated_reason` | string | 废弃原因（deprecated 专用） |
+
+### doctor.sh 增强：双向一致性扫描
+
+`doctor.sh` 现在不止检查文件存在性，还会做：
+
+- **map ↔ frontmatter 双向一致性**：`requirements-map.json` 与每个 REQ 的 frontmatter（status / priority / phase / role）必须一致
+- **孤儿检测**：map 中有但文件不存在 / 文件存在但 map 缺
+- **终态校验**：deprecated 必须有 merged_to 或 reason
+- **联动 lint**：内部会调用 `lint.sh` 做 frontmatter 校验
+
+```bash
+bash scripts/doctor.sh <project>
+```
+
+输出：详细差异清单 + 修复建议。建议在每次提交前跑一次。
+
+### 与其他 skill 的关系（更新）
+
+- `requirement` → 管 REQ 全生命周期（draft → done/deprecated）
+- `prototype-design` → 消费 REQ，生成对应原型；通过 `sync-back-refs.sh` 反向回填 `REQ.related_files.prototype`
+- `dispatch-task` → 派发"实现某个 REQ"的子任务时强制带 REQ-ID
+- 三者通过 `requirements-map.json` 共享状态
+

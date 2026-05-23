@@ -156,3 +156,118 @@ dispatch-task/
 - `prototype-design` 负责原型生成
 - `deploy-app` 负责部署执行
 - **`dispatch-task` 负责"主Agent 派子 Agent 之前的合规闸"**，与上述并列，不重叠
+
+---
+
+## 🆕 补充：合规打分规则详解
+
+`check-task-desc.sh` 内置的打分制，是把"派单是否合规"量化的最后一道闸。
+
+### 评分表（起始 100 分）
+
+| 项 | 等级 | 扣分 | 说明 |
+|----|------|-----|------|
+| 出现"读取/参考/看一下" + 文件路径关键词 | ❌ 致命 | -50 | 主 Agent 自己读，等于不派 |
+| 没有任何绝对路径 | ❌ 致命 | -30 | 子 Agent 无法定位工作目录 |
+| 没有 commit/push/部署/build/test 任一关键词 | ❌ 致命 | -20 | 没有可交付物，不闭环 |
+| 估时 > 5 分钟 | ⚠️ 警告 | -10 | 单任务过大，建议拆分 |
+| 提到 HTML/MD/JSON 生成但没提 write-large-file.sh | ⚠️ 警告 | -15 | 易触发 OpenClaw write 工具的隐式截断 |
+
+### 阈值判定
+
+| 分数区间 | 判定 | 行动 |
+|---------|------|------|
+| ≥ 80 | ✅ 可派发 | 直接 `sessions_spawn` |
+| 60-79 | ⚠️ 建议优化 | 龙哥同意可派，否则改 |
+| < 60 | ❌ 禁止派发 | 必须改完再跑 |
+
+### 配合 `pre-dispatch.sh` 使用
+
+```bash
+bash scripts/pre-dispatch.sh <task-file>
+# 内部会依次调用：
+#   1. check-task-desc.sh（合规打分）
+#   2. 工作区状态扫描（是否有未提交变更）
+#   3. AGENTS.md 5 铁律自检提示
+```
+
+---
+
+## 与 AGENTS.md 5 铁律的对应关系
+
+主 Agent 的 5 条铁律，每一条在派单阶段都有对应保障：
+
+| 铁律 | 对应保障 |
+|------|---------|
+| 1️⃣ 不直接写业务代码 | 派单时强制带"目标项目目录" + commit 关键词 |
+| 2️⃣ 不直接执行构建 | 派单描述里 build/test 关键词由子 Agent 执行 |
+| 3️⃣ 不直接执行部署 | deploy / docker / pm2 类操作必须派 |
+| 4️⃣ 不使用 `sessions_yield` | 派单模板顶部固定写 `❌ 不 sessions_yield` |
+| 5️⃣ 完成必更 TASK-TRACKER | 派单"完成后"块固定要求更新 tracker + push |
+
+`dispatch-template.sh` 生成的模板已经默认带齐这些保障字段，不要手撸派单。
+
+---
+
+## 派单实战：反例 vs 正例（来自今日 23 个 TASK）
+
+### ❌ 反例 1：让子 Agent "读取"
+
+```
+请读取 /var/lib/openclaw/.openclaw/workspace/skills/requirement/SKILL.md
+然后帮我把 set-status.sh 加上 --merged-to 参数支持。
+```
+
+**问题：** "读取 SKILL.md" 这步主 Agent 自己干就行，不该派；子 Agent 启动费 token 又费时间。
+**评分：** 100 - 50（致命）= 50 → ❌ 禁止派发
+
+**正例：**
+```
+## 任务：在 set-status.sh 增加 --merged-to 参数
+工作目录：/var/lib/openclaw/.openclaw/workspace/skills/requirement/scripts/
+约束：deprecated 时必须二选一（--merged-to 或 --reason），否则 exit 2
+完成后：git commit && push skills-repos；更新 TASK-TRACKER.json TASK-XXX → completed
+预估：3 分钟
+```
+
+### ❌ 反例 2：没有绝对路径
+
+```
+帮我把原型门户页生成器写好，并部署上去。
+```
+
+**问题：** 没说哪个项目、没绝对路径、没 build/deploy 细节。
+**评分：** 100 - 30 - 20 = 50 → ❌ 禁止派发
+
+### ✅ 正例：今日 TASK-20260523-023（generate-index.sh）
+
+完整任务描述包含：
+- 工作目录绝对路径
+- 输入文件清单 + 是否必需
+- 输出文件路径 + Assertion（>8KB / 含版本切换器 / 至少 1 个角色块）
+- 大文件写入用 `write-large-file.sh`
+- 完成后：commit/push + 更新 TASK-TRACKER + 提交报告
+
+**评分：** 100 分 → ✅ 直接派发，子 Agent 26 分钟交付。
+
+### ✅ 正例：今日 TASK-20260523-018（lint.sh + gen-changes.sh）
+
+- 双脚本一次性派
+- 每个脚本规定了入参/退出码/输出位置
+- 明确"放进 skills-repos 不动 docs-repos"边界
+
+**评分：** 100 分 → ✅ 高效产出。
+
+---
+
+## 派发前的"3 看 1 跑"
+
+派单前的最后 30 秒检查：
+
+1. 👀 **看路径**：所有路径都是绝对路径吗？
+2. 👀 **看动作**：有 commit/push/build/test/deploy 任一闭环动词吗？
+3. 👀 **看大文件**：要生成 HTML/MD/JSON 吗？有没有提 `write-large-file.sh`？
+4. 🏃 **跑校验**：`bash scripts/pre-dispatch.sh <task-file>`，分数 ≥ 80 才发车。
+
+记住：派单的质量决定子 Agent 的质量。**不要把"派单"这件事本身派出去**——这是主 Agent 的责任。
+

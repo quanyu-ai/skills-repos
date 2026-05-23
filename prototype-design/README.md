@@ -533,3 +533,208 @@ bash skills/prototype-design/scripts/promote.sh <project> <new-version>
 ```
 
 `current` 表示当前正在迭代的版本号，`null` 表示尚无正式版。
+
+---
+
+## 🆕 v3 新增能力（2026-05-23）
+
+本次新增 6 个脚本 + 4 个 lib 库 + 4 大机制升级。聚焦"批量生成 / 双向映射 / 多版本并存 / 项目门户页"。
+
+### 一、新增脚本（6 个）
+
+#### 1. `generate.sh`（Phase 2 升级）—— 批量生成 + 智能模板
+
+不再是"一次一个原型"，而是支持**按需求集合一次性批量生成**。
+模板由 `lib/generate_batch.py` 根据 REQ 的 `category`/`screen_type` 自动选型。
+
+5 个内置 wireframe 业务模板（`templates/wireframe/business/`）：
+
+| 模板 | 适用场景 |
+|------|---------|
+| `workspace.html` | 工作台/角色首页（卡片+待办+快捷入口） |
+| `list.html` | 列表页（搜索+筛选+表格+分页） |
+| `detail.html` | 详情页（左信息右操作） |
+| `form.html` | 表单页（分组+校验+提交） |
+| `dashboard.html` | 数据看板（KPI+图表占位） |
+
+> 高仿真（highfi）与可交互（interactive）后续按相同 schema 扩展。
+
+#### 2. `diff-against-requirements.sh` —— 需求-原型差异检测
+
+比对 `requirements/requirements-map.json`（活跃需求）与 `prototype/meta/requirements-map.json`（原型映射），输出三类问题：
+
+- ❌ REQ 存在但无原型 → 需要新建
+- 🗑 原型存在但 REQ 已 deprecated → 应归档
+- ⏰ REQ.updated 晚于原型 generated_at → 可能需要更新
+
+```bash
+bash scripts/diff-against-requirements.sh <project>
+# 退出码：0=无差异，1=有差异（适合 CI 报警）
+```
+
+#### 3. `generate-index.sh` —— 项目门户页生成
+
+自动生成 `prototype/index.html`，作为整个项目原型的入口门户。
+
+```bash
+bash scripts/generate-index.sh <project>
+```
+
+**输入：**
+- `requirements/requirements-map.json`（必需）
+- `prototype/meta/requirements-map.json`（必需）
+- `prototype/meta/versions.json`（可选，用于版本切换器）
+- `prototype/meta/index-config.json`（可选，配置角色分组/排序/标题，缺失走默认）
+
+**输出 Assertion：** 文件 > 8KB、含版本切换器、至少 1 个角色块。
+
+详见下文【机制三：项目门户页】。
+
+#### 4. `generate-mapping.sh` —— 需求-原型映射可视化
+
+生成 `prototype/mapping.html`，把"REQ ↔ 原型文件"映射以可视化表格展示，方便评审与产品对齐。
+
+```bash
+bash scripts/generate-mapping.sh <project>
+```
+
+底层调用 `lib/render_mapping.py`，渲染时联动 REQ 的 status/priority 染色。
+
+#### 5. `publish-version.sh` —— 多版本发布
+
+把 `_archive/<version>/` 的归档快照"发布"到 `prototype/archive/<version>/`，让历史版本变成可在线访问的副本（而不仅是冷存档）。
+
+```bash
+bash scripts/publish-version.sh <project> <version>
+# 例: bash scripts/publish-version.sh smart-college v3.0
+```
+
+发布后 `index.html` 的版本切换器会自动识别并加入新条目（需重跑 `generate-index.sh`）。
+
+#### 6. `sync-back-refs.sh` —— 反向回填
+
+把 `prototype/meta/requirements-map.json` 的 mapping，反向回填到对应 REQ 文件的 `frontmatter.related_files.prototype`。
+
+```bash
+bash scripts/sync-back-refs.sh <project> [--dry-run]
+# 退出码：0=成功（或 dry-run 完成），1=出错或 post-check 不一致
+```
+
+**为什么需要：** REQ 是需求侧的唯一事实源，但生成原型时是"按 REQ 派生"。回填后，REQ 文件本身就能查到"我对应哪些原型页面"，闭环一致性。
+
+> 已在 `generate.sh` 内部强制调用，确保生成后立刻同步。
+
+#### 7. `write-large-file.sh` —— 通用大文件写入
+
+绕过 OpenClaw `write` 工具 ~10KB 的实际限制，专用于写 HTML/CSS/JSON 等大型生成产物。
+
+```bash
+# 用法 1：从 stdin
+cat <<'EOF' | bash scripts/write-large-file.sh /path/to/output.html
+...content...
+EOF
+
+# 用法 2：从源文件
+bash scripts/write-large-file.sh /path/to/output.html --from /tmp/source.html
+
+# 用法 3：追加
+bash scripts/write-large-file.sh /path/to/output.html --append
+```
+
+**特性：** 自动建父目录 / 写后校验 size > 0 / 输出写入摘要（路径+大小+前 3 行预览）。
+
+> 主 Agent 与子 Agent 生成 >10KB 文件时必须用本脚本，**不要再用 write 工具**。
+
+### 二、新增 lib 库（4 个）
+
+| 文件 | 职责 |
+|------|------|
+| `lib/back_ref.py` | `sync-back-refs.sh` 的核心实现：解析 REQ frontmatter 并安全回填 |
+| `lib/generate_batch.py` | `generate.sh` Phase 2 的批处理引擎，按 REQ 智能选模板 |
+| `lib/generate_index.py` | `generate-index.sh` 的渲染器（HTML + 版本切换器 + 角色分组） |
+| `lib/render_mapping.py` | `generate-mapping.sh` 的映射表渲染器 |
+
+> lib 仅供脚本内部调用，外部用户应通过对应 `.sh` 入口使用。
+
+### 三、四大新机制
+
+#### 机制一：反向回填（Back-Ref）
+
+**Why：** REQ 是需求事实源，但人手维护 `REQ.related_files` 会过时。生成原型时反向回填，REQ 文件永远知道"我对应哪些原型"。
+
+**How：**
+1. `generate.sh` 生成完原型，更新 `prototype/meta/requirements-map.json`
+2. 自动调用 `sync-back-refs.sh`，把 mapping 写回每个 REQ.frontmatter.related_files.prototype
+3. `doctor.sh` 做 post-check 验证一致性
+
+**协作：** 与 `requirement` skill 的 `set-status.sh` / `doctor.sh` 形成闭环。
+
+#### 机制二：多版本并存（Archive + Switch）
+
+**Why：** 客户评审时常需要"既看新版又对照旧版"。
+
+**How：**
+1. `archive.sh` / `promote.sh` 把当前快照写入 `_archive/<version>-<date>/`（冷归档）
+2. `publish-version.sh` 把 `_archive/<version>/` 复制到 `prototype/archive/<version>/`（可访问副本）
+3. `generate-index.sh` 读 `meta/versions.json`，在门户页头部生成**版本切换器**
+4. 用户在浏览器内可在 current / v3.0 / v2.0 自由切换
+
+#### 机制三：项目门户页（Index）
+
+**Why：** 原型多了之后需要一个入口聚合"所有角色 × 所有版本"。
+
+**How：**
+- `prototype/index.html` 作为入口，按角色分组卡片（如：管理端 / 教师端 / 学生端）
+- `meta/index-config.json` 控制：标题、角色顺序、每个角色下显示哪些原型、是否隐藏 deprecated
+- `meta/versions.json` 控制：版本切换器有哪些选项
+- 任何 generate/promote/publish-version 后，重跑 `generate-index.sh` 即联动更新
+
+**默认行为：** 即使没有 `index-config.json`，也会按 frontmatter.role 自动分组渲染。
+
+#### 机制四：doctor.sh 增强（一致性 + UI 完整性）
+
+`doctor.sh` 现在覆盖：
+
+- **双向映射一致性**：REQ ↔ prototype map 必须双向对齐
+- **UI 资产完整性**：每个原型页面必须能找到 `sidebar` 注入点、`styles.css`、`<title>`
+- **standalone 校验**：原型 HTML 独立打开不能 404
+- **联动 lint**：内部会调用 `requirement/scripts/lint.sh`，需求侧不通过原型 doctor 直接 fail
+
+```bash
+bash scripts/doctor.sh <project>
+```
+
+### 四、与其他 skill 的关系（更新）
+
+- **`requirement`** → 提供 REQ 事实源；`prototype-design` 消费 REQ 并通过 `sync-back-refs.sh` 反向回填
+- **`requirement/lint.sh`** → 被 `prototype-design/doctor.sh` 调用，保证需求侧合规
+- **`dispatch-task`** → 派发"原型批量生成"任务时，必须带项目名 + REQ 范围（角色/阶段）
+- **`deploy-app`** → 部署原型到演示环境时直接拷 `prototype/` 整目录（含 `index.html` + `archive/`）
+
+### 五、常用命令速查（v3 新增部分）
+
+```bash
+# 批量生成（v3）
+bash scripts/generate.sh <project> --role admin --batch
+
+# 差异巡检
+bash scripts/diff-against-requirements.sh <project>
+
+# 反向回填 + dry-run
+bash scripts/sync-back-refs.sh <project> --dry-run
+
+# 发布历史版本到可访问目录
+bash scripts/publish-version.sh <project> v3.0
+
+# 生成项目门户页
+bash scripts/generate-index.sh <project>
+
+# 生成需求-原型映射表
+bash scripts/generate-mapping.sh <project>
+
+# 写超大 HTML
+cat <<'EOF' | bash scripts/write-large-file.sh /abs/path/file.html
+<html>...</html>
+EOF
+```
+
