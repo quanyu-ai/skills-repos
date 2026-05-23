@@ -1,0 +1,39 @@
+{
+  "id": "",
+  "display_name": "",
+  "stage": "planning",
+  "client": "",
+  "started_at": "",
+  "updated_at": "",
+  "owner": "龙哥",
+  "ai_team": ["呆呆"],
+  "tech_stack": "",
+  "github_repos": {
+    "docs": null,
+    "code": null
+  },
+  "key_dirs": {
+    "requirements": null,
+    "prototype": null,
+    "solution": null
+  },
+  "deployment": {
+    "proto": null,
+    "test": null,
+    "demo": null,
+    "prod": null
+  },
+  "metrics": {
+    "requirements_total": 0,
+    "requirements_active": 0,
+    "prototypes_total": 0,
+    "adr_count": 0,
+    "deploy_count_30d": 0,
+    "commits_30d": 0,
+    "last_synced_at": null
+  },
+  "key_decisions": [],
+  "next_milestone": "",
+  "tags": [],
+  "priority": "medium"
+}
