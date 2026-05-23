@@ -8,6 +8,8 @@ category: 业务功能
 role: <角色>
 source_doc: ""
 source_section: ""
+source_review: ""           # 来源标识：original-v3 / REVIEW-USER-VOICE / REVIEW-EDU-EXPERT 等
+merged_to: ""               # 仅 deprecated 时填写：合并去向的新 REQ ID
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 depends_on: []

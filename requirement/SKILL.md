@@ -77,6 +77,10 @@ bash {{SKILL_DIR}}/scripts/set-status.sh <project> <REQ-id> <new-status>
 bash {{SKILL_DIR}}/scripts/set-status.sh <project> --role <角色> <new-status>
 bash {{SKILL_DIR}}/scripts/set-status.sh <project> --phase <阶段> <new-status>
 bash {{SKILL_DIR}}/scripts/set-status.sh <project> --all <new-status>
+
+# 转 deprecated 时必须二选一：--merged-to <REQ-ID>  或  --reason "<原因>"
+bash {{SKILL_DIR}}/scripts/set-status.sh <project> REQ-XXXX-001 deprecated --merged-to REQ-XXXX-099
+bash {{SKILL_DIR}}/scripts/set-status.sh <project> REQ-XXXX-002 deprecated --reason "客户撤回"
 ```
 
 需求状态机（脚本会强制校验，非法转换会失败回滚）：
@@ -87,10 +91,39 @@ draft → reviewing → approved → implementing → done
         draft（打回）
 ```
 
-- 任何状态 → `deprecated` 允许
+- 任何状态 → `deprecated` 允许（但必须填 `merged_to` 或 `--reason`）
 - 相同状态 → 相同状态会被自动跳过（幂等）
 - 批量模式先 dry-run 校验全部，任一失败则整批回滚
 - 脚本自动追加 `history` 条目、更新 `updated`、调用 `sync-map.sh` 重建索引、跑 post-check assertion
+
+### 场景 6：生成版本变更对照表（v3 → v4 场景）
+
+```bash
+bash {{SKILL_DIR}}/scripts/gen-changes.sh <project> <from-version> <to-version>
+# 例：bash gen-changes.sh smart-college v3.0 v4.0
+```
+
+- 对比 `_archive/<from>-*/requirements-map.json` 与当前 `requirements-map.json`
+- 输出 `reviews/CHANGES-<from>-to-<to>.md`：包含总览 + 逐条变更表（deprecated/added/modified/unchanged）
+- 废弃项会读 REQ 文件的 `merged_to` / `deprecated_reason`，自动填备注
+- 前提：已用 `archive.sh` 归档旧版本
+
+### 场景 7：Lint 需求质量
+
+```bash
+bash {{SKILL_DIR}}/scripts/lint.sh <project>
+# 退出码 0=全部通过，1=有错误
+```
+
+检查项：
+- 必填字段：`id / title / status / phase / priority / category / created / updated`
+- `id` 格式必须为 `REQ-YYYYMMDD-NNN`
+- `status` 必须在状态机集合内
+- 文件名 ≡ `id` 字段
+- `status: deprecated` 必须有 `merged_to` 或 `deprecated_reason` 或 history.reason
+- `updated >= created`
+
+适用场景：CI/PR 门禁、大改后全量托底检查。
 
 
 ---

@@ -52,6 +52,8 @@ for f in "$REQ_DIR"/REQ-*.md; do
     role=$(get_field "$f" "role")
     source_doc=$(get_field "$f" "source_doc")
     source_section=$(get_field "$f" "source_section")
+    source_review=$(get_field "$f" "source_review")
+    merged_to=$(get_field "$f" "merged_to")
     created=$(get_field "$f" "created")
     updated=$(get_field "$f" "updated")
     relpath="${f#$WORKSPACE_ROOT/}"
@@ -71,10 +73,12 @@ for f in "$REQ_DIR"/REQ-*.md; do
        --arg role "$role" \
        --arg source_doc "$source_doc" \
        --arg source_section "$source_section" \
+       --arg source_review "$source_review" \
+       --arg merged_to "$merged_to" \
        --arg created "$created" \
        --arg updated "$updated" \
        --arg file "$relpath" \
-       '. + {($id): {id:$id,title:$title,status:$status,phase:$phase,priority:$priority,category:$category,role:$role,source_doc:$source_doc,source_section:$source_section,created:$created,updated:$updated,file:$file}}' \
+       '. + {($id): {id:$id,title:$title,status:$status,phase:$phase,priority:$priority,category:$category,role:$role,source_doc:$source_doc,source_section:$source_section,source_review:$source_review,merged_to:$merged_to,created:$created,updated:$updated,file:$file}}' \
        "$TMP" > "$TMP.new" && mv "$TMP.new" "$TMP"
 done
 
