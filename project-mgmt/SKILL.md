@@ -130,6 +130,22 @@ bash {{SKILL_DIR}}/scripts/dashboard.sh --markdown > /tmp/board.md
 ```
 - 控制台彩色表格 + 末尾按阶段汇总
 
+### 场景 8：主 Agent 启动上下文快查（重要）
+```bash
+bash {{SKILL_DIR}}/scripts/refresh-context.sh
+```
+- 读所有 `profile.json` + 里程碑 + 决策，输出到 `knowledge-repos/management/PROJECTS-CONTEXT.md`。
+- AGENTS.md 已引用 PROJECTS-CONTEXT.md，主 Agent 启动即看到。
+- **何时跑**：运行了 update-status / add-milestone / add-decision 之后手动刷一次；也可接入定时任务。
+
+### 场景 9：从老 PROJECT-BOARD.md 迁移历史（一次性）
+```bash
+bash {{SKILL_DIR}}/scripts/migrate-from-board.sh           # dry-run
+bash {{SKILL_DIR}}/scripts/migrate-from-board.sh --apply   # 真写入
+```
+- 按关键字把看板里的历史里程碑 / 状态 / 决策映射到对应项目档案。
+- 默认 dry-run；看完报告再 --apply。
+
 ---
 
 ## 🔄 与其他系统的协同
@@ -141,7 +157,7 @@ bash {{SKILL_DIR}}/scripts/dashboard.sh --markdown > /tmp/board.md
 | `deploy-app` | `sync-metrics` 在 `DEPLOY-LOG.md` 里 grep 项目名数 30 天部署条数 |
 | `solution-design` | `add-decision --ref ADR-XXX` 链接到方案 ADR |
 
-> `PROJECT-BOARD.md` 不再纯手工维护 → 用 `dashboard.sh --markdown` 输出后人工挑选合并。
+> `PROJECT-BOARD.md` 已归档（2026-05-24）→ 新的项目快查入口是 `knowledge-repos/management/PROJECTS-CONTEXT.md`（由 `refresh-context.sh` 生成）。
 
 ---
 
