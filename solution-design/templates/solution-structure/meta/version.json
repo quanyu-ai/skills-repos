@@ -1,0 +1,8 @@
+{
+  "project": "{{PROJECT}}",
+  "version": "v1.0",
+  "initialized_at": "{{INIT_AT}}",
+  "schema_version": "1.0.0",
+  "phase": 1,
+  "notes": "本文件由 solution-design skill init-solution.sh 生成。版本号随方案重大变化升级。"
+}

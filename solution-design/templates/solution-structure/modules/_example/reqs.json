@@ -1,0 +1,12 @@
+{
+  "module": "_example",
+  "reqs": [
+    {
+      "id": "REQ-YYYYMMDD-NNN",
+      "title": "示例需求标题",
+      "priority": "P1",
+      "status": "draft"
+    }
+  ],
+  "notes": "把本模块支撑的所有需求列在这里。Phase 3 将基于此生成全链路映射表。"
+}

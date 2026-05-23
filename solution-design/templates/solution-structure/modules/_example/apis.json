@@ -1,0 +1,20 @@
+{
+  "module": "_example",
+  "base_path": "/api/v1/example",
+  "apis": [
+    {
+      "method": "GET",
+      "path": "/items",
+      "summary": "列表查询",
+      "auth": "required",
+      "req_ids": ["REQ-YYYYMMDD-NNN"]
+    },
+    {
+      "method": "POST",
+      "path": "/items",
+      "summary": "创建条目",
+      "auth": "required",
+      "req_ids": []
+    }
+  ]
+}
