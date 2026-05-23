@@ -72,14 +72,26 @@ bash {{SKILL_DIR}}/scripts/import-doc.sh <project> <docx_path> [--auto-split]
 
 ### 场景 5：状态流转
 
-需求状态机：
+```bash
+bash {{SKILL_DIR}}/scripts/set-status.sh <project> <REQ-id> <new-status>
+bash {{SKILL_DIR}}/scripts/set-status.sh <project> --role <角色> <new-status>
+bash {{SKILL_DIR}}/scripts/set-status.sh <project> --phase <阶段> <new-status>
+bash {{SKILL_DIR}}/scripts/set-status.sh <project> --all <new-status>
+```
+
+需求状态机（脚本会强制校验，非法转换会失败回滚）：
 
 ```
 draft → reviewing → approved → implementing → done
-                                            ↘ deprecated
+     ↘            ↘                          ↘ deprecated
+        draft（打回）
 ```
 
-修改状态直接编辑 REQ 文件 frontmatter 的 `status` 字段，然后 `sync-map.sh` 重建索引。
+- 任何状态 → `deprecated` 允许
+- 相同状态 → 相同状态会被自动跳过（幂等）
+- 批量模式先 dry-run 校验全部，任一失败则整批回滚
+- 脚本自动追加 `history` 条目、更新 `updated`、调用 `sync-map.sh` 重建索引、跑 post-check assertion
+
 
 ---
 
@@ -90,6 +102,7 @@ draft → reviewing → approved → implementing → done
 3. ⛔ **禁止改动他人已 approved 的需求**：要变更必须新建 REQ 并标 `depends_on`
 4. ⛔ **禁止越权写入项目代码**：本 skill 只维护 `docs-repos/**` 下的 `.md/.json`
 5. ⛔ **禁止 0 编号**：`NNN` 从 `001` 起，不允许 `000`
+6. ⛔ **禁止手工 sed / 直接编辑 frontmatter 改 status**：必须通过 `scripts/set-status.sh`（脚本会校验状态机、写 history、重建索引并跑 post-check）
 
 ---
 
