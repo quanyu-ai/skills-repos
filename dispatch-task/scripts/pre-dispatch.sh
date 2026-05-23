@@ -177,23 +177,36 @@ else
     echo -e "  ${GREEN}✅ SKIP${NC}  无 TASK 登记，跳过"
 fi
 
-# 10. 依赖文件存在性
+# 10. 依赖文件存在性（2026-05-24 调优）
+#     只校验带路径分隔符的路径：
+#       - 绝对路径（/ 开头）
+#       - 明确相对路径（./xxx 或 ../xxx 或 skills/xxx / docs-repos/xxx / code-repos/xxx / knowledge-repos/xxx / scripts/xxx 开头）
+#     纯文件名（不带 /）如 hooks.md / SKILL.md 跳过不校验
+logecho () { echo "$1"; }
 echo "[10/10] 依赖文件存在性扫描..."
-# 抓 path-like 字符串：xxx/xxx.ext 或 /abs/path/file.ext
 missing_paths=()
+WS_PREFIX_RE='^(skills|docs-repos|code-repos|knowledge-repos|scripts|projects|code-repos|tools|infra)/'
 while IFS= read -r p; do
     [ -z "$p" ] && continue
     # 跳过明显是 URL / 命令选项 / 占位符
     case "$p" in
         http*|*'<'*|*'>'*|*'{'*|*'$'*) continue ;;
     esac
-    # 相对路径转工作区绝对
-    abs="$p"
-    [[ "$abs" = /* ]] || abs="$WORKSPACE/$p"
+    # 路径分类
+    if [[ "$p" = /* ]]; then
+        abs="$p"
+    elif [[ "$p" = ./* ]] || [[ "$p" = ../* ]]; then
+        abs="$WORKSPACE/$p"
+    elif [[ "$p" =~ $WS_PREFIX_RE ]]; then
+        abs="$WORKSPACE/$p"
+    else
+        # 纯文件名或其他不能判定是路径的，跳过
+        continue
+    fi
     [ -e "$abs" ] || missing_paths+=("$p")
 done < <(echo "$CONTENT" | grep -oE "[A-Za-z0-9_./-]+\.(md|json|sh|ts|tsx|js|html|css|prisma|yml|yaml|sql)" | sort -u)
 if [ ${#missing_paths[@]} -eq 0 ]; then
-    echo -e "  ${GREEN}✅ PASS${NC}  扫描到的路径全部存在"
+    echo -e "  ${GREEN}✅ PASS${NC}  扫描到的路径全部存在（已跳过纯文件名）"
 else
     # 限制最多展示 5 条
     show="${missing_paths[*]:0:5}"

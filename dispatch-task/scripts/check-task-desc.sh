@@ -36,10 +36,35 @@ fi
 score=100
 issues=()
 
-# ❌ 致命：出现"读取/参考/看一下" + 文件路径关键词（粗略匹配）
-if echo "$CONTENT" | grep -E "(读取|参考|看一下|查看|读一下).*\.(prisma|ts|tsx|js|py|md|json|sql|html|css|sh)" -q; then
+# ❌ 致命：出现"读取/参考/看一下 XX 业务大文件"（精细化匹配，2026-05-24 调优）
+#
+# 规则：
+#   触发条件 = 关键词(读/查/参考/查看/阅读) + 30 字内出现明确文件路径
+#   且：文件名不在通用调研白名单（hooks.md/building-plugins.md/README.md/SKILL.md/AGENTS.md/SOUL.md 等）
+#   且：文件名带路径分隔符 / 或扩展名属业务代码类（.prisma/.tsx/.ts/.py/.sql 等）
+#
+# 放行：
+#   - 纯短语 "看一下文档" "查文档" "调研一下"（无具体文件名）
+#   - 调研通用文档（hooks.md / building-plugins.md / SKILL.md / README.md 等）
+
+KW_RE="(读取|参考|查看|阅读|读一下|看一下)"
+# 业务大文件扩展名（代码/数据/Schema 类，不含通用 md/json）
+BIZ_EXT_RE="\.(prisma|tsx?|jsx?|py|sql|html|css|sh)"
+# 通用调研类文档白名单（命中则放行）
+RESEARCH_WHITELIST_RE="(hooks\.md|building-plugins\.md|README\.md|SKILL\.md|AGENTS\.md|SOUL\.md|USER\.md|IDENTITY\.md|TOOLS\.md|MEMORY\.md|CHANGELOG\.md|LICENSE)"
+
+# 判定 1：业务代码大文件（高危）—— 关键词 + 业务扩展名（30 字内）
+if echo "$CONTENT" | grep -E "$KW_RE.{0,30}[A-Za-z0-9_./-]+$BIZ_EXT_RE" -q; then
     score=$((score - 50))
-    issues+=("${RED}❌ -50 出现「读取/参考/查看 XX 大文件」指令，应主Agent 先消化后内联要点${NC}")
+    issues+=("${RED}❌ -50 出现「读取/参考 XX 业务代码大文件」指令，应主Agent 先消化后内联要点${NC}")
+fi
+
+# 判定 2：明确 .md/.json 大文件（但排除调研白名单）
+if echo "$CONTENT" | grep -oE "$KW_RE.{0,30}[A-Za-z0-9_./-]+\.(md|json)" \
+    | grep -vE "$RESEARCH_WHITELIST_RE" \
+    | grep -qE "$KW_RE"; then
+    score=$((score - 50))
+    issues+=("${RED}❌ -50 出现「读取/参考 XX 业务文档(md/json)」指令，应主Agent 先消化后内联要点${NC}")
 fi
 
 # ❌ 致命：没有任何绝对路径（要求至少 1 个 /xxx/ 路径）
