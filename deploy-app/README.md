@@ -562,3 +562,89 @@ bash scripts/doctor.sh --check-apps
 - **`dispatch-task`** → 派部署任务时必须带 env（proto/test/demo/prod）+ app + （prod 需 --version + --approved-by）
 - **`skill: quanyu-tech-deployer`** → 角色 skill，负责调用本 skill 的脚本
 
+---
+
+## 🆕 v2 增量能力汇总（2026-05-23）
+
+本节集中归档 2026-05-23 一天内补齐的能力，方便事后追溯。前面相关章节已分别展开，这里只做**索引 + 关键细节补全**。
+
+### A. 路径校验三层防护（v1.1）— 已在「路径校验机制」章节展开
+
+| 层 | 位置 | 强度 | 触发时机 |
+|----|------|------|---------|
+| Layer 1 | `deploy.sh` Step 2.5 | **硬中止**（dry-run 也强制） | 每次部署 |
+| Layer 2 | `deploy.sh` Step 2.5 紧跟 | warn 不中止 | 每次部署 |
+| Layer 3 | `doctor.sh --check-apps` | 矩阵扫描 + 退出码 1 | 手动 / 定时 |
+
+> Layer 1 修复了历史上最痛的坑：「SSH 握手 + git pull 之后才发现项目路径不存在」。
+
+### B. Static framework 部署修复（TASK-009）— 已在「Static framework 部署机制」章节展开
+
+核心改动：
+- 去掉 `serve -s`（避免 SPA fallback 把 `.css` 路由到 `index.html`）
+- 自动写 `serve.json`（`cleanUrls:false`，防止 `.html` 被 301 去后缀）
+- 设计原则：**多页面静态站不该用 SPA 模式**
+
+### C. 多版本支持（与 prototype-design 联动）
+
+- static 部署时 `deploy.sh` 直接整目录复制 `prototype/` → `current/`，`archive/<version>/` 一起带上
+- 无需额外配置，浏览器版本切换器（`generate-index.sh` 渲染）直接路径跳转
+
+### D. 配置分层（D1）
+
+- `environments.json`：团队共享基线，进 git
+- `environments.local.json`：本机覆盖，已加 `.gitignore`
+- 合并策略：**deep merge**（不是浅覆盖），保证嵌套字段也能精确覆盖
+- 优先级：`environments.local.json` > `environments.json`
+
+### E. prod 5 道门禁（D2）— 完整清单
+
+| # | 门禁 | 检查点 | 失败行为 |
+|---|------|--------|---------|
+| 1 | 必须传 `--version` | 参数非空 | 立即中止 |
+| 2 | 必须 `v*.*.*` 格式 | 正则 `^v[0-9]+\.[0-9]+\.[0-9]+$` | 立即中止 |
+| 3 | tag 必须真实存在 | `git rev-parse --verify <tag>` | 立即中止 |
+| 4 | 必须 `--approved-by` 白名单 | 仅 `longge` / `龙哥` / `dengyunlong` | 立即中止 |
+| 5 | 该版本必须 demo 部署过 SUCCESS | 扫描 `knowledge-repos/management/DEPLOY-LOG.md` | 立即中止 |
+
+5 道全过才进入实际部署。任一失败立即退出，**不会**消耗 SSH / git 资源。
+
+### F. 部署锁机制
+
+- **锁文件路径**：`/var/lib/openclaw/deploy-locks/<app>.lock`
+- **加锁方式**：`flock -n` 非阻塞抢锁，抢不到立即报「另一个部署正在进行」
+- **释放方式**：`trap '...' EXIT` 在脚本退出时（含异常 / Ctrl+C）自动释放
+- **僵尸锁检测**：`doctor.sh` 会扫描 `/var/lib/openclaw/deploy-locks/`，找出超过阈值仍存在的锁并提示手动清理
+- **粒度**：按 `<app>` 加锁，不锁环境 → 同一 app 不同 env 也互斥（防止 demo + prod 同时部署同一 app 的资源竞争）
+
+### G. 版本化部署（Phase 3）—— 关键实现细节
+
+```
+<deploy_root>/<app>/
+├── current -> releases/<sha-new>    # symlink 原子切换
+├── releases/
+│   ├── <sha-new>/                   # 本次部署产物（含 serve.json 等）
+│   ├── <sha-prev>/                  # 上一版本（rollback 目标）
+│   └── ...                          # 最多保留 releases_to_keep 个
+└── shared/
+    └── node_modules/                # 跨版本共享（symlink 进每个 release）
+```
+
+**关键工程细节：**
+
+1. **`node_modules` symlink 共享**：每个 `releases/<sha>/node_modules` 是指向 `shared/node_modules` 的软链，避免重复安装。
+2. **cwd 变化时必须 `pm2 delete + start`**：因为 `pm2 reload` 不会更新进程的 `cwd`，而 symlink 切换后 `current/` 指向新目录，必须 delete+start 才能让新进程从新 cwd 启动。这是踩过坑总结的硬规则。
+3. **端口变化检测**：deploy.sh 自动对比新旧 `port`，发现变化也走 delete+start。
+4. **releases_to_keep 清理**：部署成功后保留最近 N 个 release（环境配置项，默认 demo=3 / prod=5），更旧的目录被删除。
+5. **rollback**：`rollback.sh` 把 `current` symlink 指回 `releases/<sha-prev>/`，然后 delete+start（同样规则）。
+
+### H. 新增脚本一览（前文已分别介绍）
+
+| 脚本 | 引入时间 | 用途简述 |
+|------|---------|---------|
+| `deploy-prototype.sh` | v1.1 | 原型快道，跳过 git，无构建 |
+| `init-app.sh` | v1.1 | 单 app 智能添加 / 校准 |
+| `doctor.sh --check-apps` | v1.1 | app × env 路径矩阵扫描 |
+
+---
+
