@@ -2,29 +2,40 @@
 # sync-solution-map.sh - 同步方案设计与需求的映射关系
 #
 # 用法：
-#   bash sync-solution-map.sh <project>
+#   bash sync-solution-map.sh <project> [--dry-run]
 #   例：bash sync-solution-map.sh smart-college
+#   例：bash sync-solution-map.sh smart-college --dry-run
 #
 # 行为：
 #   1. 读取项目的需求文件
 #   2. 读取项目的方案设计文件
 #   3. 建立需求与模块的映射关系
 #   4. 建立需求与 API 的映射关系
-#   5. 输出映射关系到 solution-map.json 文件
+#   5. 建立 API 与代码的映射关系（如果有代码库）
+#   6. 输出映射关系到 solution-map.json 文件
 
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKSPACE_DIR="$(cd "$SKILL_DIR/../.." && pwd)"
 
-# 参数校验
+DRY_RUN=false
+
+# 参数处理
 if [ $# -lt 1 ]; then
-    echo "❌ 用法: bash sync-solution-map.sh <project>"
+    echo "❌ 用法: bash sync-solution-map.sh <project> [--dry-run]"
     echo "   例: bash sync-solution-map.sh smart-college"
+    echo "   例: bash sync-solution-map.sh smart-college --dry-run"
     exit 1
 fi
 
 PROJECT="$1"
+
+if [ "$#" -ge 2 ] && [ "$2" == "--dry-run" ]; then
+    DRY_RUN=true
+    echo "🔍 执行 dry run 模式，不会实际更新 solution-map.json"
+fi
+
 PROJECT_DIR="$WORKSPACE_DIR/docs-repos/$PROJECT"
 
 # 前置检查
@@ -45,16 +56,24 @@ if [ ! -d "$REQUIREMENTS_DIR" ]; then
     exit 1
 fi
 
+# 检查是否有代码库
+CODE_DIR="$WORKSPACE_DIR/projects/$PROJECT/src"
+HAS_CODE=false
+if [ -d "$CODE_DIR" ]; then
+    HAS_CODE=true
+fi
+
 # 创建解决方案映射
 SOLUTION_MAP="$(mktemp /tmp/solution-map.XXXXXXXXXX)"
 cat > "$SOLUTION_MAP" <<EOF
 {
   "project": "$PROJECT",
   "generated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-  "version": "v1.0",
+  "version": "v2.0",
   "modules": [],
   "req_module_map": {},
-  "req_api_map": {}
+  "req_api_map": {},
+  "api_code_map": {}
 }
 EOF
 
@@ -120,16 +139,64 @@ for MODULE in "$SOLUTION_DIR/modules"/*; do
     fi
 done
 
+# 建立 API 与代码的映射关系（如果有代码库）
+if $HAS_CODE; then
+    echo "建立 API 与代码的映射关系..."
+    
+    # 遍历所有 API 并查找对应的代码文件
+    while IFS= read -r MODULE; do
+        if [ -d "$MODULE" ] && [ "$(basename "$MODULE")" != "_example" ]; then
+            MODULE_NAME="$(basename "$MODULE")"
+            
+            if [ -f "$MODULE/apis.json" ]; then
+                while read -r api_name; do
+                    if [ -n "$api_name" ]; then
+                        # 尝试在代码库中找到与 API 相关的文件
+                        # 简单的匹配逻辑：查找包含 API 名称或相关关键词的文件
+                        CODE_FILES=$(grep -rl "$api_name" "$CODE_DIR" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" 2>/dev/null)
+                        
+                        if [ -n "$CODE_FILES" ]; then
+                            # 建立 api -> code 映射
+                            for CODE_FILE in $CODE_FILES; do
+                                # 去掉前缀路径，只保留相对于项目代码根目录的路径
+                                RELATIVE_PATH=$(echo "$CODE_FILE" | sed "s|$CODE_DIR/||")
+                                
+                                jq --arg api "$api_name" \
+                                   --arg file "$RELATIVE_PATH" \
+                                   '.api_code_map |= if has($api) then .[$api] += [$file] | map_values(unique) else . + { ($api): [$file] } end' \
+                                   "$SOLUTION_MAP" > "$SOLUTION_MAP.tmp" && mv "$SOLUTION_MAP.tmp" "$SOLUTION_MAP"
+                            done
+                        fi
+                    fi
+                done < <(jq -r '.apis[].name' "$MODULE/apis.json" 2>/dev/null)
+            fi
+        fi
+    done < <(ls -1 "$SOLUTION_DIR/modules")
+fi
+
 # 输出映射文件到项目目录
 OUTPUT_FILE="$SOLUTION_DIR/solution-map.json"
-cp "$SOLUTION_MAP" "$OUTPUT_FILE"
-echo "✅ 解决方案映射文件已生成: $OUTPUT_FILE"
+if $DRY_RUN; then
+    echo -e "\n🔍 Dry run 完成，以下是将生成的 solution-map.json 的内容预览:"
+    head -50 "$SOLUTION_MAP"
+    if [ $(wc -l < "$SOLUTION_MAP") -gt 50 ]; then
+        echo "..."
+        echo "文件过长，未显示全部内容"
+    fi
+    echo -e "\n✅ 预览完成，请使用不带 --dry-run 参数的命令实际生成文件"
+else
+    cp "$SOLUTION_MAP" "$OUTPUT_FILE"
+    echo "✅ 解决方案映射文件已生成: $OUTPUT_FILE"
 
-# 输出映射关系概览
-echo "--- 映射关系概览 ---"
-echo "模块数量: $(jq -r '.modules | length' "$OUTPUT_FILE")"
-echo "需求数量: $(jq -r '.req_module_map | length' "$OUTPUT_FILE")"
-echo "API 数量: $(jq -r '.modules | map(.apis | length) | add' "$OUTPUT_FILE")"
+    # 输出映射关系概览
+    echo "--- 映射关系概览 ---"
+    echo "模块数量: $(jq -r '.modules | length' "$OUTPUT_FILE")"
+    echo "需求数量: $(jq -r '.req_module_map | length' "$OUTPUT_FILE")"
+    echo "API 数量: $(jq -r '.modules | map(.apis | length) | add' "$OUTPUT_FILE")"
+    if $HAS_CODE; then
+        echo "API-代码映射数量: $(jq -r '.api_code_map | length' "$OUTPUT_FILE")"
+    fi
+fi
 
 # 清理临时文件
 rm "$SOLUTION_MAP"
