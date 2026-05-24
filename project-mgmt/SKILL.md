@@ -165,6 +165,7 @@ bash {{SKILL_DIR}}/scripts/dashboard.sh --markdown > /tmp/board.md
 bash {{SKILL_DIR}}/scripts/refresh-context.sh
 ```
 - 读所有 `profile.json` + 里程碑 + 决策，输出到 `knowledge-repos/management/PROJECTS-CONTEXT.md`。
+- **自动联动** `render-dashboard-html.sh`（场景 11）：每次跑 refresh-context 都会同时刷新 `dashboard.html`，无需手工。
 - AGENTS.md 已引用 PROJECTS-CONTEXT.md，主 Agent 启动即看到。
 - **何时跑**：`add-milestone` / `add-decision` / `add-incident` / `update-status` / `add-global-milestone` 已自动调一次，无需手动。批量场景请 `PROJECT_MGMT_AUTO_REFRESH=0` 跳过、结束后再手动刷一次。
 
@@ -204,6 +205,19 @@ bash {{SKILL_DIR}}/scripts/migrate-from-board.sh --apply   # 真写入
 ```
 - 按关键字把看板里的历史里程碑 / 状态 / 决策映射到对应项目档案。
 - 默认 dry-run；看完报告再 --apply。
+
+### 场景 11：HTML Dashboard（可视化仪表盘）
+
+```bash
+bash {{SKILL_DIR}}/scripts/render-dashboard-html.sh
+bash {{SKILL_DIR}}/scripts/render-dashboard-html.sh --output /tmp/my-dashboard.html
+```
+
+- 生成**单文件零依赖**的 `knowledge-repos/management/dashboard.html`，浏览器可离线打开。
+- 内容：顶栏渐变 header + 6 个全局 KPI 卡 + N 个项目卡片（阶段徽章 / 健康 / 风险 / ROI / next milestone / 团队 / mini timeline / docs·code 链接）+ 底部全局里程碑 tail 10。
+- **响应式**：手机 / 平板 / PC 均可阅读，内嵌单条下拉「按阶段筛选」（vanilla JS）。
+- **自动联动**：场景 8 `refresh-context.sh` 跳完会自动调一次，任何 `add-milestone` / `update-status` / `set-field` / `add-global-milestone` 都会同步刷新 dashboard。
+- 约束：输出 ≤ 100KB / 生成 ≤ 10s / 纯 bash + jq 拼接（不引外部 CSS·JS·字体）。
 
 ---
 

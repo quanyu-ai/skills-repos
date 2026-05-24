@@ -11,6 +11,7 @@ GEN_TIME=$(now_iso)
 
 echo "# 项目快查（自动生成 @ $GEN_TIME）"
 echo
+echo "> 🎨 HTML 可视化：\`knowledge-repos/management/dashboard.html\` （浏览器打开 file:///工作区路径）"
 echo "> 由 \`skills/project-mgmt/scripts/render-projects-context.sh\` 从 \`knowledge-repos/projects/*/profile.json\` 汇总生成。"
 echo "> **不要手编辑**。状态变更后跑 \`bash skills/project-mgmt/scripts/refresh-context.sh\` 重新生成。"
 echo
