@@ -68,6 +68,18 @@ for pd in "$PROJECTS_ROOT"/*/; do
     [ -f "$pf" ] || continue
     name=$(jq -r '.display_name // .id' "$pf")
     echo "### $pid — $name"
+    # ROI line
+    roi_calc=$(jq -r '.roi.last_calculated_at // ""' "$pf")
+    if [ -z "$roi_calc" ] || [ "$roi_calc" = "null" ]; then
+        echo "- 📊 ROI: 未同步（跑 sync-roi.sh 初始化）"
+    else
+        tc=$(jq -r '.roi.tasks_completed // 0' "$pf")
+        tt=$(jq -r '.roi.tasks_total // 0' "$pf")
+        sm=$(jq -r '.roi.saved_minutes // 0' "$pf")
+        sr=$(jq -r '.roi.save_ratio // 0' "$pf")
+        sr_pct=$(awk -v r="$sr" 'BEGIN{printf "%d", r*100}')
+        echo "- 📊 ROI: ${tc}/${tt} task, 节约 ${sm}min (${sr_pct}%)"
+    fi
     if [ -f "$mf" ]; then
         # 取 table 行（以 | 开头，且第二列不是「---」也不是「日期」）
         grep "^|" "$mf" \

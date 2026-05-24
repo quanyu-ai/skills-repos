@@ -48,11 +48,12 @@ bash {{SKILL_DIR}}/scripts/doctor.sh
 knowledge-repos/projects/
 ├── _registry.json                    # 全项目索引（自动维护，禁止手改）
 ├── <project-id>/
-│   ├── profile.json                  # 基础信息 + 状态 + 指标 + team_roles / risk_level / health
+│   ├── profile.json                  # 基础信息 + 状态 + metrics + roi + team_roles / risk_level / health
 │   ├── milestones.md                 # 里程碑日志（追加，含 STAGE-CHANGE / FIELD-CHANGE）
 │   ├── decisions.md                  # 决策记录（追加，可链接 ADR）
 │   ├── incidents.md                  # 事故 / 客户反馈（追加）
-│   └── metrics.json                  # 自动计算的指标快照
+│   ├── metrics.json                  # 自动计算的指标快照（状态视角）
+│   └── roi.json                      # ROI 快照（效率视角：tasks/估时/实时/节约/commits/deploys + matched_task_ids）
 └── ...
 ```
 
@@ -60,6 +61,8 @@ knowledge-repos/projects/
 > - `team_roles`: `[{"name":"呆呆","role":"PM"}, ...]`（区别于旧的 `ai_team` 字符串数组）
 > - `risk_level`: `low | medium | high | critical`（默认 `low`）
 > - `health`: `green | yellow | red`（默认 `green`）
+> - `metrics`: 状态快照（需求/原型/ADR/部署/commits 30d），由 `sync-metrics.sh` 写入
+> - `roi`: 效率统计（tasks_total / tasks_completed / estimated_minutes / actual_minutes / saved_minutes / save_ratio / commits_count / deploys_count / last_calculated_at），由 `sync-roi.sh` 写入；与 metrics 并存，metrics 看现状、roi 看效率
 > - 三者通过 `set-field.sh` 修改（强制 reason），不要手改 json。
 
 ---
@@ -173,6 +176,25 @@ bash {{SKILL_DIR}}/scripts/add-global-milestone.sh "<title>" --category skill|in
 - 写入 `knowledge-repos/management/GLOBAL-MILESTONES.md`，并自动 refresh PROJECTS-CONTEXT.md 末尾的「最近全局里程碑」节。
 - 非法 category 直接 exit 1。
 
+### 场景 10：项目 ROI 同步（sync-roi.sh）
+```bash
+bash {{SKILL_DIR}}/scripts/sync-roi.sh <project-id>
+bash {{SKILL_DIR}}/scripts/sync-roi.sh <project-id> --since 2026-05-01
+bash {{SKILL_DIR}}/scripts/sync-roi.sh --all
+bash {{SKILL_DIR}}/scripts/sync-roi.sh --all --since 2026-05-22
+```
+- 数据源：`TASK-TRACKER.json`（按 id/display_name/tags 关键词匹配 title/description/tags）+ `git log`（docs-repos/<id>/ + code-repos/<id>/，兼容 monorepo 子目录 / 子项目独立 git）+ `DEPLOY-LOG.md`（grep id 或 display_name，默认 30d 内）
+- 写两份：
+  - `profile.json.roi.*` + `roi.last_calculated_at`
+  - `roi.json`（独立快照：calculated_at / since / data_sources / 全部数值 / matched_task_ids 列表）
+- `--all` 末尾输出 markdown 表格汇总到 stdout（不写文件），可直接拼接到 SKILLS-ROI-REPORT。
+- 单项目 ≤ 5s，--all 8 项目 ≤ 30s。
+- 输出示例：
+```
+✓ smart-college          tasks=10/11  est=208min  act=121min  saved=87min (42%)  commits=32  deploys=36
+```
+- 找不到 docs-repos/code-repos 目录 → commits_count=0，不报错；DEPLOY-LOG.md 缺失 → deploys_count=0。
+
 ### 场景 9：从老 PROJECT-BOARD.md 迁移历史（⚠️ 一次性历史工具）
 
 > ⚠️ **一次性历史工具**，已冻结。不要扩充 decision/incident 关键字、不要把它当成日常入口。新事项请走 add-milestone / add-decision / add-incident / add-global-milestone。
@@ -193,6 +215,7 @@ bash {{SKILL_DIR}}/scripts/migrate-from-board.sh --apply   # 真写入
 | `prototype-design` | `sync-metrics` 读 `prototype/meta/requirements-map.json` 算原型数 |
 | `deploy-app` | `sync-metrics` 在 `DEPLOY-LOG.md` 里 grep 项目名数 30 天部署条数 |
 | `solution-design` | `add-decision --ref ADR-XXX` 链接到方案 ADR |
+| `SKILLS-ROI-REPORT` | `sync-roi.sh --all` 末尾的 markdown 表格可直接拼接到全局 ROI 报告里，作为「按项目维度」补充章节 |
 
 > `PROJECT-BOARD.md` 已归档（2026-05-24）→ 新的项目快查入口是 `knowledge-repos/management/PROJECTS-CONTEXT.md`（由 `refresh-context.sh` 生成）。
 

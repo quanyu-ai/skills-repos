@@ -32,6 +32,17 @@
     "commits_30d": 0,
     "last_synced_at": null
   },
+  "roi": {
+    "tasks_total": 0,
+    "tasks_completed": 0,
+    "estimated_minutes": 0,
+    "actual_minutes": 0,
+    "saved_minutes": 0,
+    "save_ratio": 0.0,
+    "commits_count": 0,
+    "deploys_count": 0,
+    "last_calculated_at": null
+  },
   "key_decisions": [],
   "next_milestone": "",
   "tags": [],
