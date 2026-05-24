@@ -35,5 +35,8 @@
   "key_decisions": [],
   "next_milestone": "",
   "tags": [],
-  "priority": "medium"
+  "priority": "medium",
+  "team_roles": [],
+  "risk_level": "low",
+  "health": "green"
 }

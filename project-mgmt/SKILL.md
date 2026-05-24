@@ -24,6 +24,7 @@ user-invocable: true
    - 里程碑（milestone）触发：阶段性交付 / 重要节点 / 客户验收 → 当场跑 `add-milestone.sh`
    - **不要事后用脚本从 README / PROJECT-BOARD / Git log 反向扫关键字**，关键字误判率高、上下文丢失、容易污染档案。`migrate-from-board.sh` 是历史一次性工具，已冻结，不再扩充关键字。
    - 跨项目 / 平台级 / 战略类用 `add-global-milestone.sh` 而不是塞到某个项目里。
+5. **stage 变更 / 字段变更必须带 `--reason "..."`（≥5 字符）**：`update-status.sh` 切阶段、`set-field.sh` 改字段都强制要求理由，缺失或敷衍（如 `--reason a`）直接拒绝。`--force` 跳转更需要解释，reason 仍然必填。
 
 ---
 
@@ -47,13 +48,19 @@ bash {{SKILL_DIR}}/scripts/doctor.sh
 knowledge-repos/projects/
 ├── _registry.json                    # 全项目索引（自动维护，禁止手改）
 ├── <project-id>/
-│   ├── profile.json                  # 基础信息 + 状态 + 指标
-│   ├── milestones.md                 # 里程碑日志（追加）
+│   ├── profile.json                  # 基础信息 + 状态 + 指标 + team_roles / risk_level / health
+│   ├── milestones.md                 # 里程碑日志（追加，含 STAGE-CHANGE / FIELD-CHANGE）
 │   ├── decisions.md                  # 决策记录（追加，可链接 ADR）
 │   ├── incidents.md                  # 事故 / 客户反馈（追加）
 │   └── metrics.json                  # 自动计算的指标快照
 └── ...
 ```
+
+> profile.json 关键字段：
+> - `team_roles`: `[{"name":"呆呆","role":"PM"}, ...]`（区别于旧的 `ai_team` 字符串数组）
+> - `risk_level`: `low | medium | high | critical`（默认 `low`）
+> - `health`: `green | yellow | red`（默认 `green`）
+> - 三者通过 `set-field.sh` 修改（强制 reason），不要手改 json。
 
 ---
 
@@ -92,11 +99,25 @@ bash {{SKILL_DIR}}/scripts/new-project.sh <id> \
 
 ### 场景 2：更新生命周期阶段
 ```bash
-bash {{SKILL_DIR}}/scripts/update-status.sh <id> <new-stage> [--reason "..."] [--force]
+bash {{SKILL_DIR}}/scripts/update-status.sh <id> <new-stage> --reason "..." [--force]
 ```
 - 跑状态机校验
+- **`--reason` 必填（≥5 字符）**，缺失或敷衍直接拒绝；`--force` 跳转更需要解释
 - 写 `profile.json` 的 `stage` + `updated_at`
 - 追加一条到 `milestones.md`：`[YYYY-MM-DD] STAGE-CHANGE: old → new (reason)`
+
+### 场景 2.5：调整字段（risk / health / priority / next_milestone / tech_stack）
+```bash
+bash {{SKILL_DIR}}/scripts/set-field.sh <id> <field> <value> --reason "..."
+# 例：
+bash {{SKILL_DIR}}/scripts/set-field.sh smart-college health yellow --reason "原型 sidebar 未修，待开发盖茨修复"
+bash {{SKILL_DIR}}/scripts/set-field.sh smart-college risk_level medium --reason "v4 116 条需求变化大"
+```
+- 合法 field 白名单：`risk_level | health | priority | next_milestone | tech_stack`
+- 白名单**不含** id / stage / started_at / updated_at / metrics（这些由专属脚本或系统自动维护）
+- 枚举字段会强校验取值（如 `health: green|yellow|red`）
+- `--reason` 必填（≥5 字符），自动追加一条 `FIELD-CHANGE` 到 `milestones.md`
+- 改 `priority` 时会同步更新 `_registry.json`
 
 ### 场景 3：追加里程碑
 ```bash

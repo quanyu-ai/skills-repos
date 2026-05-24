@@ -16,8 +16,26 @@ echo "> **不要手编辑**。状态变更后跑 \`bash skills/project-mgmt/scri
 echo
 echo "## 项目总表"
 echo
-echo "| ID | 名称 | 阶段 | 优先级 | 客户 | 技术栈 | 主要部署 |"
-echo "|----|------|------|--------|------|--------|----------|"
+echo "| ID | 名称 | 阶段 | 优先级 | 健康 | 风险 | 客户 | 技术栈 | 主要部署 |"
+echo "|----|------|------|--------|------|------|------|--------|----------|"
+
+health_icon() {
+    case "$1" in
+        green) echo "🟢" ;;
+        yellow) echo "🟡" ;;
+        red) echo "🔴" ;;
+        *) echo "—" ;;
+    esac
+}
+risk_icon() {
+    case "$1" in
+        low) echo "🟢" ;;
+        medium) echo "🟡" ;;
+        high) echo "🟠" ;;
+        critical) echo "🔴" ;;
+        *) echo "—" ;;
+    esac
+}
 
 # 总表
 shopt -s nullglob
@@ -29,11 +47,13 @@ for pd in "$PROJECTS_ROOT"/*/; do
     name=$(jq -r '.display_name // "—"' "$pf")
     stage=$(jq -r '.stage // "—"' "$pf")
     prio=$(jq -r '.priority // "—"' "$pf")
+    health=$(jq -r '.health // "green"' "$pf")
+    risk=$(jq -r '.risk_level // "low"' "$pf")
     client=$(jq -r '.client // "—"' "$pf")
     stack=$(jq -r '.tech_stack // "—"' "$pf")
     # 取第一个非 null 的部署
     dep=$(jq -r '[.deployment // {} | to_entries[] | select(.value != null) | "\(.key):\(.value)"][0] // "—"' "$pf")
-    printf "| %s | %s | %s | %s | %s | %s | %s |\n" "$pid" "$name" "$stage" "$prio" "$client" "$stack" "$dep"
+    printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n" "$pid" "$name" "$stage" "$prio" "$(health_icon "$health")" "$(risk_icon "$risk")" "$client" "$stack" "$dep"
 done
 
 echo

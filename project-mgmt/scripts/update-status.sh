@@ -28,6 +28,13 @@ if [ "$OLD" = "$NEW" ]; then
     exit 0
 fi
 
+# stage 变更必须带 reason，且 ≥5 字符
+[ -z "$REASON" ] && { echo "✗ stage 变更必须 --reason "..."（不能为空）" >&2; exit 1; }
+if [ ${#REASON} -lt 5 ]; then
+    echo "✗ --reason 太短（≥5字符），请写清楚切阶段原因" >&2
+    exit 1
+fi
+
 FORCED=""
 if ! is_legal_transition "$OLD" "$NEW"; then
     if [ $FORCE -eq 1 ]; then
@@ -47,8 +54,7 @@ PRIO=$(jq -r '.priority' "$PROFILE")
 
 jq_inplace "$PROFILE" --arg s "$NEW" --arg t "$NOW" '.stage=$s | .updated_at=$t'
 
-MSG="STAGE-CHANGE: $OLD → $NEW$FORCED"
-[ -n "$REASON" ] && MSG="$MSG ($REASON)"
+MSG="STAGE-CHANGE: $OLD → $NEW$FORCED ($REASON)"
 echo "| $TODAY | STAGE | $MSG |" >> "$PROJECTS_ROOT/$ID/milestones.md"
 
 registry_upsert "$ID" "$NEW" "$DISPLAY" "$PRIO"
