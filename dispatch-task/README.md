@@ -226,7 +226,7 @@ bash scripts/pre-dispatch.sh <task-file>
 ## 任务：在 set-status.sh 增加 --merged-to 参数
 工作目录：/var/lib/openclaw/.openclaw/workspace/skills/requirement/scripts/
 约束：deprecated 时必须二选一（--merged-to 或 --reason），否则 exit 2
-完成后：git commit && push skills-repos；更新 TASK-TRACKER.json TASK-XXX → completed
+完成后：git commit && push；更新 TASK-TRACKER.json TASK-XXX → completed
 预估：3 分钟
 ```
 
@@ -254,7 +254,7 @@ bash scripts/pre-dispatch.sh <task-file>
 
 - 双脚本一次性派
 - 每个脚本规定了入参/退出码/输出位置
-- 明确"放进 skills-repos 不动 docs-repos"边界
+- 明确"放进 skills/ 不动 docs-repos"边界
 
 **评分：** 100 分 → ✅ 高效产出。
 

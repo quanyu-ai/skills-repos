@@ -93,10 +93,19 @@ if echo "$CONTENT" | grep -E "(生成|创建|新建|写).*\.(html|md|json|tsx|ts
     fi
 fi
 
-# ❌ 致命：涉及修改 skills/ 目录下的脚本文件（违反 AGENTS.md 第1条铁律）
+# ⚠️ 警告：涉及修改 skills/ 目录下的脚本文件（违反 AGENTS.md 第1条铁律）
 if echo "$CONTENT" | grep -E "skills/[a-z0-9-]+/scripts/.*\.(sh|ts|js|tsx)" -q; then
-    score=$((score - 50))
-    issues+=('${RED}❌ -50 涉及修改技能脚本文件，必须使用子Agent派发，违反 AGENTS.md 第1条铁律${NC}')
+    # 检查任务描述中是否明确提到是子Agent来执行
+    if echo "$CONTENT" | grep -E "子Agent|sessions_spawn" -q;
+    then
+        # 如果明确是子Agent来执行，只给警告
+        score=$((score - 10))
+        issues+=('${YELLOW}⚠️ -10 涉及修改技能脚本文件，要求子Agent严格执行${NC}')
+    else
+        # 如果没有明确提到子Agent，仍然是致命错误
+        score=$((score - 50))
+        issues+=('${RED}❌ -50 涉及修改技能脚本文件，必须使用子Agent派发，违反 AGENTS.md 第1条铁律${NC}')
+    fi
 fi
 
 # ❌ 重要：涉及覆盖/重写文件但未提备份/确认

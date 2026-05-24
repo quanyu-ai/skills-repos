@@ -56,7 +56,7 @@ fi
 
 if [ ! -d "$TEMPLATE_SRC" ]; then
     echo "❌ 模板目录缺失: $TEMPLATE_SRC"
-    echo "   skill 安装可能损坏，请重新拉取 skills-repos"
+    echo "   skill 安装可能损坏，请检查 skills/ 目录"
     exit 1
 fi
 
