@@ -85,11 +85,25 @@ if echo "$CONTENT" | grep -E "(预估|耗时|时间).*([6-9]|[0-9]{2,}).*(分钟
     issues+=("${YELLOW}⚠️  -10 估时 > 5 分钟，建议拆分${NC}")
 fi
 
-# ⚠️ 提到生成大文件（HTML/MD/JSON）但没提 write-large-file.sh
+# ❌ 致命：提到生成大文件（HTML/MD/JSON）但没提 write-large-file.sh
 if echo "$CONTENT" | grep -E "(生成|创建|新建|写).*\.(html|md|json|tsx|ts)" -q; then
     if ! echo "$CONTENT" | grep -E "(write-large-file|heredoc|cat <<)" -q; then
-        score=$((score - 15))
-        issues+=("${YELLOW}⚠️  -15 涉及生成文件却未提 write-large-file.sh / heredoc，可能触发 OpenClaw write 10KB 截断${NC}")
+        score=$((score - 20))
+        issues+=("${RED}❌ -20 涉及生成文件却未提 write-large-file.sh / heredoc，会触发 OpenClaw write 10KB 截断${NC}")
+    fi
+fi
+
+# ❌ 致命：涉及修改 skills/ 目录下的脚本文件（违反 AGENTS.md 第1条铁律）
+if echo "$CONTENT" | grep -E "skills/[a-z0-9-]+/scripts/.*\.(sh|ts|js|tsx)" -q; then
+    score=$((score - 50))
+    issues+=('${RED}❌ -50 涉及修改技能脚本文件，必须使用子Agent派发，违反 AGENTS.md 第1条铁律${NC}')
+fi
+
+# ❌ 重要：涉及覆盖/重写文件但未提备份/确认
+if echo "$CONTENT" | grep -E "(覆盖|重写|替换|覆盖.*文件|覆盖.*配置)" -q; then
+    if ! echo "$CONTENT" | grep -E "(备份|确认|允许覆盖|已获授权|经.*批准)" -q; then
+        score=$((score - 30))
+        issues+=('${RED}❌ -30 涉及覆盖文件但未提备份/确认/授权${NC}')
     fi
 fi
 
