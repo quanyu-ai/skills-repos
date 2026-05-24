@@ -47,5 +47,24 @@ INIT_SH="$SKILL_DIR/scripts/init-solution.sh"
 command -v sed >/dev/null 2>&1 || fail "sed not installed"
 command -v cp  >/dev/null 2>&1 || fail "cp not installed"
 
+# 检查项 6: 检查智院项目的方案设计（如果存在）
+if [ -d "/var/lib/openclaw/.openclaw/workspace/docs-repos/smart-college" ]; then
+    SOLUTION_DIR="/var/lib/openclaw/.openclaw/workspace/docs-repos/smart-college/solution"
+    if [ -d "$SOLUTION_DIR" ]; then
+        # 检查模块 apis.json
+        MODULES_DIR="$SOLUTION_DIR/modules"
+        if [ -d "$MODULES_DIR" ]; then
+            for MODULE in "$MODULES_DIR"/*; do
+                if [ -d "$MODULE" ] && [ "$(basename "$MODULE")" != "_example" ]; then
+                    APIS_JSON="$MODULE/apis.json"
+                    if [ ! -f "$APIS_JSON" ]; then
+                        echo "⚠️  [WARNING] 模块 $(basename "$MODULE") 缺少 apis.json 文件"
+                    fi
+                fi
+            done
+        fi
+    fi
+fi
+
 echo "READY"
 exit 0
