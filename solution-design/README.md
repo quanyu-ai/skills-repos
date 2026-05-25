@@ -53,7 +53,7 @@
 
 ## Phase 演进路线
 
-### Phase 1（当前版本）：轻量骨架
+### Phase 1：轻量骨架
 
 只做三件事：
 
@@ -61,23 +61,71 @@
 2. `init-solution.sh`：一键初始化骨架
 3. `doctor.sh`：自检模板完整性
 
-**不做**：自动生成业务内容、不做映射、不做差异告警。
+### Phase 2（当前）：自动化闭环
 
-### Phase 2：generate-modules.sh
+在不替代人判断的前提下，建立「需求 ↔ 模块 ↔ API ↔ 代码」的索引和漂移监测：
 
-从 `requirement` skill 的 REQ 列表，自动推断模块拆分，生成 `modules/<name>/design.md` 草稿。
-龙哥审一遍，去伪存真。
+| 脚本 | 作用 | 何时跑 |
+| --- | --- | --- |
+| `generate-modules.sh` | 从 REQ 关键词/角色拆模块草稿 | 需求初稿确认后一次性，或新增大批需求时 |
+| `sync-solution-map.sh` | 生成 `solution-map.json`，建立反向映射 | 每次改 modules/ 后 |
+| `diff-against-reqs.sh` | 检测方案漂移（缺失/孤儿/空模块/无效引用） | 需求变更后、每次提交前 |
+| `validate-solution.sh` | 分级完整性校验（P0/P1/P2） | 提交、部署、阶段评审前 |
 
-### Phase 3：sync-solution-map.sh
+核心数据结构（`solution-map.json`）：
 
-建立 REQ ↔ 模块 ↔ API ↔ 代码文件 4 层映射表。
-任意一端改动，可以查出影响范围。
+```json
+{
+  "stats": { "modules": 11, "reqs": 95, "apis": 76, "code_files": 0 },
+  "modules": [ {"name":"academic-management", "reqs":[...], "apis":[...]} ],
+  "req_module_map": { "REQ-20260522-014": ["academic-management"] },
+  "req_api_map":    { "REQ-20260522-030": [{"module":"academic-management","method":"GET","path":"/grades","api_id":"AM-001"}] },
+  "api_code_map":   { "academic-management:GET /grades": ["app/api/grades/route.ts"] }
+}
+```
 
-### Phase 4：diff-against-reqs.sh
+### Phase 3：测试 / 原型反向索引
 
-当 REQ 状态变化（新增/废弃/修改），扫描 solution/ 找出受影响的模块和 ADR，输出"方案漂移告警"。
+原型页面 ↔ 模块；测试用例 ↔ API。让"改动影响范围"四层都可查。
 
-## 与其他 skill 的边界
+### Phase 4：跨项目方案模板复用
+
+沉淀标准化的鉴权 / 通知 / 审批模块设计，作为子模板。
+
+## 概念澄清：方案设计 vs 设计技能
+
+### 方案设计（Solution Design）
+方案设计是产品开发初期的**技术架构和实现方案规划**阶段，专注于：
+- 技术选型决策（ADR）
+- 系统架构设计（分层、部署拓扑、数据流）
+- 模块拆分和接口定义
+- 数据库设计（ER 图、表结构、索引策略）
+- API 设计（RESTful / tRPC 路由表）
+- 技术风险评估和解决方案
+
+### solution-design 技能的功能定位
+
+**solution-design 是方案设计阶段的标准化工作流**，帮助团队在编码之前建立清晰的技术蓝图。它不负责界面设计（那是 prototype-design 的事），也不负责需求管理（那是 requirement skill 的事），而是专注于**「怎么实现」**的技术决策。
+
+### solution-design 的主要工作
+
+| 工作领域 | 具体内容 | 产出物 | 对应目录 |
+|---------|---------|--------|----------|
+| **技术架构** | 分层架构、部署拓扑、数据流、技术栈选型 | 总架构 overview.md、模块全景图、数据流图、部署架构图 | `architecture/` |
+| **模块拆分** | 从需求推导模块、定义模块边界、模块间依赖关系 | 模块设计文档、REQ 映射、API 清单 | `modules/<name>/` |
+| **API 设计** | 路由表、请求/响应模型、错误码、鉴权策略 | API 契约文档、模块 API 清单 | `api/api-design.md` + `modules/<name>/apis.json` |
+| **数据库设计** | ER 图、表结构、索引策略、JSONB 字段规划 | 表结构文档、ER 图、索引策略 | `database/` |
+| **决策记录** | 技术选型理由、备选方案对比、实施后果 | ADR 文档 | `adr/` |
+
+### 设计技能的层次
+设计技能是一个更宽泛的概念，在 OpenClaw 技能体系中分为两个主要分支：
+
+| 技能名称 | 功能定位 | 主要工作 |
+|---------|----------|----------|
+| **solution-design** | 方案设计阶段 | 技术架构、模块拆分、API 设计、数据库设计 |
+| **prototype-design** | 原型设计阶段 | 界面设计、交互设计、可交互原型生成 |
+
+### 与其他 skill 的边界
 
 | skill | 责任 | 与 solution-design 的关系 |
 | --- | --- | --- |

@@ -1,20 +1,42 @@
 {
   "module": "_example",
   "base_path": "/api/v1/example",
+  "description": "示例模块的 API 清单。模块创建后请替换 description 并补全 apis。",
   "apis": [
     {
+      "id": "EX-001",
       "method": "GET",
       "path": "/items",
       "summary": "列表查询",
       "auth": "required",
-      "req_ids": ["REQ-YYYYMMDD-NNN"]
+      "roles": ["user"],
+      "req_ids": ["REQ-YYYYMMDD-NNN"],
+      "params": {
+        "query": [
+          { "name": "page", "type": "int", "required": false, "default": 1 },
+          { "name": "page_size", "type": "int", "required": false, "default": 20 }
+        ]
+      },
+      "response": {
+        "200": { "type": "object", "schema": { "total": "int", "data": "Item[]" } }
+      }
     },
     {
+      "id": "EX-002",
       "method": "POST",
       "path": "/items",
       "summary": "创建条目",
       "auth": "required",
-      "req_ids": []
+      "roles": ["user"],
+      "req_ids": [],
+      "body": {
+        "name": "string (required)",
+        "description": "string (optional)"
+      },
+      "response": {
+        "200": { "type": "object", "schema": { "id": "int" } },
+        "400": "参数错误"
+      }
     }
   ]
 }

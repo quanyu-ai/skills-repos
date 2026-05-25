@@ -1,12 +1,16 @@
 {
   "module": "_example",
+  "module_name": "示例模块",
+  "type": "business",
+  "priority": "P1",
   "reqs": [
     {
       "id": "REQ-YYYYMMDD-NNN",
       "title": "示例需求标题",
       "priority": "P1",
-      "status": "draft"
+      "status": "draft",
+      "role": ""
     }
   ],
-  "notes": "把本模块支撑的所有需求列在这里。Phase 3 将基于此生成全链路映射表。"
+  "notes": "把本模块支撑的所有需求列在 reqs 数组里。字段含义：id 必填且符合 REQ-YYYYMMDD-NNN 格式；title/priority/status/role 选填。sync-solution-map.sh 会读取 id 字段建立反向映射。"
 }
