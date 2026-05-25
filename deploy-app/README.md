@@ -39,6 +39,7 @@ deploy-app 是 OpenClaw 的标准化部署 Skill,旨在将部署过程变成一�
 - ✅ **环境差异化配置**:apps.json 支持 env_config,按环境覆盖框架/命令等配置
 - ✅ **端口变化检测**:自动检测端口变化,执行 delete+start 而非 reload
 - ✅ **原型部署**:支持 static 框架快速部署,无需构建
+- ✅ **原型取消部署**:undeploy-prototype.sh 脚本,只停用访问链接,保留原型文件
 - ✅ **部署锁**:flock 防止并发部署同一应用
 - ✅ **配置分层**:environments.json + environments.local.json(deep merge)
 - ✅ **自动化日志**:每次部署自动写入 DEPLOY-LOG.md
@@ -105,7 +106,8 @@ deploy-app 是 OpenClaw 的标准化部署 Skill,旨在将部署过程变成一�
 │   ├── rollback.sh           # 回滚脚本(295行)
 │   ├── verify.sh             # 健康检查(88行)
 │   ├── doctor.sh             # 自检脚本(6项检查)
-│   └── init.sh               # 交互式初始化向导
+│   ├── init.sh               # 交互式初始化向导
+│   └── undeploy-prototype.sh # 原型取消部署脚本(只停用访问链接,保留原型文件)
 └── templates/                # 预留目录
 ```
 
@@ -159,6 +161,21 @@ bash scripts/init.sh
 ```
 
 交互式向导,帮助生成 apps.json 和 environments.json 草稿。
+
+### undeploy-prototype.sh(原型取消部署)
+
+```bash
+bash scripts/undeploy-prototype.sh <app> [--dry-run]
+```
+
+| 参数 | 说明 |
+|------|------|
+| `<app>` | 应用 key(apps.json 中定义) |
+| `--dry-run` | 只打印操作,不实际执行 |
+
+**特点**:只停用访问链接,保留原有的原型文件。
+
+**注意**:该脚本主要用于取消原型部署,它会停止 PM2 进程,但保留原型文件在原位置。
 
 ## 配置说明
 
@@ -312,7 +329,14 @@ bash scripts/deploy.sh proto smart-college-prototype
 open http://localhost:3021
 ```
 
-## 与其他系统的关系
+## 🚨 红线规则（必须遵守）
+
+1. **禁止手撕部署**：任何 pm2/scp/ssh/rsync 命令必须通过脚本执行
+2. **禁止跳过自检**：任何部署前必须先运行 `doctor.sh`
+3. **禁止硬编码**：所有配置必须来自 apps.json 和 environments.json
+4. **禁止 root 部署**：必须使用 openclaw 用户 + 限定密钥
+5. **本机也走 SSH**：demo 环境即使是 localhost 也要走 SSH 流程
+6. **有公网 IP 必须用公网 IP 访问**：禁止使用 127.0.0.1 或 localhost（阿里云：8.138.118.28，腾讯云：43.139.53.121）
 
 | 系统 | 关系 |
 |------|------|

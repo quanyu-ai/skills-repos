@@ -116,6 +116,7 @@ bash {{SKILL_DIR}}/scripts/rollback.sh <env> <app> [target_version]
 3. ⛔ **禁止把 `apps.json` / `environments.json` 提交进 git**(已在 `config/.gitignore` 拦截)
 4. ⛔ **禁止以 `root` 身份直接部署**(必须用 `deploy` 用户 + 限定密钥)
 5. ⛔ **本机也走 SSH**(`demo` 环境 host=localhost,但仍用 `~/.ssh/deploy_local` 走 ssh)
+6. ⛔ **有公网 IP 的服务器必须用公网 IP 访问**(如 8.138.118.28 / 43.139.53.121)，禁止用 127.0.0.1 或 localhost
 
 ---
 
