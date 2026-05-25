@@ -43,7 +43,7 @@ metadata: {"openclaw":{"emoji":"📋"}}
 - ✅ 修改后的操作（build / 部署 / 测试 / commit / push）
 - ✅ 环境信息（数据库连接、端口、路径、容器名）
 - ✅ 单任务执行预估 ≤ 3 分钟；超时 ≤ 600s
-- ✅ 若涉及生成 >10KB 文件，必须明示：使用 `skills/prototype-design/scripts/write-large-file.sh` 或 exec heredoc，**禁用 OpenClaw write 工具**（踩坑见 MEMORY.md 2026-05-23）
+- ✅ 若涉及生成 >10KB 文件，必须明示：使用 `scripts/write-large-file.sh` 或 exec heredoc，**禁用 OpenClaw write 工具**（踩坑见 MEMORY.md 2026-05-23）
 
 ## 🚦 派发流程（标准 5 步）
 

@@ -56,7 +56,7 @@ dispatch-task/
 - DB / 端口 / 容器名等
 
 ### 重要约束
-- 大文件用 `skills/prototype-design/scripts/write-large-file.sh`
+- 大文件用 `scripts/write-large-file.sh`
 - 禁用 OpenClaw write 工具写 >10KB 文件
 - set -euo pipefail
 ```

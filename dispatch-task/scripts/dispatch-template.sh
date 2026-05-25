@@ -44,7 +44,7 @@ case "$TYPE" in
 - 容器：<container>
 
 ### 重要约束
-- 大文件 (>10KB) 用 `skills/prototype-design/scripts/write-large-file.sh`
+- 大文件 (>10KB) 用 `scripts/write-large-file.sh`
 - 禁用 OpenClaw write 工具写 >10KB 文件（踩坑见 MEMORY.md 2026-05-23）
 - 所有 shell 脚本 `set -euo pipefail`
 
@@ -118,7 +118,7 @@ EOF
 
 ### 工具
 - 必须用 `skills/prototype-design/scripts/generate.sh`
-- 写 HTML 必须用 `skills/prototype-design/scripts/write-large-file.sh`
+- 写 HTML 必须用 `scripts/write-large-file.sh`
 - 禁用 OpenClaw write 工具
 
 ### 完成后

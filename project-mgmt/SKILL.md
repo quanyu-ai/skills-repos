@@ -237,5 +237,5 @@ bash {{SKILL_DIR}}/scripts/render-dashboard-html.sh --output /tmp/my-dashboard.h
 
 ## 🧪 自检与排错
 - 出问题先跑 `doctor.sh`，会同时校验：每个项目档案文件齐全 / `_registry.json` 一致 / `stage` 合法
-- 大文件写入参考 `skills/prototype-design/scripts/write-large-file.sh`
+- 大文件写入参考 `scripts/write-large-file.sh`
 - 编号 / 日期统一用 `Asia/Shanghai` 时区

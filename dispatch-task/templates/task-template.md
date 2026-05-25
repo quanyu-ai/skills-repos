@@ -35,7 +35,7 @@
 - 容器/服务：<name>
 
 ### 重要约束
-- ✅ 大文件 (>10KB) 用 `skills/prototype-design/scripts/write-large-file.sh` 或 exec heredoc
+- ✅ 大文件 (>10KB) 用 `scripts/write-large-file.sh` 或 exec heredoc
 - ✅ 所有 shell 脚本 `set -euo pipefail`
 - ❌ 禁用 OpenClaw `write` 工具写 >10KB 文件（会被静默截断，踩坑见 MEMORY.md 2026-05-23）
 - ❌ 不 `sessions_yield`（会挂起子 Agent）
