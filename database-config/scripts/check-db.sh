@@ -57,8 +57,17 @@ check_health() {
 # 模式 B: 三态探测（programmatic, 给 deploy.sh 调）
 # ----------------------------------------------------------------
 # 工具：从 apps.json 读取 app 在 env 下的 database 配置
+# G 阶段：远端 DB 支持。如果 override 了 host/port（开 SSH 隧道后），返回 override 值
+PROBE_HOST_OVERRIDE=""
+PROBE_PORT_OVERRIDE=""
 _probe_read_db() {
     local app="$1" env="$2" field="$3"
+    if [ -n "$PROBE_HOST_OVERRIDE" ] && [ "$field" = "host" ]; then
+        echo "$PROBE_HOST_OVERRIDE"; return
+    fi
+    if [ -n "$PROBE_PORT_OVERRIDE" ] && [ "$field" = "port" ]; then
+        echo "$PROBE_PORT_OVERRIDE"; return
+    fi
     jq -r --arg a "$app" --arg e "$env" --arg f "$field" \
         ".apps[\$a].env_config[\$e].database[\$f] // empty" \
         "$CONFIG_DIR/apps.json"
@@ -204,12 +213,14 @@ probe 模式 stdout 返回:
 EOF
 }
 
-ENV=""; APP=""; MODE="health"
+ENV=""; APP=""; MODE="health"; VIA_SSH=""; SSH_KEY_VIA=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help) print_help; exit 0 ;;
         --app)     APP="$2"; shift 2 ;;
         --mode)    MODE="$2"; shift 2 ;;
+        --via-ssh) VIA_SSH="$2"; shift 2 ;;
+        --ssh-key) SSH_KEY_VIA="$2"; shift 2 ;;
         proto|test|demo|prod) ENV="$1"; shift ;;
         *) echo "无效参数: $1" >&2; print_help; exit 1 ;;
     esac
@@ -227,6 +238,29 @@ case "$MODE" in
         ;;
     probe)
         [ -z "$APP" ] && { echo "probe 模式需要 --app <key>" >&2; exit 1; }
+        # G 阶段：如 --via-ssh 传入，开 SSH 隧道到远端 DB
+        if [ -n "$VIA_SSH" ]; then
+            REAL_DB_HOST=$(_probe_read_db "$APP" "$ENV" "host")
+            REAL_DB_PORT=$(_probe_read_db "$APP" "$ENV" "port")
+            [ -n "$REAL_DB_HOST" ] || { echo "probe: 读不到 db host" >&2; exit 1; }
+            [ -n "$REAL_DB_PORT" ] || REAL_DB_PORT=5432
+            # 从远端视角，db 一般在 127.0.0.1（同机 PG）。如果 host 是远端公网 IP，同机访问也能通
+            # 随机本地端口
+            LOCAL_PORT=$(comm -23 <(seq 15432 15532 | sort) <(ss -tlnH | awk '{print $4}' | awk -F: '{print $NF}' | sort -u) | shuf -n 1)
+            [ -n "$LOCAL_PORT" ] || LOCAL_PORT=15432
+            SSH_OPTS_TUN=(-o StrictHostKeyChecking=no -o BatchMode=yes)
+            [ -n "$SSH_KEY_VIA" ] && SSH_OPTS_TUN+=(-i "${SSH_KEY_VIA/#\~/$HOME}")
+            # 开后台隧道
+            ssh "${SSH_OPTS_TUN[@]}" -fN -L "${LOCAL_PORT}:127.0.0.1:${REAL_DB_PORT}" "$VIA_SSH" 2>/dev/null \
+                || { echo "probe: SSH 隧道开启失败 ($VIA_SSH)" >&2; exit 1; }
+            # 记住 PID 以便退出时关闭
+            TUN_PID=$(pgrep -fnx "ssh -i .* -fN -L ${LOCAL_PORT}:127.0.0.1:${REAL_DB_PORT} $VIA_SSH" 2>/dev/null || pgrep -f "${LOCAL_PORT}:127.0.0.1:${REAL_DB_PORT}" 2>/dev/null | head -1)
+            trap '[ -n "${TUN_PID:-}" ] && kill "$TUN_PID" 2>/dev/null || true' EXIT
+            sleep 1
+            PROBE_HOST_OVERRIDE="127.0.0.1"
+            PROBE_PORT_OVERRIDE="$LOCAL_PORT"
+            echo "[probe] SSH 隧道已开：local:$LOCAL_PORT -> $VIA_SSH:127.0.0.1:$REAL_DB_PORT (pid=$TUN_PID)" >&2
+        fi
         probe_state "$ENV" "$APP"
         exit 0
         ;;

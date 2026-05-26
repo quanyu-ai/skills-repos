@@ -11,7 +11,6 @@ SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG_DIR="$SKILL_DIR/config"
 APPS_JSON="$CONFIG_DIR/apps.json"
 ENVS_JSON="$CONFIG_DIR/environments.json"
-
 fail() {
     echo "NEED_SETUP: $1"
     exit 1
@@ -102,16 +101,37 @@ jq empty "$CONFIG_DIR/apps.json" 2>/dev/null || fail "apps.json invalid JSON"
 # 检查项 4：environments.json JSON 格式有效
 jq empty "$CONFIG_DIR/environments.json" 2>/dev/null || fail "environments.json invalid JSON"
 
-# 检查项 5：本机 SSH 密钥
-[ -f "$HOME/.ssh/deploy_local" ] || fail "SSH deploy_local key missing - run setup.md step 5"
+# 检查项 5：本机 SSH 密钥（F-5：按环境条件检查，不强要求 deploy_local）
+# 仅在 environments.json 里存在 ssh_key 为 deploy_local 的环境才检查
+DEPLOY_LOCAL_NEEDED="false"
+DEPLOY_PROD_NEEDED="false"
+if jq -e '.environments | to_entries[] | select(.value.ssh_key | strings | contains("deploy_local"))' "$CONFIG_DIR/environments.json" >/dev/null 2>&1; then
+    DEPLOY_LOCAL_NEEDED="true"
+fi
+if jq -e '.environments | to_entries[] | select(.value.ssh_key | strings | contains("deploy_prod"))' "$CONFIG_DIR/environments.json" >/dev/null 2>&1; then
+    DEPLOY_PROD_NEEDED="true"
+fi
 
-# 检查项 6：本机 SSH 联通
-ssh -i "$HOME/.ssh/deploy_local" \
-    -o BatchMode=yes \
-    -o ConnectTimeout=5 \
-    -o StrictHostKeyChecking=no \
-    deploy@localhost true 2>/dev/null \
-    || fail "SSH localhost not configured - run setup.md step 5"
+if [ "$DEPLOY_LOCAL_NEEDED" = "true" ]; then
+    [ -f "$HOME/.ssh/deploy_local" ] || fail "SSH deploy_local key missing - run setup.md step 5"
+fi
+if [ "$DEPLOY_PROD_NEEDED" = "true" ]; then
+    if [ ! -f "$HOME/.ssh/deploy_prod" ]; then
+        # 有 prod 环境但密钥不在 -> WARN 不 fail（远端部署由 init-remote-target.sh 引导）
+        echo "WARN: SSH deploy_prod key missing - 远端部署需要，请生成后贴到腾讯云 deploy authorized_keys"
+        echo "      或者跑: bash $SKILL_DIR/scripts/init-remote-target.sh root@<远端> --ssh-key ~/.ssh/<root密钥>"
+    fi
+fi
+
+# 检查项 6：本机 SSH 联通（仅当 deploy_local 需要时）
+if [ "$DEPLOY_LOCAL_NEEDED" = "true" ] && [ -f "$HOME/.ssh/deploy_local" ]; then
+    ssh -i "$HOME/.ssh/deploy_local" \
+        -o BatchMode=yes \
+        -o ConnectTimeout=5 \
+        -o StrictHostKeyChecking=no \
+        deploy@localhost true 2>/dev/null \
+        || fail "SSH localhost not configured - run setup.md step 5"
+fi
 
 # 检查项 7/8：OpenClaw skill env 注入（不阻塞，仅 WARN）
 [ -n "$ALIYUN_HOST" ]  || echo "WARN: ALIYUN_HOST env not injected (set via skills.entries.deploy-app.env in ~/.openclaw/openclaw.json)"
@@ -138,6 +158,69 @@ if [ -d "$LOCK_DIR" ]; then
         fi
     done
     [ -z "$ZOMBIE_FOUND" ] || echo "WARN: 发现僵尸部署锁 (>1小时)，建议手动清理: rm /var/lib/openclaw/deploy-locks/<app>.lock"
+fi
+
+# ============================================================
+# G 阶段：跨机部署预检（F-1/2/3/4/9 本机可推断部分）
+# ============================================================
+
+# F-1: deploy-locks 目录可写（deploy 用户要能创建 lock）
+LOCK_DIR="/var/lib/openclaw/deploy-locks"
+if [ -d "$LOCK_DIR" ]; then
+    if [ -w "$LOCK_DIR" ]; then
+        : # ok
+    else
+        echo "WARN: $LOCK_DIR 当前用户不可写（F-1）：sudo chmod 1777 $LOCK_DIR  或 sudo chown $(whoami) $LOCK_DIR"
+    fi
+else
+    echo "WARN: $LOCK_DIR 不存在（deploy.sh 会自建但需 mkdir -p 权限）"
+fi
+
+# F-2: apps.json / environments.json 权限（deploy 用户要能读）
+for _f in "$APPS_JSON" "$ENVS_JSON"; do
+    if [ -f "$_f" ]; then
+        _perm=$(stat -c '%a' "$_f" 2>/dev/null || echo "")
+        _grp=$(stat -c '%G' "$_f" 2>/dev/null || echo "")
+        if [ "$_perm" = "600" ] || [ "$_perm" = "640" ]; then
+            if [ "$_grp" != "deploy" ] && [ "$_grp" != "openclaw" ]; then
+                echo "WARN: $_f 权限=$_perm 组=$_grp（F-2）：deploy 用户可能读不了。试：sudo chgrp deploy $_f && sudo chmod 640 $_f"
+            fi
+        fi
+    fi
+done
+
+# F-3 / F-4: 各项目 .git 目录为 deploy 用户可访问（仅在本机部署环境检查）
+if [ "$DEPLOY_LOCAL_NEEDED" = "true" ] && [ -f "$APPS_JSON" ]; then
+    while IFS= read -r _path; do
+        [ -z "$_path" ] || [ "$_path" = "null" ] && continue
+        if [ -d "$_path" ]; then
+            # 推导仓根
+            _gd="$_path"
+            while [ -n "$_gd" ] && [ "$_gd" != "/" ] && [ ! -d "$_gd/.git" ]; do _gd=$(dirname "$_gd"); done
+            if [ -d "$_gd/.git" ]; then
+                _git_grp=$(stat -c '%G' "$_gd/.git" 2>/dev/null || echo "")
+                _git_perm=$(stat -c '%a' "$_gd/.git" 2>/dev/null || echo "")
+                if [ "$_git_grp" != "deploy" ] && [ "$_git_grp" != "openclaw" ]; then
+                    echo "WARN: $_gd/.git 组=$_git_grp（F-4）：sudo chgrp -R deploy $_gd/.git && sudo chmod -R g+w $_gd/.git"
+                fi
+            fi
+        fi
+    done < <(jq -r '.apps[].env_config[]?.project_path // empty' "$APPS_JSON" 2>/dev/null)
+fi
+
+# F-9: pnpm 可执行
+if ! command -v pnpm >/dev/null 2>&1; then
+    if [ "$DEPLOY_LOCAL_NEEDED" = "true" ]; then
+        echo "WARN: pnpm 不在 PATH（F-9）：sudo corepack enable; sudo npm i -g pnpm@9"
+    fi
+fi
+
+# G 阶段：远端机检查（仅提示，不主动 SSH，避免 doctor 慢）
+if [ "$DEPLOY_PROD_NEEDED" = "true" ]; then
+    PROD_HOST=$(jq -r '.environments.prod.host // empty' "$ENVS_JSON" 2>/dev/null)
+    if [ -n "$PROD_HOST" ]; then
+        echo "INFO: 远端部署目标 prod=$PROD_HOST。首次部署前请跑: bash $SKILL_DIR/scripts/init-remote-target.sh root@$PROD_HOST --ssh-key ~/.ssh/<root_key>"
+    fi
 fi
 
 echo "READY"

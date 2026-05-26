@@ -289,3 +289,97 @@ bash scripts/verify.sh demo quanyu-console --strict
 # 回滚
 bash scripts/rollback.sh demo quanyu-console
 ```
+---
+
+## 🌐 跨机部署（远端模式）— G 阶段新增
+
+### 适用场景
+- 主控机（跑 deploy.sh 的机器）≠ 部署目标机
+- 例：阿里云主控 → 腾讯云部署 prod
+- deploy.sh 会自动检测：HOST 不命中本机网卡 IP / 本机公网 IP → 走远端模式
+- 否则走本机模式（保留旧行为，向后兼容）
+
+### 远端模式整体流程
+```
+本机 deploy.sh
+  ↓
+SSH 到 HOST（用 environments.<env>.ssh_key 密钥）
+  ↓
+远端：
+  1. git clone/pull 到 /home/<deploy_user>/code-repos/<app>/
+  2. git checkout <tag>
+  3. pnpm install --frozen-lockfile
+  4. pnpm --filter ./<app_subdir> build
+  5. mkdir /home/<deploy_user>/deploys/<app>/releases/<sha>
+  6. cp .next/public/package.json 到 release 目录
+  7. node_modules symlink
+  8. current symlink 切换
+  9. scp ecosystem.config.cjs 到远端 /tmp
+  10. SSH 跑 pm2 start/reload --only <pm2_name>
+  ↓
+本机：curl http://<host>:<port>/api/health
+```
+
+### 跨机部署前置准备
+
+#### Step A：在腾讯云（目标机）跑 init-remote-target.sh
+> 一键解决 F-2/3/6/7/8/9 六个踩坑
+
+```bash
+# 在本机（主控）用 root 密钥跑
+bash skills/deploy-app/scripts/init-remote-target.sh root@43.139.53.121 --ssh-key ~/.ssh/<root_key>
+```
+
+会自动：
+- 建 deploy 用户 + sudoers NOPASSWD
+- 修 /etc/sudoers secure_path 包含 /usr/local/bin (F-8)
+- 配 deploy 用户 .ssh + authorized_keys（注入主控公钥）
+- 生成 deploy 用户 SSH 密钥（用于 git clone GitHub）（F-6）
+- 安装 git / curl / build-essential / pnpm（F-9）
+- 创建 /home/deploy/code-repos / deploys 工作目录
+- 配 git safe.directory '*' (F-3)
+- 输出 deploy 用户公钥（要手工去 GitHub Deploy Keys 添加）
+
+#### Step B：把 deploy 公钥添加到 GitHub
+- 项目级（推荐 read-only）：https://github.com/<org>/<repo>/settings/keys → Add deploy key
+- 或账号级：https://github.com/settings/keys
+
+#### Step C：本机配置 ssh_key 指向 deploy_prod
+- `environments.json` 的 `prod.ssh_key` 默认 `~/.ssh/deploy_prod`
+- 把主控机的 `~/.ssh/deploy_prod` 公钥也加到腾讯云 deploy@/.ssh/authorized_keys（init-remote-target.sh 默认注入主控 id_ed25519.pub；如要单独 deploy_prod 需手工补）
+
+#### Step D：跑跨机部署
+```bash
+bash skills/deploy-app/scripts/deploy.sh prod smartops --version v1.0.0 --approved-by longge
+```
+
+### F-1~F-11 踩坑系统性沉淀
+
+| # | 坑 | 沉淀方案 |
+|---|---|---|
+| F-1 | deploy-locks 目录 deploy 用户写不了 | `setup.md` Step 2.5 + doctor.sh 自动检测 + 提示 `sudo chmod 1777 /var/lib/openclaw/deploy-locks` |
+| F-2 | apps.json/environments.json 600 权限 deploy 读不了 | doctor.sh 自动检测 + init-remote-target.sh 改组 |
+| F-3 | git safe.directory 未配 | init-remote-target.sh 自动 `git config --global --add safe.directory '*'` |
+| F-4 | .git 目录组无写权限 | doctor.sh 自动检测 + 提示 `sudo chgrp -R deploy <repo>/.git && sudo chmod -R g+w <repo>/.git` |
+| F-5 | doctor.sh 强制要 deploy_local 密钥 | doctor.sh 改为按环境条件检查（远端模式不强制 deploy_local，只 WARN deploy_prod 缺失） |
+| F-6 | deploy 用户无 GitHub 部署密钥 | init-remote-target.sh 自动 ssh-keygen + 输出公钥让 GitHub 加 |
+| F-7 | 腾讯云无 deploy 用户 | init-remote-target.sh 自动 useradd + sudoers + .ssh |
+| F-8 | sudo secure_path 不含 /usr/local/bin | init-remote-target.sh 写 /etc/sudoers.d/91-secure-path |
+| F-9 | pnpm 不全局可执行 | init-remote-target.sh 安装 + 软链 /usr/local/bin/pnpm |
+| F-10 | check-db.sh 跨机连不到远端 127.0.0.1 PG | check-db.sh 新增 --via-ssh / --ssh-key，自动开 SSH 隧道把远端 127.0.0.1:5432 转发到本地随机端口 |
+| F-11 | deploy.sh 不 scp 代码（只 scp ecosystem） | deploy.sh 新增 `is_remote_mode()` + 远端 git clone/build/release/PM2 全流程；is_remote_mode 保守判断（HOST 不在本机网卡列表才视为远端） |
+
+### 兼容性保证
+- `is_remote_mode()` 在 HOST 命中以下任一条件时返回 false（走本机模式）：
+  - HOST = localhost / 127.0.0.1 / ::1 / 0.0.0.0
+  - HOST 在 `hostname -I` 输出的 IP 列表里
+  - HOST 等于 `curl -s ifconfig.me` 拿到的公网 IP
+- 本机模式 100% 保持旧行为：git/build 都在本机源码目录跑，PM2 cwd 指向源码目录（无 deploy_root 时）或 release 目录（有 deploy_root 时）
+- test/demo 环境 host 是 8.138.118.28（阿里云本机网卡 IP），自动走本机模式
+- prod 环境 host 是 43.139.53.121（腾讯云，非本机），自动走远端模式
+
+### 远端模式当前限制
+- `init-db.sh` / `migrate-db.sh` 暂未支持 `--via-ssh`
+  - 远端模式 + DB missing/behind 时，deploy.sh 会 die 并提示手工处理
+  - 推荐做法：先在远端机用 prisma 跑 `pnpm --filter @smartops/db exec prisma migrate deploy`
+- `check-db.sh probe` 已支持 --via-ssh，远端模式下自动开 SSH 隧道

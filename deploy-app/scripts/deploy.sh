@@ -317,6 +317,52 @@ _local() {
 }
 
 # ============================================================
+# G 阶段：跨机部署支持 - is_remote_mode / _run_at_target
+# ============================================================
+# is_remote_mode 判断 HOST 是否远端机：
+#   - 命中 localhost / 127.0.0.1 / ::1 / 0.0.0.0 -> 本机
+#   - 命中本机网卡 IP / hostname -I 输出 -> 本机
+#   - 命中 curl ifconfig.me 公网 IP -> 本机
+#   - 其它 -> 远端
+# 保守策略：判断本机有任何疑虑就走本机（保留向后兼容）。
+# 但只要确认 HOST 不在本机任何接口/公网 IP 列表，则切远端。
+_get_local_ips_cached=""
+_get_local_ips() {
+    if [ -z "$_get_local_ips_cached" ]; then
+        local ips="localhost 127.0.0.1 ::1 0.0.0.0"
+        # hostname -I 输出所有本机网卡 IP
+        local hn_ips="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true)"
+        # 公网 IP（缓存只查一次）
+        local pub_ip="$(curl -fsS --max-time 3 ifconfig.me 2>/dev/null || true)"
+        _get_local_ips_cached="$(printf '%s\n%s\n%s\n' "$ips" "$hn_ips" "$pub_ip" | tr ' ' '\n' | grep -v '^$' | sort -u)"
+    fi
+    echo "$_get_local_ips_cached"
+}
+
+is_remote_mode() {
+    # HOST 必须已定义
+    [ -n "${HOST:-}" ] || return 1   # 没 HOST -> 当本机处理（保守）
+    case "$HOST" in
+        localhost|127.0.0.1|::1|0.0.0.0) return 1 ;;
+    esac
+    # 比对本机 IP 列表
+    if _get_local_ips | grep -qFx "$HOST"; then
+        return 1
+    fi
+    return 0
+}
+
+# _run_at_target：自动按部署模式选 _local 或 _ssh
+# 用法: _run_at_target "<shell command>"
+_run_at_target() {
+    if is_remote_mode; then
+        _ssh "$*"
+    else
+        _local "$*"
+    fi
+}
+
+# ============================================================
 # 4. 读 apps.json
 # ============================================================
 log "Step 2/10: 读 apps.json -> app=$APP_KEY"
@@ -463,6 +509,71 @@ if [ -n "$DB_HOST_DEFAULT" ] && ! validate_host_not_local "$DB_HOST_DEFAULT"; th
 fi
 
 # ============================================================
+# 5.2 G 阶段：跨机部署模式探测 + 路径映射
+# ============================================================
+IS_REMOTE="false"
+REMOTE_WORK_ROOT=""
+REMOTE_REPO_ROOT=""
+REMOTE_APP_PATH=""
+REMOTE_MONO_ROOT=""
+LOCAL_REPO_ROOT=""
+APP_SUBDIR=""
+
+if is_remote_mode; then
+    IS_REMOTE="true"
+    log_ok "跨机部署模式识别：HOST=$HOST 不在本机 IP 列表，启用远端模式（远端 git clone + build + release）"
+
+    # 1) 推导本地仓根（用于计算 app 子路径，然后映射到远端）
+    if [ -n "$APP_MONO_ROOT" ]; then
+        LOCAL_REPO_ROOT="$APP_MONO_ROOT"
+    else
+        # 没 monorepo.root 配置：追溯项目父目录找 .git
+        _probe="$APP_PATH"
+        while [ -n "$_probe" ] && [ "$_probe" != "/" ]; do
+            if [ -d "$_probe/.git" ]; then LOCAL_REPO_ROOT="$_probe"; break; fi
+            _probe="$(dirname "$_probe")"
+        done
+        # 实在找不到就简单取 APP_PATH 本身
+        [ -n "$LOCAL_REPO_ROOT" ] || LOCAL_REPO_ROOT="$APP_PATH"
+    fi
+
+    # 2) 计算 app_subdir（相对 LOCAL_REPO_ROOT 的路径）
+    if [ "$APP_PATH" = "$LOCAL_REPO_ROOT" ]; then
+        APP_SUBDIR="."
+    else
+        APP_SUBDIR="${APP_PATH#$LOCAL_REPO_ROOT/}"
+    fi
+
+    # 3) 远端路径规划：/home/<ssh_user>/code-repos/<app>/； release 路径 /home/<ssh_user>/deploys/<app>/
+    REMOTE_HOME="/home/$SSH_USER"
+    REMOTE_WORK_ROOT="$REMOTE_HOME/code-repos"
+    REMOTE_MONO_ROOT="$REMOTE_WORK_ROOT/$APP_KEY"
+    REMOTE_REPO_ROOT="$REMOTE_MONO_ROOT"   # 子 monorepo 仓也是同一仓
+    if [ "$APP_SUBDIR" = "." ]; then
+        REMOTE_APP_PATH="$REMOTE_MONO_ROOT"
+    else
+        REMOTE_APP_PATH="$REMOTE_MONO_ROOT/$APP_SUBDIR"
+    fi
+
+    # 4) 远端 deploy_root：如 environments.json 未配，默认 /home/<ssh_user>/deploys
+    if [ -z "$DEPLOY_ROOT" ]; then
+        DEPLOY_ROOT="$REMOTE_HOME/deploys"
+        USE_RELEASES="true"
+        log_warn "远端模式强制启用版本化部署：DEPLOY_ROOT=$DEPLOY_ROOT（未在 environments.json 配置，用默认值）"
+    fi
+
+    # 5) 检查 repo_url（远端 git clone 必须）
+    APP_REPO_URL="$(_app_get "$APP_KEY" ".repo_url")"
+    [ -n "$APP_REPO_URL" ] || die "远端模式要求 apps.json[$APP_KEY].repo_url 非空（供远端 git clone）"
+
+    log_ok "路径映射: 本地 repo=$LOCAL_REPO_ROOT 子路径=$APP_SUBDIR"
+    log_ok "远端工作区: repo=$REMOTE_REPO_ROOT  app=$REMOTE_APP_PATH  deploy_root=$DEPLOY_ROOT"
+    log_ok "远端 repo_url: $APP_REPO_URL"
+else
+    log_ok "本机部署模式（HOST=$HOST 命中本机网卡）"
+fi
+
+# ============================================================
 # 6. 预检查
 # ============================================================
 log "Step 4/10: 预检查 SSH / 项目路径"
@@ -484,36 +595,83 @@ fi
 # ============================================================
 log "Step 5/10: git 拉代码"
 
-# monorepo 在 root 拉代码，单仓项目在 project_path 拉
-if [ -n "$APP_MONO_ROOT" ]; then
-    GIT_DIR="$APP_MONO_ROOT"
-else
-    GIT_DIR="$APP_PATH"
-fi
+if [ "$IS_REMOTE" = "true" ]; then
+    # ============== 远端模式：远端 clone/pull ==============
+    log "远端模式: SSH 到 $SSH_USER@$HOST 拉代码"
 
-GIT_SHA="(skipped)"
-IS_GIT="false"
-if [ -d "$GIT_DIR/.git" ] || (cd "$GIT_DIR" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1); then
-    IS_GIT="true"
+    GIT_REMOTE_SCRIPT=$(cat <<RGIT
+set -e
+mkdir -p '$REMOTE_WORK_ROOT'
+if [ ! -d '$REMOTE_REPO_ROOT/.git' ]; then
+    echo '[remote-git] 首次 clone: $APP_REPO_URL -> $REMOTE_REPO_ROOT'
+    git clone '$APP_REPO_URL' '$REMOTE_REPO_ROOT'
 fi
-if [ "$IS_GIT" = "true" ]; then
-    _local "cd '$GIT_DIR' && git fetch --all --tags --quiet"
+cd '$REMOTE_REPO_ROOT'
+# 保证 origin url 与配置一致
+CURR_URL=\$(git remote get-url origin 2>/dev/null || echo '')
+if [ "\$CURR_URL" != "$APP_REPO_URL" ]; then
+    git remote set-url origin '$APP_REPO_URL'
+fi
+git fetch --all --tags --quiet
+RGIT
+)
     if [ -n "$VERSION_REF" ]; then
-        log "checkout 指定版本: $VERSION_REF"
-        _local "cd '$GIT_DIR' && git checkout '$VERSION_REF'"
+        GIT_REMOTE_SCRIPT="$GIT_REMOTE_SCRIPT"$'\n'"cd '$REMOTE_REPO_ROOT' && git checkout '$VERSION_REF'"
     else
-        log "pull 默认分支"
-        _local "cd '$GIT_DIR' && git pull --ff-only"
+        GIT_REMOTE_SCRIPT="$GIT_REMOTE_SCRIPT"$'\n'"cd '$REMOTE_REPO_ROOT' && git pull --ff-only"
     fi
-    if [ "$DRY_RUN" != "true" ]; then
-        GIT_SHA="$(cd "$GIT_DIR" && git rev-parse --short HEAD)"
+    GIT_REMOTE_SCRIPT="$GIT_REMOTE_SCRIPT"$'\n'"cd '$REMOTE_REPO_ROOT' && git rev-parse --short HEAD"
+
+    if [ "$DRY_RUN" = "true" ]; then
+        echo "  [dry-run] ssh $SSH_USER@$HOST bash -s <<EOF"
+        echo "$GIT_REMOTE_SCRIPT" | sed 's/^/    | /'
+        echo "  [dry-run] EOF"
+        GIT_SHA="(dry-run-remote)"
     else
-        # dry-run 下也读一下 sha，便于预览版本化路径
-        GIT_SHA="$(cd "$GIT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo '(skipped)')"
+        REMOTE_GIT_OUT=$(ssh -i "$SSH_KEY_EXPANDED" \
+            -o StrictHostKeyChecking=no \
+            -o BatchMode=yes \
+            "$SSH_USER@$HOST" bash -s <<<"$GIT_REMOTE_SCRIPT" 2>&1) \
+            || die "远端 git 操作失败:\n$REMOTE_GIT_OUT"
+        # 最后一行为 short SHA
+        GIT_SHA=$(echo "$REMOTE_GIT_OUT" | tail -1 | tr -d '[:space:]')
+        echo "$REMOTE_GIT_OUT" | grep -E '^\[remote-git\]' || true
     fi
-    log_ok "代码版本: $GIT_SHA"
+    log_ok "远端代码版本: $GIT_SHA"
+    IS_GIT="true"
 else
-    log_warn "$GIT_DIR 不是 git 仓库，跳过 git 操作"
+    # ============== 本机模式：原逻辑 ==============
+    # monorepo 在 root 拉代码，单仓项目在 project_path 拉
+    if [ -n "$APP_MONO_ROOT" ]; then
+        GIT_DIR="$APP_MONO_ROOT"
+    else
+        GIT_DIR="$APP_PATH"
+    fi
+
+    GIT_SHA="(skipped)"
+    IS_GIT="false"
+    if [ -d "$GIT_DIR/.git" ] || (cd "$GIT_DIR" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1); then
+        IS_GIT="true"
+    fi
+    if [ "$IS_GIT" = "true" ]; then
+        _local "cd '$GIT_DIR' && git fetch --all --tags --quiet"
+        if [ -n "$VERSION_REF" ]; then
+            log "checkout 指定版本: $VERSION_REF"
+            _local "cd '$GIT_DIR' && git checkout '$VERSION_REF'"
+        else
+            log "pull 默认分支"
+            _local "cd '$GIT_DIR' && git pull --ff-only"
+        fi
+        if [ "$DRY_RUN" != "true" ]; then
+            GIT_SHA="$(cd "$GIT_DIR" && git rev-parse --short HEAD)"
+        else
+            # dry-run 下也读一下 sha，便于预览版本化路径
+            GIT_SHA="$(cd "$GIT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo '(skipped)')"
+        fi
+        log_ok "代码版本: $GIT_SHA"
+    else
+        log_warn "$GIT_DIR 不是 git 仓库，跳过 git 操作"
+    fi
 fi
 
 # ============================================================
@@ -523,7 +681,66 @@ if [ "$SKIP_BUILD" = "true" ]; then
     log_warn "Step 6/10: --skip-build, 跳过构建"
 elif [ "$APP_FRAMEWORK" = "static" ]; then
     log_warn "Step 6/10: framework=static, 跳过构建"
+elif [ "$IS_REMOTE" = "true" ]; then
+    # ============== 远端模式：远端 pnpm install + build ==============
+    log "Step 6/10: 远端构建于 $SSH_USER@$HOST:$REMOTE_REPO_ROOT"
+    BUILD_REMOTE_SCRIPT=$(cat <<RBUILD
+set -e
+export PUPPETEER_SKIP_DOWNLOAD=true
+export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
+cd '$REMOTE_REPO_ROOT'
+# pnpm 必须可用（F-9 坑）
+if ! command -v pnpm >/dev/null 2>&1; then
+    echo '[remote-build] pnpm 不在 PATH，尝试 corepack enable / npm i -g pnpm'
+    if command -v corepack >/dev/null 2>&1; then
+        corepack enable >/dev/null 2>&1 || true
+        corepack prepare pnpm@latest --activate >/dev/null 2>&1 || true
+    fi
+    if ! command -v pnpm >/dev/null 2>&1; then
+        npm install -g pnpm@9 2>&1 || { echo '[remote-build] pnpm 安装失败'; exit 1; }
+    fi
+fi
+echo '[remote-build] pnpm install --frozen-lockfile'
+pnpm install --frozen-lockfile
+# G 阶段：monorepo 常见 prisma generate 需在 build 前跱，检测并自动调用
+if [ -f packages/db/prisma/schema.prisma ] || [ -f prisma/schema.prisma ]; then
+    if pnpm run db:generate 2>/dev/null; then
+        echo '[remote-build] prisma generate 完成 (走 db:generate)'
+    elif pnpm --filter @smartops/db exec prisma generate 2>/dev/null; then
+        echo '[remote-build] prisma generate 完成 (走 filter)'
+    else
+        echo '[remote-build][warn] prisma generate 跳过（未找到可用 script）'
+    fi
+fi
+RBUILD
+)
+    if [ -n "$APP_MONO_ROOT" ] && [ -n "$APP_MONO_WS" ]; then
+        # monorepo：在 root 跳 install 后用 --filter ./apps/xxx build
+        BUILD_REMOTE_SCRIPT="$BUILD_REMOTE_SCRIPT"$'\n'"echo '[remote-build] pnpm --filter ./$APP_MONO_WS build'"$'\n'"cd '$REMOTE_REPO_ROOT' && pnpm --filter './$APP_MONO_WS' build"
+    elif [ "$APP_SUBDIR" != "." ]; then
+        # 推导出的 monorepo 子包（smartops apps/web）：使用 --filter ./apps/<name>
+        BUILD_REMOTE_SCRIPT="$BUILD_REMOTE_SCRIPT"$'\n'"echo '[remote-build] pnpm --filter ./$APP_SUBDIR build'"$'\n'"cd '$REMOTE_REPO_ROOT' && pnpm --filter './$APP_SUBDIR' build"
+    else
+        # 单仓：在仓根跳 build_cmd（默认 pnpm build）
+        _build_cmd="${APP_BUILD:-pnpm build}"
+        BUILD_REMOTE_SCRIPT="$BUILD_REMOTE_SCRIPT"$'\n'"echo '[remote-build] $_build_cmd'"$'\n'"cd '$REMOTE_APP_PATH' && $_build_cmd"
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        echo "  [dry-run] ssh $SSH_USER@$HOST bash -s <<EOF (远端构建)"
+        echo "$BUILD_REMOTE_SCRIPT" | sed 's/^/    | /'
+        echo "  [dry-run] EOF"
+    else
+        ssh -i "$SSH_KEY_EXPANDED" \
+            -o StrictHostKeyChecking=no \
+            -o BatchMode=yes \
+            "$SSH_USER@$HOST" bash -s <<<"$BUILD_REMOTE_SCRIPT" \
+            || die "远端构建失败"
+    fi
+    log_ok "远端构建完成"
 else
+    # ============== 本机模式：原逻辑 ==============
     log "Step 6/10: 构建 ($APP_BUILD)"
     if [ -n "$APP_MONO_ROOT" ] && [ -n "$APP_MONO_WS" ]; then
         # monorepo: 先在 root 跑 install，然后 --filter ./apps/xxx build
@@ -573,12 +790,25 @@ step_db_check_and_apply() {
         return 0
     fi
 
-    DB_STATE="$(bash "$DB_SKILL_DIR/scripts/check-db.sh" "$ENV_NAME" --app "$APP_KEY" --mode probe 2>/dev/null | tail -1)" \
+    # G 阶段：远端模式下使用 SSH 隧道连远端 DB。
+    # check-db.sh 只允许进入 probe 逻辑后面的 PGPASSWORD psql，
+    # 所以由 deploy.sh 负责探测 -- 后面会改 check-db.sh 支持 --via-ssh 参数。
+    local probe_cmd=(bash "$DB_SKILL_DIR/scripts/check-db.sh" "$ENV_NAME" --app "$APP_KEY" --mode probe)
+    if [ "$IS_REMOTE" = "true" ]; then
+        probe_cmd+=(--via-ssh "$SSH_USER@$HOST" --ssh-key "$SSH_KEY_EXPANDED")
+    fi
+    DB_STATE="$("${probe_cmd[@]}" 2>/dev/null | tail -1)" \
         || die "check-db.sh probe 执行失败。请检查数据库连接或用 --skip-db 临时绕过"
     log_ok "[db] probe 返回: $DB_STATE"
 
     case "$DB_STATE" in
         missing)
+            if [ "$IS_REMOTE" = "true" ]; then
+                log_err "[db] 远端模式下数据库不存在（missing），但 init-db / migrate-db 未适配 --via-ssh"
+                log_err "[db] 请手工在远端机 $SSH_USER@$HOST 上建库，或在本机跱 init-db.sh 后重跑部署"
+                log_err "[db] 参考：PRINCIPLES/DB-DEPLOY-INTEGRATION.md"
+                die "远端 DB missing，部署中止"
+            fi
             log "[db] 状态一：数据库不存在，自动建库 + migrate"
             bash "$DB_SKILL_DIR/scripts/init-db.sh" "$ENV_NAME" --app "$APP_KEY" --non-interactive \
                 || die "[db] init-db.sh 失败，部署中止"
@@ -596,6 +826,8 @@ step_db_check_and_apply() {
                 log_warn "[db] deploy-app 不会自动 migrate；请走人工 DBA 流程"
                 log_warn "[db] 参见 PRINCIPLES/DB-DEPLOY-INTEGRATION.md §四"
                 # 不中断部署（仅警告，代码可先上）
+            elif [ "$IS_REMOTE" = "true" ]; then
+                log_warn "[db] 远端模式且 schema 落后 ($detail)：migrate-db.sh 未适配 --via-ssh，请手工在远端机跱 prisma migrate deploy"
             else
                 log_warn "[db] schema 落后 ($detail)"
                 if [ -t 0 ]; then
@@ -654,18 +886,30 @@ if [ "$USE_RELEASES" = "true" ]; then
     CURRENT_LINK="$APP_DEPLOY_DIR/current"
     SHARED_NM_DIR="$DEPLOY_ROOT/shared/node_modules"
 
-    # 2) 准备目录
+    # G 阶段：远端模式下 SRC_APP_PATH = REMOTE_APP_PATH，本机模式 = APP_PATH
+    if [ "$IS_REMOTE" = "true" ]; then
+        SRC_APP_PATH="$REMOTE_APP_PATH"
+        SRC_MONO_ROOT="$REMOTE_MONO_ROOT"
+    else
+        SRC_APP_PATH="$APP_PATH"
+        SRC_MONO_ROOT="$APP_MONO_ROOT"
+    fi
+
+    # 2) 准备目录（远端模式走 _ssh）
     if [ "$DRY_RUN" = "true" ]; then
-        echo "  [dry-run] mkdir -p $RELEASES_DIR $SHARED_NM_DIR"
+        echo "  [dry-run] mkdir -p $RELEASES_DIR $SHARED_NM_DIR  (mode=$([ "$IS_REMOTE" = true ] && echo remote || echo local))"
         echo "  [dry-run] RELEASE_DIR=$RELEASE_DIR"
     else
-        mkdir -p "$RELEASES_DIR" "$SHARED_NM_DIR"
-        # 若同 sha 目录已存在（如重复部署），清空重建以保证一致
-        if [ -d "$RELEASE_DIR" ]; then
-            log_warn "release 目录已存在，重置: $RELEASE_DIR"
-            rm -rf "$RELEASE_DIR"
+        if [ "$IS_REMOTE" = "true" ]; then
+            _ssh "mkdir -p '$RELEASES_DIR' '$SHARED_NM_DIR'; if [ -d '$RELEASE_DIR' ]; then echo '[remote] release 目录已存在，重置: $RELEASE_DIR'; rm -rf '$RELEASE_DIR'; fi; mkdir -p '$RELEASE_DIR'"
+        else
+            mkdir -p "$RELEASES_DIR" "$SHARED_NM_DIR"
+            if [ -d "$RELEASE_DIR" ]; then
+                log_warn "release 目录已存在，重置: $RELEASE_DIR"
+                rm -rf "$RELEASE_DIR"
+            fi
+            mkdir -p "$RELEASE_DIR"
         fi
-        mkdir -p "$RELEASE_DIR"
     fi
 
     # 3) 复制 build 产物到 release 目录
@@ -673,38 +917,53 @@ if [ "$USE_RELEASES" = "true" ]; then
         nextjs)
             log "复制 .next / public / package.json -> $RELEASE_DIR"
             if [ "$DRY_RUN" != "true" ]; then
-                [ -d "$APP_PATH/.next" ] || die "build 产物缺失: $APP_PATH/.next"
-                # 用 cp -a 保留权限；.next 比较大，但单应用通常 <200MB，可接受
-                cp -a "$APP_PATH/.next" "$RELEASE_DIR/"
-                [ -d "$APP_PATH/public" ] && cp -a "$APP_PATH/public" "$RELEASE_DIR/" || true
-                [ -f "$APP_PATH/package.json" ] && cp -a "$APP_PATH/package.json" "$RELEASE_DIR/" || true
-                [ -f "$APP_PATH/next.config.js" ]  && cp -a "$APP_PATH/next.config.js"  "$RELEASE_DIR/" || true
-                [ -f "$APP_PATH/next.config.mjs" ] && cp -a "$APP_PATH/next.config.mjs" "$RELEASE_DIR/" || true
-                [ -f "$APP_PATH/next.config.ts" ]  && cp -a "$APP_PATH/next.config.ts"  "$RELEASE_DIR/" || true
+                if [ "$IS_REMOTE" = "true" ]; then
+                    # 远端复制：一段 _ssh 脚本完成
+                    _ssh "set -e; \
+[ -d '$SRC_APP_PATH/.next' ] || { echo 'build 产物缺失: $SRC_APP_PATH/.next' >&2; exit 1; }; \
+cp -a '$SRC_APP_PATH/.next' '$RELEASE_DIR/'; \
+[ -d '$SRC_APP_PATH/public' ] && cp -a '$SRC_APP_PATH/public' '$RELEASE_DIR/' || true; \
+[ -f '$SRC_APP_PATH/package.json' ] && cp -a '$SRC_APP_PATH/package.json' '$RELEASE_DIR/' || true; \
+[ -f '$SRC_APP_PATH/next.config.js' ] && cp -a '$SRC_APP_PATH/next.config.js' '$RELEASE_DIR/' || true; \
+[ -f '$SRC_APP_PATH/next.config.mjs' ] && cp -a '$SRC_APP_PATH/next.config.mjs' '$RELEASE_DIR/' || true; \
+[ -f '$SRC_APP_PATH/next.config.ts' ] && cp -a '$SRC_APP_PATH/next.config.ts' '$RELEASE_DIR/' || true; \
+echo '[remote] nextjs 产物复制完成'"
+                else
+                    [ -d "$APP_PATH/.next" ] || die "build 产物缺失: $APP_PATH/.next"
+                    cp -a "$APP_PATH/.next" "$RELEASE_DIR/"
+                    [ -d "$APP_PATH/public" ] && cp -a "$APP_PATH/public" "$RELEASE_DIR/" || true
+                    [ -f "$APP_PATH/package.json" ] && cp -a "$APP_PATH/package.json" "$RELEASE_DIR/" || true
+                    [ -f "$APP_PATH/next.config.js" ]  && cp -a "$APP_PATH/next.config.js"  "$RELEASE_DIR/" || true
+                    [ -f "$APP_PATH/next.config.mjs" ] && cp -a "$APP_PATH/next.config.mjs" "$RELEASE_DIR/" || true
+                    [ -f "$APP_PATH/next.config.ts" ]  && cp -a "$APP_PATH/next.config.ts"  "$RELEASE_DIR/" || true
+                fi
             fi
             ;;
         static)
             log "复制静态站点 (排除 .git/node_modules/server.js/*.log/_archive，保留 archive/) -> $RELEASE_DIR"
             if [ "$DRY_RUN" != "true" ]; then
-                [ -d "$APP_PATH" ] || die "static 源目录不存在: $APP_PATH"
-                rsync -a --delete \
-                    --exclude='.git' --exclude='node_modules' \
-                    --exclude='*.log' --exclude='server.js' \
-                    --exclude='_archive' \
-                    "$APP_PATH/" "$RELEASE_DIR/"
-                # 多版本原型：archive/ 子目录不排除，与当前版同站点并存
-                if [ -d "$APP_PATH/archive" ]; then
-                    ARCHIVE_VER_COUNT=$(find "$APP_PATH/archive" -mindepth 1 -maxdepth 1 -type d | wc -l)
-                    DEPLOYED_VER_COUNT=$(find "$RELEASE_DIR/archive" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
-                    log_ok "历史版本: src=$ARCHIVE_VER_COUNT 个 / deployed=$DEPLOYED_VER_COUNT 个"
-                    if [ "$ARCHIVE_VER_COUNT" -ne "$DEPLOYED_VER_COUNT" ]; then
-                        die "archive/ 版本数不一致 src=$ARCHIVE_VER_COUNT deployed=$DEPLOYED_VER_COUNT"
+                if [ "$IS_REMOTE" = "true" ]; then
+                    _ssh "set -e; [ -d '$SRC_APP_PATH' ] || { echo 'static 源目录不存在: $SRC_APP_PATH' >&2; exit 1; }; rsync -a --delete --exclude='.git' --exclude='node_modules' --exclude='*.log' --exclude='server.js' --exclude='_archive' '$SRC_APP_PATH/' '$RELEASE_DIR/'; if [ ! -f '$RELEASE_DIR/serve.json' ]; then printf '%s\n' '{' '  \"cleanUrls\": false,' '  \"trailingSlash\": false,' '  \"renderSingle\": false,' '  \"directoryListing\": false' '}' > '$RELEASE_DIR/serve.json'; fi"
+                else
+                    [ -d "$APP_PATH" ] || die "static 源目录不存在: $APP_PATH"
+                    rsync -a --delete \
+                        --exclude='.git' --exclude='node_modules' \
+                        --exclude='*.log' --exclude='server.js' \
+                        --exclude='_archive' \
+                        "$APP_PATH/" "$RELEASE_DIR/"
+                    # 多版本原型：archive/ 子目录不排除，与当前版同站点并存
+                    if [ -d "$APP_PATH/archive" ]; then
+                        ARCHIVE_VER_COUNT=$(find "$APP_PATH/archive" -mindepth 1 -maxdepth 1 -type d | wc -l)
+                        DEPLOYED_VER_COUNT=$(find "$RELEASE_DIR/archive" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+                        log_ok "历史版本: src=$ARCHIVE_VER_COUNT 个 / deployed=$DEPLOYED_VER_COUNT 个"
+                        if [ "$ARCHIVE_VER_COUNT" -ne "$DEPLOYED_VER_COUNT" ]; then
+                            die "archive/ 版本数不一致 src=$ARCHIVE_VER_COUNT deployed=$DEPLOYED_VER_COUNT"
+                        fi
                     fi
-                fi
-                # 生成 serve.json：禁用 cleanUrls / trailingSlash，避免 .html 被 301 去后缀导致路径 fallback 问题
-                # （serve@14 默认 cleanUrls=true 会将 /xxx.html 301 到 /xxx）
-                if [ ! -f "$RELEASE_DIR/serve.json" ]; then
-                    cat > "$RELEASE_DIR/serve.json" <<'SERVE_JSON'
+                    # 生成 serve.json：禁用 cleanUrls / trailingSlash，避免 .html 被 301 去后缀导致路径 fallback 问题
+                    # （serve@14 默认 cleanUrls=true 会将 /xxx.html 301 到 /xxx）
+                    if [ ! -f "$RELEASE_DIR/serve.json" ]; then
+                        cat > "$RELEASE_DIR/serve.json" <<'SERVE_JSON'
 {
   "cleanUrls": false,
   "trailingSlash": false,
@@ -712,17 +971,21 @@ if [ "$USE_RELEASES" = "true" ]; then
   "directoryListing": false
 }
 SERVE_JSON
-                    log_ok "生成 serve.json (cleanUrls=false)"
+                        log_ok "生成 serve.json (cleanUrls=false)"
+                    fi
                 fi
             fi
             ;;
         express|nestjs|node)
             log "复制项目目录到 $RELEASE_DIR (排除 node_modules/.git)"
             if [ "$DRY_RUN" != "true" ]; then
-                # 简单实现：rsync 排除大目录
-                rsync -a --delete \
-                    --exclude='node_modules' --exclude='.git' --exclude='.next/cache' \
-                    "$APP_PATH/" "$RELEASE_DIR/"
+                if [ "$IS_REMOTE" = "true" ]; then
+                    _ssh "set -e; rsync -a --delete --exclude='node_modules' --exclude='.git' --exclude='.next/cache' '$SRC_APP_PATH/' '$RELEASE_DIR/'"
+                else
+                    rsync -a --delete \
+                        --exclude='node_modules' --exclude='.git' --exclude='.next/cache' \
+                        "$APP_PATH/" "$RELEASE_DIR/"
+                fi
             fi
             ;;
         *)
@@ -730,44 +993,83 @@ SERVE_JSON
             ;;
     esac
 
-    # 4) 共享 node_modules：把 release/node_modules symlink 到源码目录
-    NM_TARGET=""
-    if [ -n "$APP_MONO_ROOT" ] && [ -d "$APP_MONO_ROOT/node_modules" ]; then
-        # monorepo 一般共用 root/node_modules；workspace 子项目自身也可能有
-        # 优先 app 自身（pnpm workspace 软链会挂在子项目下）
-        if [ -d "$APP_PATH/node_modules" ]; then
-            NM_TARGET="$APP_PATH/node_modules"
+    # 3.5) G 阶段：Prisma client 路径适配（保证运行时能找到 query engine .so）
+    # Prisma client 生成于 node_modules/.pnpm/@prisma+client@*/node_modules/.prisma，
+    # 运行时 fallback 中的一个路径是 release/.prisma
+    if [ "$APP_FRAMEWORK" = "nextjs" ] && [ "$DRY_RUN" != "true" ]; then
+        if [ "$IS_REMOTE" = "true" ]; then
+            _ssh "PRISMA_DIR=\"\$(find '$SRC_MONO_ROOT/node_modules/.pnpm' -maxdepth 3 -name '.prisma' -type d 2>/dev/null | head -1)\"; if [ -n \"\$PRISMA_DIR\" ]; then ln -sfn \"\$PRISMA_DIR\" '$RELEASE_DIR/.prisma'; echo '[remote] Prisma .prisma symlink 创建: '\$PRISMA_DIR; fi"
         else
-            NM_TARGET="$APP_MONO_ROOT/node_modules"
+            _src_mono="${APP_MONO_ROOT:-$APP_PATH}"
+            PRISMA_DIR=$(find "$_src_mono/node_modules/.pnpm" -maxdepth 3 -name '.prisma' -type d 2>/dev/null | head -1)
+            if [ -n "$PRISMA_DIR" ]; then
+                ln -sfn "$PRISMA_DIR" "$RELEASE_DIR/.prisma"
+                log_ok "Prisma .prisma symlink 创建: $PRISMA_DIR"
+            fi
         fi
-    else
-        NM_TARGET="$APP_PATH/node_modules"
     fi
 
-    if [ "$DRY_RUN" = "true" ]; then
-        echo "  [dry-run] ln -sfn $NM_TARGET $RELEASE_DIR/node_modules"
-        echo "  [dry-run] ln -sfn $NM_TARGET $SHARED_NM_DIR/$APP_KEY"
-    else
-        if [ -d "$NM_TARGET" ]; then
-            ln -sfn "$NM_TARGET" "$RELEASE_DIR/node_modules"
-            ln -sfn "$NM_TARGET" "$SHARED_NM_DIR/$APP_KEY"
+    # 4) 共享 node_modules：把 release/node_modules symlink 到源码目录
+    if [ "$IS_REMOTE" = "true" ]; then
+        # 远端模式：在远端机判断 node_modules 位置
+        # 优先 SRC_APP_PATH/node_modules，其次 SRC_MONO_ROOT/node_modules
+        if [ "$DRY_RUN" = "true" ]; then
+            echo "  [dry-run] ssh ln -sfn <node_modules> $RELEASE_DIR/node_modules"
         else
-            log_warn "node_modules 不存在，跳过 symlink: $NM_TARGET"
+            _ssh "set -e; \
+if [ -d '$SRC_APP_PATH/node_modules' ]; then NM='$SRC_APP_PATH/node_modules'; \
+elif [ -n '$SRC_MONO_ROOT' ] && [ -d '$SRC_MONO_ROOT/node_modules' ]; then NM='$SRC_MONO_ROOT/node_modules'; \
+else echo '[remote] node_modules 不存在，跳过 symlink' >&2; NM=''; fi; \
+if [ -n \"\$NM\" ]; then ln -sfn \"\$NM\" '$RELEASE_DIR/node_modules'; ln -sfn \"\$NM\" '$SHARED_NM_DIR/$APP_KEY'; fi"
+        fi
+    else
+        if [ -n "$APP_MONO_ROOT" ] && [ -d "$APP_MONO_ROOT/node_modules" ]; then
+            # monorepo 一般共用 root/node_modules；workspace 子项目自身也可能有
+            # 优先 app 自身（pnpm workspace 软链会挂在子项目下）
+            if [ -d "$APP_PATH/node_modules" ]; then
+                NM_TARGET="$APP_PATH/node_modules"
+            else
+                NM_TARGET="$APP_MONO_ROOT/node_modules"
+            fi
+        else
+            NM_TARGET="$APP_PATH/node_modules"
+        fi
+
+        if [ "$DRY_RUN" = "true" ]; then
+            echo "  [dry-run] ln -sfn $NM_TARGET $RELEASE_DIR/node_modules"
+            echo "  [dry-run] ln -sfn $NM_TARGET $SHARED_NM_DIR/$APP_KEY"
+        else
+            if [ -d "$NM_TARGET" ]; then
+                ln -sfn "$NM_TARGET" "$RELEASE_DIR/node_modules"
+                ln -sfn "$NM_TARGET" "$SHARED_NM_DIR/$APP_KEY"
+            else
+                log_warn "node_modules 不存在，跳过 symlink: $NM_TARGET"
+            fi
         fi
     fi
 
     # 5) 记录上一个版本（用于回滚参考）
-    if [ -L "$CURRENT_LINK" ]; then
-        PREV_SHA="$(basename "$(readlink "$CURRENT_LINK")")"
+    if [ "$IS_REMOTE" = "true" ]; then
+        if [ "$DRY_RUN" != "true" ]; then
+            PREV_SHA="$(_ssh "[ -L '$CURRENT_LINK' ] && basename \"\$(readlink '$CURRENT_LINK')\" || true" 2>/dev/null | tr -d '[:space:]')"
+        fi
+    else
+        if [ -L "$CURRENT_LINK" ]; then
+            PREV_SHA="$(basename "$(readlink "$CURRENT_LINK")")"
+        fi
     fi
     [ -n "$PREV_SHA" ] && log_ok "上一个版本: $PREV_SHA" || log_warn "无上一个版本（首次版本化部署）"
     log_ok "本次版本: $RELEASE_SHA -> $RELEASE_DIR"
 
     # 6) 切换 current symlink（原子）
     if [ "$DRY_RUN" = "true" ]; then
-        echo "  [dry-run] ln -sfn $RELEASE_DIR $CURRENT_LINK"
+        echo "  [dry-run] ln -sfn $RELEASE_DIR $CURRENT_LINK  (mode=$([ "$IS_REMOTE" = true ] && echo remote || echo local))"
     else
-        ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+        if [ "$IS_REMOTE" = "true" ]; then
+            _ssh "ln -sfn '$RELEASE_DIR' '$CURRENT_LINK'"
+        else
+            ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+        fi
     fi
     PM2_CWD="$CURRENT_LINK"
 fi
@@ -784,14 +1086,28 @@ case "$DEPLOY_MODE" in
         case "$APP_FRAMEWORK" in
             nextjs)
                 # 支持 monorepo 结构：先在 project_path 找，没找到就在父目录找
-                if [ -f "$PM2_CWD/node_modules/next/dist/bin/next" ]; then
+                # G 阶段：远端模式在远端机试探；本机模式本地试探
+                _detect_next_script() {
+                    local cwd="$1"
+                    if [ "$IS_REMOTE" = "true" ]; then
+                        _ssh "if [ -f '$cwd/node_modules/next/dist/bin/next' ]; then echo 'node_modules/next/dist/bin/next'; \
+elif [ -f \"\$(dirname '$cwd')/node_modules/next/dist/bin/next\" ]; then echo \"\$(dirname '$cwd')/node_modules/next/dist/bin/next\"; \
+elif [ -f \"\$(dirname \$(dirname '$cwd'))/node_modules/next/dist/bin/next\" ]; then echo \"\$(dirname \$(dirname '$cwd'))/node_modules/next/dist/bin/next\"; \
+else echo ''; fi" 2>/dev/null | tr -d '\r' | head -1
+                    else
+                        if [ -f "$cwd/node_modules/next/dist/bin/next" ]; then echo 'node_modules/next/dist/bin/next'
+                        elif [ -f "$(dirname $cwd)/node_modules/next/dist/bin/next" ]; then echo "$(dirname $cwd)/node_modules/next/dist/bin/next"
+                        elif [ -f "$(dirname $(dirname $cwd))/node_modules/next/dist/bin/next" ]; then echo "$(dirname $(dirname $cwd))/node_modules/next/dist/bin/next"
+                        else echo ''
+                        fi
+                    fi
+                }
+                if [ "$DRY_RUN" = "true" ]; then
+                    # dry-run 探不到也给个默认值
                     PM2_SCRIPT="node_modules/next/dist/bin/next"
-                elif [ -f "$(dirname $PM2_CWD)/node_modules/next/dist/bin/next" ]; then
-                    PM2_SCRIPT="$(dirname $PM2_CWD)/node_modules/next/dist/bin/next"
-                elif [ -f "$(dirname $(dirname $PM2_CWD))/node_modules/next/dist/bin/next" ]; then
-                    PM2_SCRIPT="$(dirname $(dirname $PM2_CWD))/node_modules/next/dist/bin/next"
                 else
-                    die "未找到 next 命令，请检查项目依赖是否正确安装"
+                    PM2_SCRIPT="$(_detect_next_script "$PM2_CWD")"
+                    [ -n "$PM2_SCRIPT" ] || die "未找到 next 命令 (cwd=$PM2_CWD, mode=$([ "$IS_REMOTE" = true ] && echo remote || echo local))。请检查项目依赖是否正确安装"
                 fi
                 # 注意：next start 不支持 --prefix（这是 pnpm/npm 的选项）。
                 # 旧逻辑曾在 apps/web 结构下注入 --prefix 导致 PM2 启动失败，已移除。
@@ -922,7 +1238,11 @@ RSCRIPT
 
         # 把 ecosystem 也保留一份到 release 目录（便于回滚时复用）
         if [ "$USE_RELEASES" = "true" ] && [ "$DRY_RUN" != "true" ] && [ -n "$RELEASE_DIR" ]; then
-            cp -a "$ECO_TMP" "$RELEASE_DIR/ecosystem.config.cjs"
+            if [ "$IS_REMOTE" = "true" ]; then
+                scp -i "$SSH_KEY_EXPANDED" -o StrictHostKeyChecking=no "$ECO_TMP" "$SSH_USER@$HOST:$RELEASE_DIR/ecosystem.config.cjs" >/dev/null
+            else
+                cp -a "$ECO_TMP" "$RELEASE_DIR/ecosystem.config.cjs"
+            fi
         fi
         rm -f "$ECO_TMP" 2>/dev/null || true
         ;;
@@ -1004,23 +1324,36 @@ fi
 # ============================================================
 if [ "$USE_RELEASES" = "true" ] && [ "$HEALTH_OK" = "true" ] && [ "$DRY_RUN" != "true" ]; then
     log "Step 10/10a: 清理旧版本 (保留 $RELEASES_TO_KEEP 个)"
-    CURRENT_REL_SHA="$(basename "$(readlink "$DEPLOY_ROOT/$APP_KEY/current")")"
-    cd "$DEPLOY_ROOT/$APP_KEY/releases"
-    # 按 mtime 倒序，保留前 N 个；其余删除（但绝不删 current 指向的那个）
-    ALL_RELEASES=$(ls -1t 2>/dev/null || true)
-    KEEP=0
-    for r in $ALL_RELEASES; do
-        if [ "$r" = "$CURRENT_REL_SHA" ]; then
-            continue
-        fi
-        KEEP=$((KEEP + 1))
-        # 当前指向的算 1 个，再保留 (N-1) 个其他
-        if [ "$KEEP" -ge "$RELEASES_TO_KEEP" ]; then
-            log "  删除旧版本: $r"
-            rm -rf "./$r"
-        fi
-    done
-    cd - >/dev/null
+    if [ "$IS_REMOTE" = "true" ]; then
+        _ssh "set -e; \
+CURRENT_REL_SHA=\"\$(basename \"\$(readlink '$DEPLOY_ROOT/$APP_KEY/current')\")\"; \
+cd '$DEPLOY_ROOT/$APP_KEY/releases'; \
+ALL_RELEASES=\"\$(ls -1t 2>/dev/null || true)\"; \
+KEEP=0; \
+for r in \$ALL_RELEASES; do \
+    if [ \"\$r\" = \"\$CURRENT_REL_SHA\" ]; then continue; fi; \
+    KEEP=\$((KEEP + 1)); \
+    if [ \"\$KEEP\" -ge $RELEASES_TO_KEEP ]; then echo '  删除旧版本: '\$r; rm -rf \"./\$r\"; fi; \
+done"
+    else
+        CURRENT_REL_SHA="$(basename "$(readlink "$DEPLOY_ROOT/$APP_KEY/current")")"
+        cd "$DEPLOY_ROOT/$APP_KEY/releases"
+        # 按 mtime 倒序，保留前 N 个；其余删除（但绝不删 current 指向的那个）
+        ALL_RELEASES=$(ls -1t 2>/dev/null || true)
+        KEEP=0
+        for r in $ALL_RELEASES; do
+            if [ "$r" = "$CURRENT_REL_SHA" ]; then
+                continue
+            fi
+            KEEP=$((KEEP + 1))
+            # 当前指向的算 1 个，再保留 (N-1) 个其他
+            if [ "$KEEP" -ge "$RELEASES_TO_KEEP" ]; then
+                log "  删除旧版本: $r"
+                rm -rf "./$r"
+            fi
+        done
+        cd - >/dev/null
+    fi
 fi
 
 # ============================================================
