@@ -58,6 +58,8 @@ deploy-app skill 的两份核心配置 schema 说明。**字段名严格按本�
       "deploy_base_path": "<string, required> 源码根目录（git pull 用），如 /var/lib/openclaw/.openclaw/workspace/code-repos",
       "deploy_root":      "<string, optional, Phase 3+> 版本化部署根目录，按 <root>/<app>/releases/<sha> 组织；未配置则回退到原地部署（旧行为）",
       "releases_to_keep": "<int, optional, Phase 3+> 保留的历史版本数（含当前），默认 3。部署成功后清理多余版本目录",
+      "database_host":    "<string, optional, C 阶段+> 环境默认 DB 服务器 host，默认 localhost。用于 DB 服务器与 App 服务器分离场景；apps.json.env_config.<env>.database.host 可覆盖。参见 PRINCIPLES/DB-DEPLOY-INTEGRATION.md §十",
+      "database_port":    "<int, optional, C 阶段+> 环境默认 DB 服务器 port，默认 5432",
       "nginx_conf_dir":   "<string, optional> Nginx 配置目录",
       "apps": {
         "<app_key>": {

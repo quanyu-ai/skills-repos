@@ -54,31 +54,73 @@ init_mysql_env() {
 # 通用核心实现
 # ----------------------------------------------------------------
 # PostgreSQL: 注意 CREATE DATABASE 不支持 IF NOT EXISTS，需先查 pg_database
+# C 阶段修正：原代码用 db user 连 postgres 库做 CREATE （首次 user 都不存在何谈建库）。
+# 现改为：
+#   1. 本机 (host=localhost/127.0.0.1)：优先用 sudo -u postgres 的 peer 认证
+#   2. 远程：需要环境变量 PGADMIN_USER/PGADMIN_PASSWORD 提供管理员账号
+#      或从 environments.json 读取 admin_user/admin_password
 _init_postgres() {
     local host="$1" port="$2" db_name="$3" username="$4" password="$5"
     log_info "初始化 PostgreSQL 数据库 $db_name@$host:$port (user=$username)"
 
+    # 判断 admin 接入方式
+    local IS_LOCAL="false"
+    if [ "$host" = "localhost" ] || [ "$host" = "127.0.0.1" ]; then
+        IS_LOCAL="true"
+    fi
+
+    # admin 执行函数
+    _admin_psql() {
+        if [ "$IS_LOCAL" = "true" ] && command -v sudo >/dev/null 2>&1; then
+            sudo -u postgres psql -p "$port" -d postgres "$@"
+        else
+            local au="${PGADMIN_USER:-postgres}"
+            local ap="${PGADMIN_PASSWORD:-}"
+            PGPASSWORD="$ap" psql -h "$host" -p "$port" -U "$au" -d postgres "$@"
+        fi
+    }
+
     # 1. 检查数据库是否已存在
     local exists
-    exists=$(PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$username" -d postgres -tAc \
-        "SELECT 1 FROM pg_database WHERE datname='${db_name}'" 2>/dev/null || true)
+    exists=$(_admin_psql -tAc "SELECT 1 FROM pg_database WHERE datname='${db_name}'" 2>/dev/null || true)
     if [ "$exists" = "1" ]; then
         log_warn "数据库 $db_name 已存在，跳过 CREATE"
     else
+        # 2. 先创建 user（如不存在）
+        local uexists
+        uexists=$(_admin_psql -tAc "SELECT 1 FROM pg_user WHERE usename='${username}'" 2>/dev/null || true)
+        if [ "$uexists" != "1" ]; then
+            log_info "创建用户 $username..."
+            _admin_psql -c "CREATE USER \"${username}\" WITH ENCRYPTED PASSWORD '${password}';" >/dev/null \
+                || { log_error "无法创建用户 $username"; return 1; }
+            log_ok "用户 $username 已创建"
+        else
+            log_warn "用户 $username 已存在，跳过创建"
+        fi
+
+        # 3. 创建数据库 OWNER=$username
         log_info "创建数据库 $db_name..."
-        if ! PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$username" -d postgres \
-            -c "CREATE DATABASE \"${db_name}\";" >/dev/null 2>&1; then
+        if ! _admin_psql -c "CREATE DATABASE \"${db_name}\" OWNER \"${username}\";" >/dev/null 2>&1; then
             log_error "无法创建数据库 $db_name"
             return 1
         fi
-        log_ok "数据库 $db_name 已创建"
+        log_ok "数据库 $db_name 已创建，OWNER=$username"
+
+        # 4. GRANT
+        _admin_psql -c "GRANT ALL PRIVILEGES ON DATABASE \"${db_name}\" TO \"${username}\";" >/dev/null 2>&1 || true
     fi
 
-    # 2. 创建扩展
+    # 5. 创建扩展 uuid-ossp（需 superuser 权限，用 admin 账号连目标库）
     log_info "创建数据库扩展 uuid-ossp..."
-    PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$username" -d "$db_name" \
-        -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" >/dev/null 2>&1 \
-        || log_warn "无法创建 uuid-ossp 扩展（可忽略）"
+    if [ "$IS_LOCAL" = "true" ] && command -v sudo >/dev/null 2>&1; then
+        sudo -u postgres psql -p "$port" -d "$db_name" \
+            -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" >/dev/null 2>&1 \
+            || log_warn "无法创建 uuid-ossp 扩展（可忽略）"
+    else
+        PGPASSWORD="${PGADMIN_PASSWORD:-}" psql -h "$host" -p "$port" -U "${PGADMIN_USER:-postgres}" -d "$db_name" \
+            -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" >/dev/null 2>&1 \
+            || log_warn "无法创建 uuid-ossp 扩展（可忽略）"
+    fi
 
     log_ok "PostgreSQL 初始化完成: $db_name"
 }

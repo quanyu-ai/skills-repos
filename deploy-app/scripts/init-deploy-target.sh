@@ -5,12 +5,17 @@
 #   1. 校验项目已在 _registry.json 注册（拿 code）
 #   2. 按 PORT-ALLOCATION.md 公式算端口（env_base + code）
 #   3. 询问目标服务器（默认本机，可选 8.138.118.28 / 43.139.53.121 / 其他）
-#   4. prod 自动建库（建议名 <app>_<env>，自动生成强密码）
-#   5. 写入三处：
-#      - skills/deploy-app/config/apps.json (env_config.<env>)
+#   4. 询问 DB 服务器（C 阶段：environments.<env>.database_host 默认 / 可覆盖为远程）
+#   5. DB 命名硬约束：强制 <app>_<env>；同名库已存在时：
+#        - prod: 询问是否复用现有库【红线，不准重建】
+#        - proto/test/demo: 直接报错，要求先手工 drop
+#   6. 写入三处：
+#      - skills/deploy-app/config/apps.json (env_config.<env>，含完整 db block 含 host/port)
 #      - skills/deploy-app/config/environments.json (apps.<app_id>)
-#      - knowledge-repos/projects/<app>/profile.json (deployment.<env>)
-#   6. 追加 INFRA-LEDGER（保留历史，新增条目）
+#      - knowledge-reps/projects/<app>/profile.json (deployment.<env>)
+#   7. 追加 INFRA-LEDGER（保留历史，新增条目）
+#
+# 参见: PRINCIPLES/DB-DEPLOY-INTEGRATION.md §十「环境隔离与服务器分离」
 
 set -euo pipefail
 
@@ -47,6 +52,13 @@ case "$ENV_NAME" in
     proto|test|demo|prod) ;;
     *) die "非法环境: $ENV_NAME（合法: proto|test|demo|prod）" ;;
 esac
+
+# ----------------------------------------------------------------
+# DB 命名硬约束（C 阶段新增）
+# 强制 <app_id>_<env> 格式，禁止跨环境复用
+# ----------------------------------------------------------------
+EXPECTED_DB_NAME="${APP_ID//-/_}_${ENV_NAME}"
+log "DB 命名硬约束: 预期 DB 名 = $EXPECTED_DB_NAME (格式: <app>_<env>)"
 
 # 1. 取 project code
 [ -f "$REGISTRY" ] || die "_registry.json 不存在: $REGISTRY"
@@ -86,28 +98,93 @@ case "$SRV_CHOICE" in
 esac
 log_ok "目标主机: $HOST"
 
-# 4. prod 自动建库
+# 4. DB 块构造（C 阶段：所有环境都规范化，不仅 prod；DB 服务器分离）
+# ----------------------------------------------------------------
+# 4.1 询问 DB 服务器位置
+#     - local: 用 environments.<env>.database_host 默认值（通常 localhost）
+#     - remote: 用户输入 host:port，覆盖到 apps.json.env_config.<env>.database
+# ----------------------------------------------------------------
 DB_BLOCK=""
-if [ "$ENV_NAME" = "prod" ]; then
-    DB_NAME="${APP_ID//-/_}_${ENV_NAME}"
-    DB_USER="$DB_NAME"
-    DB_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9!@#%^*_+=' </dev/urandom 2>/dev/null | head -c 24 || echo "auto_$(date +%s)")"
-    log_warn "prod 部署建议自动建库:"
-    echo "  数据库名: $DB_NAME"
-    echo "  用户名:   $DB_USER"
-    echo "  密码:     $DB_PASS"
-    read -p "是否在写入 env_config 时记录该数据库块？(Y/n): " -r
-    if [[ -z "$REPLY" ]] || [[ "$REPLY" =~ ^[Yy]$ ]]; then
-        DB_BLOCK="{
-          \"type\": \"postgresql\",
-          \"host\": \"localhost\",
-          \"port\": 5432,
-          \"database\": \"$DB_NAME\",
-          \"username\": \"$DB_USER\",
-          \"password\": \"$DB_PASS\"
-        }"
-        log_warn "⚠️ 仅记录到 env_config.prod.database；建库 SQL 由部署 Agent 自行执行（避免本脚本越权写 DB）"
+DEFAULT_DB_HOST="$(jq -r --arg e "$ENV_NAME" '.environments[$e].database_host // "localhost"' "$ENVS_JSON")"
+DEFAULT_DB_PORT="$(jq -r --arg e "$ENV_NAME" '.environments[$e].database_port // 5432' "$ENVS_JSON")"
+
+echo
+echo "DB 服务器候选 ($APP_ID@$ENV_NAME):"
+echo "  1) local (environments.$ENV_NAME 默认 $DEFAULT_DB_HOST:$DEFAULT_DB_PORT)"
+echo "  2) 自定义远程 (输入 host:port)"
+read -p "选择 DB 服务器 [1-2, 默认 1]: " -r DB_SRV_CHOICE
+DB_SRV_CHOICE="${DB_SRV_CHOICE:-1}"
+case "$DB_SRV_CHOICE" in
+    1) DB_HOST="$DEFAULT_DB_HOST"; DB_PORT="$DEFAULT_DB_PORT" ;;
+    2)
+        read -p "输入 DB host: " -r DB_HOST
+        read -p "输入 DB port [5432]: " -r DB_PORT
+        DB_PORT="${DB_PORT:-5432}"
+        ;;
+    *) die "非法选择" ;;
+esac
+log_ok "DB 服务器: $DB_HOST:$DB_PORT"
+
+# 4.2 DB 名/用户名硬约束: <app_id>_<env>
+# 检测同名 DB 是否已存在（仅 local 时能查）
+DB_NAME="$EXPECTED_DB_NAME"
+DB_USER="$DB_NAME"
+DB_EXISTS="unknown"
+if [ "$DB_HOST" = "localhost" ] || [ "$DB_HOST" = "127.0.0.1" ]; then
+    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null | grep -q '^1$'; then
+        DB_EXISTS="yes"
+    else
+        DB_EXISTS="no"
     fi
+fi
+
+if [ "$DB_EXISTS" = "yes" ]; then
+    if [ "$ENV_NAME" = "prod" ]; then
+        log_warn "prod 数据库 $DB_NAME 已存在（红线：禁止 drop / 重建）"
+        read -p "使用现有库？(Y/n): " -r
+        if [[ -n "$REPLY" ]] && [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+            die "用户取消"
+        fi
+        log_warn "使用现有 prod 库: $DB_NAME（密码字段需用户手工填到 apps.json）"
+    else
+        log_err "$ENV_NAME 数据库 $DB_NAME 已存在！"
+        log_err "按 DB-DEPLOY-INTEGRATION.md 规范，非 prod 环境禁止复用同名库"
+        log_err "请先手工 drop: sudo -u postgres psql -c \"DROP DATABASE $DB_NAME; DROP USER IF EXISTS $DB_USER;\""
+        log_err "或将该 $ENV_NAME 配到其他 app/code"
+        exit 1
+    fi
+fi
+
+# 4.3 询问 DB 管理员账号（用于 CREATE DATABASE / USER）
+DB_ADMIN="postgres"
+if [ "$DB_HOST" != "localhost" ] && [ "$DB_HOST" != "127.0.0.1" ]; then
+    read -p "远程 DB 管理员账号 [postgres]: " -r DB_ADMIN_IN
+    DB_ADMIN="${DB_ADMIN_IN:-postgres}"
+fi
+
+# 4.4 生成强密码
+DB_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || echo "auto_$(date +%s)")"
+
+log_warn "数据库配置:"
+echo "  type:     postgresql"
+echo "  host:     $DB_HOST"
+echo "  port:     $DB_PORT"
+echo "  database: $DB_NAME"
+echo "  username: $DB_USER"
+echo "  password: $DB_PASS"
+echo "  admin:    $DB_ADMIN（用于建库；不写入 apps.json）"
+
+read -p "是否写入 apps.json.env_config.$ENV_NAME.database？(Y/n): " -r
+if [[ -z "$REPLY" ]] || [[ "$REPLY" =~ ^[Yy]$ ]]; then
+    DB_BLOCK="{
+      \"type\": \"postgresql\",
+      \"host\": \"$DB_HOST\",
+      \"port\": $DB_PORT,
+      \"database\": \"$DB_NAME\",
+      \"username\": \"$DB_USER\",
+      \"password\": \"$DB_PASS\"
+    }"
+    log_ok "DB block 已构造"
 fi
 
 # 5a. 写 environments.json：apps.<app_id> = {port, pm2_name}
@@ -119,7 +196,7 @@ jq --arg env "$ENV_NAME" --arg app "$APP_ID" --argjson port "$PORT" --arg pm2 "$
    "$ENVS_JSON" > "$TMP_ENV" && mv "$TMP_ENV" "$ENVS_JSON"
 log_ok "environments.json: $ENV_NAME.apps.$APP_ID = {port:$PORT, pm2_name:$PM2_NAME}"
 
-# 5b. 写 apps.json：env_config.<env>（仅 prod 写 database）
+# 5b. 写 apps.json：env_config.<env>（C 阶段：所有环境都写 database）
 if [ -n "$DB_BLOCK" ]; then
     TMP_APPS="$(mktemp)"
     jq --arg app "$APP_ID" --arg env "$ENV_NAME" --argjson db "$DB_BLOCK" \
@@ -177,8 +254,11 @@ cat <<DONE
   状态:     planned
 
 下一步:
-  1. 如果是 prod，请手动在数据库中执行：
-       CREATE DATABASE ...; CREATE USER ...; GRANT ...;
+  1. 数据库会在首次 deploy.sh 探测到 missing 时自动建库 + migrate + 种子
+     （要求 admin 账号 $DB_ADMIN 在 $DB_HOST 有 CREATE DATABASE/USER 权限）
+     如想提前手工建：
+       sudo -u postgres psql -c "CREATE USER $DB_USER WITH ENCRYPTED PASSWORD '<见 apps.json>';"
+       sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
   2. 推送代码到对应分支
   3. 跑部署: bash $SKILL_DIR/scripts/deploy.sh $ENV_NAME $APP_ID [--version vX.Y.Z]
 
