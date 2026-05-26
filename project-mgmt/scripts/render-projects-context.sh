@@ -52,8 +52,8 @@ for pd in "$PROJECTS_ROOT"/*/; do
     risk=$(jq -r '.risk_level // "low"' "$pf")
     client=$(jq -r '.client // "—"' "$pf")
     stack=$(jq -r '.tech_stack // "—"' "$pf")
-    # 取第一个非 null 的部署
-    dep=$(jq -r '[.deployment // {} | to_entries[] | select(.value != null) | "\(.key):\(.value)"][0] // "—"' "$pf")
+    # 取第一个非 null 的部署（兼容字符串 / 对象两种 schema）
+    dep=$(jq -r '[.deployment // {} | to_entries[] | select(.value != null) | if (.value|type)=="object" then "\(.key):\(.value.url // .value.port // "live")" else "\(.key):\(.value)" end][0] // "—"' "$pf")
     printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n" "$pid" "$name" "$stage" "$prio" "$(health_icon "$health")" "$(risk_icon "$risk")" "$client" "$stack" "$dep"
 done
 

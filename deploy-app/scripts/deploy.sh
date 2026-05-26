@@ -239,6 +239,33 @@ if [ "$ENV_NAME" = "prod" ]; then
     fi
 
     log_ok "prod 门禁 L3 全部通过 ✓"
+
+    # 门禁6（VERSIONING.md）: package.json.version 必须 == tag（去 v 前缀）
+    # 仅 prod 强制，与 D2 门禁 1~5 叠加
+    if [ -n "$VERSION_REF" ]; then
+        APP_PATH_PKG="$(_app_get "$APP_KEY" ".project_path")"
+        # 优先查 project_path/package.json，再查 monorepo root
+        PKG_FILE=""
+        if [ -f "$APP_PATH_PKG/package.json" ]; then
+            PKG_FILE="$APP_PATH_PKG/package.json"
+        else
+            MONO_ROOT_PKG="$(_app_get "$APP_KEY" ".monorepo.root")"
+            [ -n "$MONO_ROOT_PKG" ] && [ -f "$MONO_ROOT_PKG/package.json" ] && PKG_FILE="$MONO_ROOT_PKG/package.json"
+        fi
+        if [ -z "$PKG_FILE" ]; then
+            log_warn "门禁6 跳过：未找到 package.json (路径: $APP_PATH_PKG)"
+        else
+            PKG_VER="$(jq -r '.version // empty' "$PKG_FILE")"
+            TAG_VER="${VERSION_REF#v}"
+            if [ "$PKG_VER" != "$TAG_VER" ]; then
+                log_err "门禁6 失败：package.json.version=$PKG_VER 与 tag=$VERSION_REF 不一致"
+                log_err "请先跑：bash $SCRIPTS_DIR/release.sh $APP_KEY --explicit $VERSION_REF"
+                log_err "参见：knowledge-repos/management/PRINCIPLES/VERSIONING.md"
+                exit 2
+            fi
+            log_ok "门禁6 通过：package.json.version=$PKG_VER == tag=$VERSION_REF"
+        fi
+    fi
 fi
 
 # ============================================================
@@ -342,7 +369,14 @@ ENV_EXISTS="$(jq -r --arg e "$ENV_NAME" '.environments | has($e)' "$ENVS_JSON")"
 
 ENVAPP_PORT="$(_envapp_get "$ENV_NAME" "$APP_KEY" ".port")"
 ENVAPP_PM2_NAME="$(_envapp_get "$ENV_NAME" "$APP_KEY" ".pm2_name")"
-[ -n "$ENVAPP_PORT" ] || die "环境 $ENV_NAME 未声明 app=$APP_KEY (检查 environments.json)"
+if [ -z "$ENVAPP_PORT" ]; then
+    log_err "环境 $ENV_NAME 未声明 app=$APP_KEY"
+    log_err "请先跑引导脚本初始化此应用的 $ENV_NAME 环境："
+    log_err "  bash $SCRIPTS_DIR/init-deploy-target.sh $APP_KEY $ENV_NAME"
+    log_err "会自动按公式 端口=env_base+code 分配端口并写入各项配置。参见："
+    log_err "  knowledge-repos/management/PRINCIPLES/PORT-ALLOCATION.md"
+    exit 1
+fi
 
 # 优先 envapp 级覆盖，否则取 env 级默认
 HOST="$(_envapp_get "$ENV_NAME" "$APP_KEY" ".host")"
@@ -603,9 +637,22 @@ case "$DEPLOY_MODE" in
         # 默认走 deployment-standard §2.0.3 推荐的 next start 方式
         case "$APP_FRAMEWORK" in
             nextjs)
-                # 使用相对路径：next 通过 node_modules symlink 找到
-                PM2_SCRIPT="node_modules/next/dist/bin/next"
-                PM2_ARGS="start -H 0.0.0.0 -p $ENVAPP_PORT"
+                # 支持 monorepo 结构：先在 project_path 找，没找到就在父目录找
+                if [ -f "$PM2_CWD/node_modules/next/dist/bin/next" ]; then
+                    PM2_SCRIPT="node_modules/next/dist/bin/next"
+                elif [ -f "$(dirname $PM2_CWD)/node_modules/next/dist/bin/next" ]; then
+                    PM2_SCRIPT="$(dirname $PM2_CWD)/node_modules/next/dist/bin/next"
+                elif [ -f "$(dirname $(dirname $PM2_CWD))/node_modules/next/dist/bin/next" ]; then
+                    PM2_SCRIPT="$(dirname $(dirname $PM2_CWD))/node_modules/next/dist/bin/next"
+                else
+                    die "未找到 next 命令，请检查项目依赖是否正确安装"
+                fi
+                # 如果是 monorepo apps/web 结构，start 命令需要 --prefix 参数
+                if [ "$(basename $PM2_CWD)" = "web" ] && [ "$(basename $(dirname $PM2_CWD))" = "apps" ]; then
+                    PM2_ARGS="start -H 0.0.0.0 -p $ENVAPP_PORT --prefix $PM2_CWD"
+                else
+                    PM2_ARGS="start -H 0.0.0.0 -p $ENVAPP_PORT"
+                fi
                 ;;
             static)
                 # 静态站点：用 npx serve -l <port> . 跑（PM2 守护进程）
@@ -759,6 +806,33 @@ if [ "$HEALTH_OK" = "false" ]; then
     STATUS="FAILED"
 else
     STATUS="SUCCESS"
+
+    # prod 额外检查（VERSIONING.md）: /api/health 返回的 version 必须 == tag
+    if [ "$ENV_NAME" = "prod" ] && [ -n "$VERSION_REF" ] && [ "$DRY_RUN" != "true" ]; then
+        log "prod 附加检查：/api/health version == $VERSION_REF"
+        APP_HEALTH_PATH="$(_app_get "$APP_KEY" ".health_path")"
+        [ -n "$APP_HEALTH_PATH" ] || APP_HEALTH_PATH="/api/health"
+        HEALTH_URL="http://$HOST:$ENVAPP_PORT$APP_HEALTH_PATH"
+        HEALTH_JSON="$(curl -fsS --max-time 10 "$HEALTH_URL" 2>/dev/null || echo '')"
+        if [ -z "$HEALTH_JSON" ]; then
+            log_err "prod 附加检查失败：$HEALTH_URL 不可达"
+            STATUS="FAILED"
+            bash "$SCRIPTS_DIR/rollback.sh" "$ENV_NAME" "$APP_KEY" || true
+        else
+            HEALTH_VER="$(echo "$HEALTH_JSON" | jq -r '.version // empty' 2>/dev/null || echo '')"
+            TAG_VER_BARE="${VERSION_REF#v}"
+            # 接受 v前缀或不带前缀两种返回
+            if [ "$HEALTH_VER" = "$VERSION_REF" ] || [ "$HEALTH_VER" = "$TAG_VER_BARE" ]; then
+                log_ok "prod 附加检查通过：health.version=$HEALTH_VER == tag=$VERSION_REF"
+            else
+                log_err "prod 附加检查失败：health.version='$HEALTH_VER' 不等于 tag=$VERSION_REF"
+                log_err "请确认 /api/health 已正确暴露 version 字段。参见："
+                log_err "  knowledge-repos/management/PRINCIPLES/VERSIONING.md"
+                STATUS="FAILED"
+                bash "$SCRIPTS_DIR/rollback.sh" "$ENV_NAME" "$APP_KEY" || true
+            fi
+        fi
+    fi
 fi
 
 # ============================================================

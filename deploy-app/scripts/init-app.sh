@@ -272,6 +272,25 @@ fi
 # 5. 自动添加到 environments.json（可选）
 # ============================================================
 ENV_FILE="$CONFIG_DIR/environments.json"
+REGISTRY_FILE="/var/lib/openclaw/.openclaw/workspace/knowledge-repos/projects/_registry.json"
+
+# 从 _registry.json 读取 project code（端口公式所需）
+lookup_project_code() {
+    local app="$1"
+    [ -f "$REGISTRY_FILE" ] || { echo ""; return; }
+    jq -r --arg k "$app" '.projects[$k].code // empty' "$REGISTRY_FILE"
+}
+
+# 环境号段表（与 PRINCIPLES/PORT-ALLOCATION.md 严格一致）
+env_base() {
+    case "$1" in
+        proto) echo 3000 ;;
+        test)  echo 3100 ;;
+        demo)  echo 3200 ;;
+        prod)  echo 3900 ;;
+        *)     echo "" ;;
+    esac
+}
 
 # 检查 environments.json 中是否已包含该应用
 if ! jq -e ".environments.demo.apps[\"$APP_KEY\"]" "$ENV_FILE" >/dev/null 2>&1; then
@@ -283,22 +302,30 @@ if ! jq -e ".environments.demo.apps[\"$APP_KEY\"]" "$ENV_FILE" >/dev/null 2>&1; 
             read -p "是否自动添加到 demo 环境？(Y/n): " -r
         fi
         if [ "$NO_INTERACTIVE" = "true" ] || [[ $REPLY =~ ^[Yy]$ ]] || [ -z "$REPLY" ]; then
-            # 自动分配端口
-            # 查找最大端口号
-            MAX_PORT="$(jq -r '.environments.demo.apps | to_entries | map(.value.port) | max' "$ENV_FILE" 2>/dev/null || echo 3100)"
-            NEW_PORT="$((MAX_PORT + 1))"
-            
+            # 从 _registry.json 读取 project code，按公式 端口 = env_base + code 分配
+            PROJ_CODE="$(lookup_project_code "$APP_KEY")"
+            if [ -z "$PROJ_CODE" ]; then
+                log_err "项目 '$APP_KEY' 未在 _registry.json 中注册。"
+                log_err "请先跑：bash /var/lib/openclaw/.openclaw/workspace/skills/project-mgmt/scripts/new-project.sh $APP_KEY <显示名>"
+                log_err "参见：knowledge-repos/management/PRINCIPLES/PORT-ALLOCATION.md"
+                exit 1
+            fi
+            DEMO_BASE="$(env_base demo)"
+            NEW_PORT=$((DEMO_BASE + 10#$PROJ_CODE))
+
+            log_ok "依据 PORT-ALLOCATION.md 公式计算: $DEMO_BASE + $PROJ_CODE = $NEW_PORT"
+
             TEMP_ENV="$(mktemp -t envs-merged-XXXXXX.json)"
             ENV_DATA="$(cat "$ENV_FILE")"
-            
+
             NEW_ENV="$(jq ".environments.demo.apps += { \"$APP_KEY\": {
                 \"port\": $NEW_PORT,
-                \"pm2_name\": \"$APP_KEY\"
+                \"pm2_name\": \"demo-$APP_KEY\"
             }}" <<<"$ENV_DATA")"
-            
+
             echo "$NEW_ENV" | jq '.' > "$TEMP_ENV"
             mv -f "$TEMP_ENV" "$ENV_FILE"
-            log_ok "已添加到 demo 环境，端口: $NEW_PORT"
+            log_ok "已添加到 demo 环境，端口: $NEW_PORT (公式: 3200 + $PROJ_CODE)"
         fi
     fi
 else
