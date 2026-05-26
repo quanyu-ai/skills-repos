@@ -1,9 +1,13 @@
 #!/bin/bash
 # release.sh - 版本发布脚本（四联动机制的入口）
 # 用法:
-#   release.sh <app_id> --bump major|minor|patch
-#   release.sh <app_id> --explicit v1.2.3
+#   release.sh <app_id> --bump major|minor|patch [--force] [--dry-run]
+#   release.sh <app_id> --explicit v1.2.3 [--force] [--dry-run]
 #   release.sh <app_id> --bump patch --dry-run
+#
+# 加固项 (2026-05-26):
+#   - git working tree 必须干净 (除非 --force)
+#   - CHANGELOG 草稿不能为空 (除非 --force)
 #
 # 行为:
 #   1. 从 _registry.json 找到项目代码目录
@@ -29,8 +33,12 @@ REGISTRY="$WS_ROOT/knowledge-repos/projects/_registry.json"
 usage() {
     cat <<USAGE
 Usage:
-  $(basename "$0") <app_id> --bump major|minor|patch [--dry-run]
-  $(basename "$0") <app_id> --explicit vX.Y.Z [--dry-run]
+  $(basename "$0") <app_id> --bump major|minor|patch [--force] [--dry-run]
+  $(basename "$0") <app_id> --explicit vX.Y.Z [--force] [--dry-run]
+
+选项:
+  --force       跳过 working-tree 干净校验 与 CHANGELOG 非空校验（应急用）
+  --dry-run     仅预览
 
 参见: knowledge-repos/management/PRINCIPLES/VERSIONING.md
 USAGE
@@ -40,12 +48,13 @@ USAGE
 APP_ID="${1:-}"; [ -z "$APP_ID" ] && usage
 shift
 
-BUMP=""; EXPLICIT=""; DRY_RUN="false"
+BUMP=""; EXPLICIT=""; DRY_RUN="false"; FORCE="false"
 while [ $# -gt 0 ]; do
     case "$1" in
         --bump)     BUMP="$2"; shift 2 ;;
         --explicit) EXPLICIT="$2"; shift 2 ;;
         --dry-run)  DRY_RUN="true"; shift ;;
+        --force)    FORCE="true"; shift ;;
         -h|--help)  usage ;;
         *)          die "未知参数: $1" ;;
     esac
@@ -84,6 +93,21 @@ log_ok "package.json: $PKG"
 
 # 3. 读上一 tag
 cd "$GIT_ROOT"
+
+# 3.0 working tree 干净校验（除非 --force）
+if [ "$FORCE" != "true" ]; then
+    DIRTY="$(git status --porcelain)"
+    if [ -n "$DIRTY" ]; then
+        log_err "git working tree 不干净，拒绝 release："
+        echo "$DIRTY" | sed 's/^/    /' >&2
+        log_err "请先 commit / stash / clean。应急可用 --force 强制。"
+        exit 1
+    fi
+    log_ok "working tree clean"
+else
+    log_warn "--force 启用，跳过 working tree 校验"
+fi
+
 LAST_TAG="$(git tag --sort=-creatordate 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -z "$LAST_TAG" ] && LAST_TAG="v0.0.0"
 log "上一个 tag: $LAST_TAG"
@@ -105,6 +129,22 @@ else
 fi
 NEW_VER="${NEW_TAG#v}"
 log_ok "新版本号: $NEW_TAG (package.json.version = $NEW_VER)"
+
+# 4.5 预算 CHANGELOG 草稿是否为空（越早报错越好）
+if [ "$LAST_TAG" = "v0.0.0" ]; then
+    COMMIT_LIST_PREFLIGHT="$(git log --oneline -n 20 || true)"
+else
+    COMMIT_LIST_PREFLIGHT="$(git log --oneline "${LAST_TAG}..HEAD" || true)"
+fi
+if [ -z "$(echo "$COMMIT_LIST_PREFLIGHT" | tr -d '[:space:]')" ]; then
+    if [ "$FORCE" = "true" ]; then
+        log_warn "CHANGELOG 草稿为空 (从 $LAST_TAG 到 HEAD 无 commit)，--force 强过"
+    else
+        log_err "CHANGELOG 草稿为空：从 $LAST_TAG 到 HEAD 无 commit，拒绝 release"
+        log_err "请先 commit 有意义的变更，或用 --force 强制发 milestone tag"
+        exit 1
+    fi
+fi
 
 if [ "$DRY_RUN" = "true" ]; then
     log_warn "dry-run: 仅展示，不写不 commit"
@@ -133,6 +173,18 @@ log_ok "package.json.version 已更新为 $NEW_VER"
 # 6. 追加 CHANGELOG.md
 CHANGELOG="$GIT_ROOT/CHANGELOG.md"
 TODAY="$(date '+%F')"
+
+# 6.0 预构造 commit 清单（preflight 已筛查过空与 --force）
+if [ "$LAST_TAG" = "v0.0.0" ]; then
+    COMMIT_LIST="$(git log --oneline -n 20 || true)"
+else
+    COMMIT_LIST="$(git log --oneline "${LAST_TAG}..HEAD" || true)"
+fi
+if [ -z "$(echo "$COMMIT_LIST" | tr -d '[:space:]')" ]; then
+    # 只会在 --force 路径走到这里
+    COMMIT_LIST="- (no changes since $LAST_TAG; release forced)"
+fi
+
 TMP_CL="$(mktemp)"
 {
     echo "# CHANGELOG"
@@ -140,9 +192,9 @@ TMP_CL="$(mktemp)"
     echo "## $NEW_TAG — $TODAY"
     echo ""
     if [ "$LAST_TAG" = "v0.0.0" ]; then
-        git log --oneline -n 20 | sed 's/^/- /'
+        echo "$COMMIT_LIST" | sed 's/^/- /'
     else
-        git log --oneline "${LAST_TAG}..HEAD" | sed 's/^/- /'
+        echo "$COMMIT_LIST" | sed 's/^/- /'
     fi
     echo ""
     if [ -f "$CHANGELOG" ]; then

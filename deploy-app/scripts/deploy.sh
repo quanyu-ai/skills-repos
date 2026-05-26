@@ -1,6 +1,6 @@
 #!/bin/bash
 # deploy.sh - Phase 2 主部署脚本
-# 用法: ./deploy.sh <env> <app> [--version <git_sha_or_tag>] [--approved-by <user>] [--skip-build] [--dry-run]
+# 用法: ./deploy.sh <env> <app> [--version <git_sha_or_tag>] [--approved-by <user>] [--skip-build] [--skip-db] [--db-only] [--dry-run]
 #
 # 严格按 deployment-standard.md §2.0.1-§2.0.4 执行:
 #   * Next.js 必须 -H 0.0.0.0
@@ -37,12 +37,14 @@ die()     { log_err "$*"; exit 1; }
 # ============================================================
 usage() {
     cat <<USAGE
-Usage: $(basename "$0") <env> <app> [--version <ref>] [--approved-by <user>] [--skip-build] [--dry-run]
+Usage: $(basename "$0") <env> <app> [--version <ref>] [--approved-by <user>] [--skip-build] [--skip-db] [--db-only] [--dry-run]
   <env>             环境名: proto | test | demo | prod
   <app>             应用 key (apps.json 中定义)
   --version <ref>   指定 git tag/sha (默认: 当前默认分支 HEAD)
   --approved-by <user>  审批人 (prod 必需)
   --skip-build      跳过构建步骤
+  --skip-db         跳过 DB 联动（应急逃生口；将在 DEPLOY-LOG.md notes 标注）
+  --db-only         只跑 DB 联动，不部署代码（调试用）
   --dry-run         只打印操作，不实际执行
 USAGE
     exit 1
@@ -56,6 +58,8 @@ shift 2 || true
 VERSION_REF=""
 APPROVED_BY=""
 SKIP_BUILD="false"
+SKIP_DB="false"
+DB_ONLY="false"
 DRY_RUN="false"
 
 while [ $# -gt 0 ]; do
@@ -63,11 +67,17 @@ while [ $# -gt 0 ]; do
         --version)      VERSION_REF="${2:-}"; shift 2 ;;
         --approved-by)  APPROVED_BY="${2:-}"; shift 2 ;;
         --skip-build)   SKIP_BUILD="true"; shift ;;
+        --skip-db)      SKIP_DB="true"; shift ;;
+        --db-only)      DB_ONLY="true"; shift ;;
         --dry-run)      DRY_RUN="true"; shift ;;
         -h|--help)      usage ;;
         *)              die "未知参数: $1" ;;
     esac
 done
+
+if [ "$SKIP_DB" = "true" ] && [ "$DB_ONLY" = "true" ]; then
+    die "--skip-db 与 --db-only 互斥"
+fi
 
 # ============================================================
 # 1.2 工具函数（提前到 D1/D2 之前，供门禁/锁使用）
@@ -481,6 +491,98 @@ else
             || log_warn "build_cmd 为空，跳过构建"
     fi
     log_ok "构建完成"
+fi
+
+# ============================================================
+# 6.4 数据库联动 (PRINCIPLE: DB-DEPLOY-INTEGRATION.md)
+#     仅当 apps.json[$APP_KEY].env_config[$ENV_NAME].database 存在时触发
+# ============================================================
+DB_SKILL_DIR="$SKILL_DIR/../database-config"
+DB_STATE=""          # missing / up_to_date / behind:N:list / skipped
+
+step_db_check_and_apply() {
+    if [ "$SKIP_DB" = "true" ]; then
+        log_warn "--skip-db 启用，跳过数据库联动（应急逃生口，请在 DEPLOY-LOG.md notes 标注）"
+        DB_STATE="skipped"
+        return 0
+    fi
+
+    local db_type
+    db_type=$(jq -r --arg a "$APP_KEY" --arg e "$ENV_NAME" \
+        '.apps[$a].env_config[$e].database.type // empty' "$APPS_JSON")
+    if [ -z "$db_type" ]; then
+        log "[db] apps.json[$APP_KEY].env_config[$ENV_NAME].database 未配置，跳过"
+        DB_STATE="none"
+        return 0
+    fi
+
+    if [ ! -d "$DB_SKILL_DIR" ]; then
+        log_warn "database-config skill 不在 ($DB_SKILL_DIR)，跳过 DB 联动"
+        DB_STATE="skill_missing"
+        return 0
+    fi
+
+    log "Step 6.4: DB 三态探测 (probe)"
+    if [ "$DRY_RUN" = "true" ]; then
+        log_warn "[dry-run] 会调 check-db.sh $ENV_NAME --app $APP_KEY --mode probe"
+        DB_STATE="dry-run"
+        return 0
+    fi
+
+    DB_STATE="$(bash "$DB_SKILL_DIR/scripts/check-db.sh" "$ENV_NAME" --app "$APP_KEY" --mode probe 2>/dev/null | tail -1)" \
+        || die "check-db.sh probe 执行失败。请检查数据库连接或用 --skip-db 临时绕过"
+    log_ok "[db] probe 返回: $DB_STATE"
+
+    case "$DB_STATE" in
+        missing)
+            log "[db] 状态一：数据库不存在，自动建库 + migrate"
+            bash "$DB_SKILL_DIR/scripts/init-db.sh" "$ENV_NAME" --app "$APP_KEY" --non-interactive \
+                || die "[db] init-db.sh 失败，部署中止"
+            bash "$DB_SKILL_DIR/scripts/migrate-db.sh" "$ENV_NAME" --app "$APP_KEY" --non-interactive \
+                || die "[db] migrate-db.sh 失败，部署中止，请 DBA 介入"
+            log_ok "[db] 建库 + 迁移完成"
+            ;;
+        up_to_date|none|skill_missing)
+            log_ok "[db] schema 最新或无 schema 概念，跳过"
+            ;;
+        behind:*)
+            local detail="${DB_STATE#behind:}"
+            if [ "$ENV_NAME" = "prod" ]; then
+                log_warn "[db] 🔴 RED LINE: prod 数据库存在 schema 落后 ($detail)"
+                log_warn "[db] deploy-app 不会自动 migrate；请走人工 DBA 流程"
+                log_warn "[db] 参见 PRINCIPLES/DB-DEPLOY-INTEGRATION.md §四"
+                # 不中断部署（仅警告，代码可先上）
+            else
+                log_warn "[db] schema 落后 ($detail)"
+                if [ -t 0 ]; then
+                    read -r -t 5 -p "是否执行 migrate? (y/N) " answer || answer="N"
+                else
+                    answer="N"
+                fi
+                case "${answer:-N}" in
+                    y|Y|yes|YES)
+                        bash "$DB_SKILL_DIR/scripts/migrate-db.sh" "$ENV_NAME" --app "$APP_KEY" --non-interactive \
+                            || die "[db] migrate-db.sh 失败，部署中止"
+                        log_ok "[db] 迁移完成"
+                        ;;
+                    *)
+                        log_warn "[db] 用户选择跳过 migrate，继续部署代码（可能运行时报字段缺失）"
+                        ;;
+                esac
+            fi
+            ;;
+        *)
+            die "[db] check-db.sh 返回未知状态: $DB_STATE"
+            ;;
+    esac
+}
+
+step_db_check_and_apply
+
+# --db-only 提前退出（调试用）
+if [ "$DB_ONLY" = "true" ]; then
+    log_ok "--db-only 模式完成，跳过后续部署步骤"
+    exit 0
 fi
 
 # ============================================================
