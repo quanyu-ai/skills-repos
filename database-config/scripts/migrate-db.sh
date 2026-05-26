@@ -1,144 +1,213 @@
 #!/usr/bin/env bash
-# migrate-db.sh - 数据库迁移脚本
+# migrate-db.sh — 数据库迁移路由器（D 阶段重构）
+#
+# 设计：本脚本仅做"识别 + 派发 + 收集结果"，绝不直接执行 migrate。
+#       真正的迁移由 migrators/<tool>.sh 完成。
 #
 # 用法:
-#   ./migrate-db.sh <env> <app>                    旧行为（兼容）
-#   ./migrate-db.sh <env> --app <key> [--non-interactive]
-#                                                  新行为：明确从 apps.json.env_config 读配置
+#   ./migrate-db.sh <env> <app>                          兼容
+#   ./migrate-db.sh <env> --app <key> [--non-interactive] 推荐
 #
-# 参考: knowledge-repos/management/PRINCIPLES/DB-DEPLOY-INTEGRATION.md
+# 参考: knowledge-repos/management/PRINCIPLES/MIGRATION-ARCHITECTURE.md
+#       knowledge-repos/management/PRINCIPLES/DB-DEPLOY-INTEGRATION.md
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+MIGRATORS_DIR="$PROJECT_DIR/migrators"
 CONFIG_DIR="/var/lib/openclaw/.openclaw/workspace/skills/deploy-app/config"
 
 source "$PROJECT_DIR/utils/config-utils.sh"
 source "$PROJECT_DIR/utils/db-utils.sh"
 
-# ----------------------------------------------------------------
-# 从 apps.json 读 app+env database 字段
-# ----------------------------------------------------------------
-_app_db_get() {
-    local app="$1" env="$2" field="$3"
-    jq -r --arg a "$app" --arg e "$env" --arg f "$field" \
-        ".apps[\$a].env_config[\$e].database[\$f] // empty" \
+# ============================================================
+# 配置读取
+# ============================================================
+_app_get() {
+    local app="$1" path="$2"
+    jq -r --arg a "$app" \
+        ".apps[\$a] | $path // empty" \
         "$CONFIG_DIR/apps.json"
+}
+
+_app_env_get() {
+    local app="$1" env="$2" path="$3"
+    jq -r --arg a "$app" --arg e "$env" \
+        ".apps[\$a].env_config[\$e] | $path // empty" \
+        "$CONFIG_DIR/apps.json"
+}
+
+_app_db_field() {
+    local app="$1" env="$2" field="$3"
+    _app_env_get "$app" "$env" ".database.\"$field\""
+}
+
+_app_mig_field() {
+    # 优先 env_config.<env>.migration.<field>，回退 app 根 migration.<field>
+    local app="$1" env="$2" field="$3"
+    local v
+    v=$(_app_env_get "$app" "$env" ".migration.$field")
+    if [ -n "$v" ] && [ "$v" != "null" ]; then
+        echo "$v"; return
+    fi
+    _app_get "$app" ".migration.$field"
+}
+
+_app_mig_cmd() {
+    local app="$1" env="$2" key="$3"
+    local v
+    v=$(_app_env_get "$app" "$env" ".migration.commands.\"$key\"")
+    if [ -n "$v" ] && [ "$v" != "null" ]; then
+        echo "$v"; return
+    fi
+    _app_get "$app" ".migration.commands.\"$key\""
 }
 
 _app_project_path() {
     local app="$1" env="$2"
     local p
-    p=$(jq -r --arg a "$app" --arg e "$env" \
-        ".apps[\$a].env_config[\$e].project_path // empty" \
-        "$CONFIG_DIR/apps.json")
-    [ -n "$p" ] && { echo "$p"; return; }
-    jq -r --arg a "$app" \
-        ".apps[\$a].project_code_path // .apps[\$a].project_path // empty" \
-        "$CONFIG_DIR/apps.json"
+    p=$(_app_env_get "$app" "$env" ".project_path")
+    [ -n "$p" ] && [ "$p" != "null" ] && { echo "$p"; return; }
+    _app_get "$app" '.project_code_path // .project_path'
 }
 
-# 从 app+env 生成 DATABASE_URL
-_app_connection_string() {
-    local env="$1" app="$2"
-    local type=$(_app_db_get "$app" "$env" "type")
-    local host=$(_app_db_get "$app" "$env" "host")
-    local port=$(_app_db_get "$app" "$env" "port")
-    local db=$(_app_db_get "$app" "$env" "database")
-    local user=$(_app_db_get "$app" "$env" "username")
-    local pass=$(_app_db_get "$app" "$env" "password")
-    case "$type" in
-        postgresql) echo "postgresql://${user}:${pass}@${host}:${port}/${db}" ;;
-        mysql)      echo "mysql://${user}:${pass}@${host}:${port}/${db}" ;;
-        *) return 1 ;;
-    esac
-}
-
-# ----------------------------------------------------------------
-# 新接口：按 app 迁移
-# ----------------------------------------------------------------
-migrate_app_database() {
-    local env="$1" app="$2"
-    log_info "按 app 迁移数据库 ($env / $app)..."
-
-    local proj_path; proj_path=$(_app_project_path "$app" "$env")
-    [ -z "$proj_path" ] && { log_error "找不到 app 项目路径: $app"; return 1; }
-    [ -d "$proj_path" ] || { log_error "项目路径不存在: $proj_path"; return 1; }
-    log_info "项目路径: $proj_path"
-
-    # 找 prisma schema
-    local prisma_schema=""
-    for cand in "$proj_path/prisma/schema.prisma" "$proj_path/../prisma/schema.prisma" "$proj_path/../../prisma/schema.prisma"; do
-        if [ -f "$cand" ]; then prisma_schema="$cand"; break; fi
+# ============================================================
+# 自动探测（fallback）
+# 返回 stdout 两行： tool=<x>\nschema_path=<y>
+# 失败返回退出码 1
+# ============================================================
+_probe_tool() {
+    local proj="$1" db_type="$2"
+    # 1~4: prisma 各种位置
+    local candidates=(
+        "$proj/prisma/schema.prisma"
+        "$proj/packages/db/prisma/schema.prisma"
+    )
+    # 5: monorepo 通配
+    for f in "$proj"/packages/*/prisma/schema.prisma "$proj"/apps/*/prisma/schema.prisma; do
+        [ -f "$f" ] && candidates+=("$f")
     done
 
-    local conn_str
-    conn_str=$(_app_connection_string "$env" "$app") || {
-        log_error "无法生成 DATABASE_URL ($env / $app)"; return 1
-    }
+    for cand in "${candidates[@]}"; do
+        if [ -f "$cand" ]; then
+            local prov
+            prov=$(awk '/^[[:space:]]*datasource[[:space:]]/{flag=1;next} flag && /\}/{flag=0} flag && /provider[[:space:]]*=/{match($0,/"[^"]+"/); if(RSTART){print substr($0,RSTART+1,RLENGTH-2); exit}}' "$cand")
+            case "$prov" in
+                postgresql)
+                    echo "tool=prisma-postgresql"
+                    echo "schema_path=$(realpath --relative-to="$proj" "$cand")"
+                    return 0 ;;
+                mysql)
+                    echo "tool=prisma-mysql"
+                    echo "schema_path=$(realpath --relative-to="$proj" "$cand")"
+                    return 0 ;;
+                *) ;;
+            esac
+        fi
+    done
 
-    if [ -n "$prisma_schema" ]; then
-        log_info "发现 Prisma schema: $prisma_schema"
-        local prisma_root; prisma_root="$(dirname "$(dirname "$prisma_schema")")"
-        log_info "执行 prisma migrate deploy..."
-        if (cd "$prisma_root" && DATABASE_URL="$conn_str" \
-                npx --yes prisma migrate deploy --schema "$prisma_schema"); then
-            log_ok "Prisma 迁移成功"
-        else
-            log_error "Prisma 迁移失败"
+    # raw-sql 探测：常见 sql 目录
+    for d in db/migrations sql migrations chenxi-backend/sql; do
+        if [ -d "$proj/$d" ] && ls "$proj/$d"/*.sql >/dev/null 2>&1; then
+            echo "tool=raw-sql"
+            echo "schema_path=$d"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# ============================================================
+# 主路由
+# ============================================================
+route_and_dispatch() {
+    local env="$1" app="$2"
+    log_info "=========================================="
+    log_info "[migrate-db 路由器] env=$env app=$app"
+    log_info "=========================================="
+
+    # 1. 收集 DB 连接
+    local db_type db_host db_port db_name db_user db_pass
+    db_type=$(_app_db_field "$app" "$env" "type")
+    db_host=$(_app_db_field "$app" "$env" "host")
+    db_port=$(_app_db_field "$app" "$env" "port")
+    db_name=$(_app_db_field "$app" "$env" "database")
+    db_user=$(_app_db_field "$app" "$env" "username")
+    db_pass=$(_app_db_field "$app" "$env" "password")
+
+    [ -z "$db_type" ] && { log_error "apps.json[$app].env_config[$env].database 缺失"; return 1; }
+
+    # 2. 收集项目路径
+    local proj_path
+    proj_path=$(_app_project_path "$app" "$env")
+    [ -z "$proj_path" ] && { log_error "找不到项目路径"; return 1; }
+    [ -d "$proj_path" ] || { log_error "项目路径不存在: $proj_path"; return 1; }
+
+    # 3. 路由：显式 migration.tool 优先
+    local tool schema_path cmd_deploy cmd_seed
+    tool=$(_app_mig_field "$app" "$env" "tool")
+    schema_path=$(_app_mig_field "$app" "$env" "schema_path")
+    cmd_deploy=$(_app_mig_cmd "$app" "$env" "deploy")
+    cmd_seed=$(_app_mig_cmd "$app" "$env" "seed")
+
+    if [ -n "$tool" ]; then
+        log_info "[路由] 显式声明: tool=$tool schema_path=$schema_path"
+    else
+        log_info "[路由] 未显式声明，自动探测..."
+        local probe_out
+        if ! probe_out=$(_probe_tool "$proj_path" "$db_type"); then
+            log_error "无法自动探测迁移工具"
+            log_error "请在 apps.json env_config.$env.migration 显式声明 tool 和 schema_path"
+            log_error "参见: knowledge-repos/management/PRINCIPLES/MIGRATION-ARCHITECTURE.md"
             return 1
         fi
-        # seed (可选, 失败仅 warn)
-        if [ -f "$proj_path/prisma/seed.ts" ] || [ -f "$prisma_root/prisma/seed.ts" ]; then
-            local seed_file
-            [ -f "$proj_path/prisma/seed.ts" ] && seed_file="$proj_path/prisma/seed.ts" || seed_file="$prisma_root/prisma/seed.ts"
-            log_info "执行 seed: $seed_file"
-            (cd "$prisma_root" && DATABASE_URL="$conn_str" npx --yes tsx "$seed_file") \
-                && log_ok "seed 完成" || log_warn "seed 失败（已忽略）"
+        tool=$(echo "$probe_out" | grep '^tool=' | cut -d= -f2)
+        schema_path=$(echo "$probe_out" | grep '^schema_path=' | cut -d= -f2-)
+        log_ok "[路由] 自动探测命中: tool=$tool schema_path=$schema_path"
+    fi
+
+    # 4. 检查 migrator 存在
+    local migrator="$MIGRATORS_DIR/$tool.sh"
+    if [ ! -f "$migrator" ]; then
+        log_error "migrator 未实装: $tool"
+        log_error "已可用: $(ls "$MIGRATORS_DIR" | grep '\.sh$' | tr '\n' ' ')"
+        if [ -f "$migrator.template" ]; then
+            log_error "存在 template，可参照实装: $migrator.template"
         fi
-        return 0
+        return 1
     fi
 
-    log_warn "未找到 Prisma schema，跳过迁移（仅 Prisma 自动迁移已实装）"
-    return 0
+    # 5. 派发
+    log_info "[派发] $migrator"
+    DB_HOST="$db_host" DB_PORT="$db_port" DB_NAME="$db_name" \
+    DB_USER="$db_user" DB_PASSWORD="$db_pass" DB_TYPE="$db_type" \
+    PROJECT_PATH="$proj_path" SCHEMA_PATH="$schema_path" \
+    COMMAND_DEPLOY="${cmd_deploy:-}" COMMAND_SEED="${cmd_seed:-}" \
+    ENV_NAME="$env" \
+    bash "$migrator"
+    local rc=$?
+    log_info "[结果] migrator exit=$rc"
+    return $rc
 }
 
-# ----------------------------------------------------------------
-# 旧接口（兼容）
-# ----------------------------------------------------------------
-migrate_database_legacy() {
-    local env="$1" app="$2"
-    log_info "[legacy] 数据库迁移 ($env: $app)..."
-    check_config_files
-    validate_env "$env"
-    validate_app "$app"
-    local project_path=$(read_app_config "$app" "project_path")
-    [ -z "$project_path" ] || [ ! -d "$project_path" ] && {
-        log_error "应用路径不存在: $project_path"; return 1
-    }
-    if [ -f "$project_path/prisma/schema.prisma" ]; then
-        log_info "Prisma 检测到，走新接口"
-        migrate_app_database "$env" "$app"
-        return $?
-    fi
-    log_warn "[legacy] 非 Prisma 项目，已退役（TypeORM/Sequelize 接口暂不实装）"
-    return 0
-}
-
-# ----------------------------------------------------------------
+# ============================================================
 # CLI
-# ----------------------------------------------------------------
+# ============================================================
 print_help() {
-    cat <<EOF
+    cat <<'EOF'
 用法:
-  $0 <env> <app>                          旧形参（兼容）
-  $0 <env> --app <key> [--non-interactive]
-                                          推荐形参
+  migrate-db.sh <env> <app>                          兼容形参
+  migrate-db.sh <env> --app <key> [--non-interactive] 推荐形参
 
 环境: proto | test | demo | prod
 
-参见: knowledge-repos/management/PRINCIPLES/DB-DEPLOY-INTEGRATION.md
+本脚本是路由器，只识别和派发；实际迁移由 migrators/<tool>.sh 执行。
+
+参见:
+  knowledge-repos/management/PRINCIPLES/MIGRATION-ARCHITECTURE.md
+  knowledge-repos/management/PRINCIPLES/DB-DEPLOY-INTEGRATION.md
 EOF
 }
 
@@ -150,7 +219,6 @@ while [[ $# -gt 0 ]]; do
         --non-interactive|--auto-yes) NON_INTERACTIVE=1; shift ;;
         proto|test|demo|prod) ENV="$1"; shift ;;
         *)
-            # 兼容旧形参：第二个 positional 当作 app
             if [ -z "$APP" ] && [ -n "$ENV" ]; then APP="$1"; shift; continue; fi
             echo "无效参数: $1" >&2; print_help; exit 1
             ;;
@@ -160,5 +228,5 @@ done
 [ -z "$ENV" ] && { echo "未指定环境" >&2; print_help; exit 1; }
 [ -z "$APP" ] && { echo "未指定 app" >&2; print_help; exit 1; }
 
-migrate_app_database "$ENV" "$APP"
+route_and_dispatch "$ENV" "$APP"
 exit $?

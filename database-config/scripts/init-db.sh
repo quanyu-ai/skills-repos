@@ -69,10 +69,10 @@ _init_postgres() {
         IS_LOCAL="true"
     fi
 
-    # admin 执行函数
+    # admin 执行函数（cd /tmp 避免 sudo 在不可读目录的 warning）
     _admin_psql() {
         if [ "$IS_LOCAL" = "true" ] && command -v sudo >/dev/null 2>&1; then
-            sudo -u postgres psql -p "$port" -d postgres "$@"
+            (cd /tmp && sudo -u postgres psql -p "$port" -d postgres "$@")
         else
             local au="${PGADMIN_USER:-postgres}"
             local ap="${PGADMIN_PASSWORD:-}"
@@ -113,8 +113,8 @@ _init_postgres() {
     # 5. 创建扩展 uuid-ossp（需 superuser 权限，用 admin 账号连目标库）
     log_info "创建数据库扩展 uuid-ossp..."
     if [ "$IS_LOCAL" = "true" ] && command -v sudo >/dev/null 2>&1; then
-        sudo -u postgres psql -p "$port" -d "$db_name" \
-            -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" >/dev/null 2>&1 \
+        (cd /tmp && sudo -u postgres psql -p "$port" -d "$db_name" \
+            -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";") >/dev/null 2>&1 \
             || log_warn "无法创建 uuid-ossp 扩展（可忽略）"
     else
         PGPASSWORD="${PGADMIN_PASSWORD:-}" psql -h "$host" -p "$port" -U "${PGADMIN_USER:-postgres}" -d "$db_name" \

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# TEMPLATE - NOT IMPLEMENTED
+# migrators/flyway.sh.template
+#
+# 启用步骤：
+# 1. mv flyway.sh.template flyway.sh
+# 2. 实装 main()
+# 3. 测试通过后在 MIGRATION-ARCHITECTURE.md 标记 ✅
+#
+# Flyway 调用：
+#   flyway -url=jdbc:postgresql://$DB_HOST:$DB_PORT/$DB_NAME \
+#          -user=$DB_USER -password=$DB_PASSWORD \
+#          -locations=filesystem:$PROJECT_PATH/$SCHEMA_PATH migrate
+#
+# 注意：
+#   - flyway CLI 需预装（apt install flyway 或下载二进制）
+#   - DB_TYPE 决定 jdbc 前缀：postgresql / mysql / oracle:thin / sqlserver
+#   - SCHEMA_PATH 通常是 db/migration 目录
+#
+# 输出契约同 MIGRATION-ARCHITECTURE.md §五
+
+echo "[flyway] TEMPLATE NOT IMPLEMENTED" >&2
+echo '{"status":"fail","tool":"flyway","stage":"not-implemented","error":"TEMPLATE file. Rename to flyway.sh and implement main()."}'
+exit 5

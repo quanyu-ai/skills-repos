@@ -20,11 +20,46 @@ deploy-app skill 的两份核心配置 schema 说明。**字段名严格按本�
       "health_path":  "<string, required> 健康检查路径，如 /api/health",
       "framework":    "<enum, required> nextjs|nestjs|static|docker-only",
       "node_version": "<string, optional> 如 20.x",
-      "env_files":    "<string[], optional> 需要额外加载的 .env 路径列表"
+      "env_files":    "<string[], optional> 需要额外加载的 .env 路径列表",
+      "env_config":   "<object, optional, C+阶段> 按环境覆盖配置，详见下方「env_config 子 schema」"
     }
   }
 }
 ```
+
+### env_config 子 schema (C+ 阶段)
+
+```jsonc
+{
+  "env_config": {
+    "<env_name>": {                            // test/demo/prod
+      "project_path": "<string, optional> 覆盖 app.project_path",
+      "database": {                            // C 阶段
+        "type":     "<enum> postgresql|mysql|redis",
+        "host":     "<string>",
+        "port":     "<int>",
+        "database": "<string>",
+        "username": "<string>",
+        "password": "<string>"
+      },
+      "migration": {                           // D 阶段新增：插件化迁移声明
+        "tool":        "<enum> prisma-postgresql|prisma-mysql|raw-sql|typeorm|flyway|liquibase|oracle-raw",
+        "schema_path": "<string> 相对 project_path 的路径（文件或目录）",
+        "commands": {                          // 可选：完全自定义命令（覆盖默认 npx prisma migrate deploy）
+          "deploy": "<string> shell 命令",
+          "seed":   "<string> shell 命令"
+        },
+        "options": {                           // 可选：工具特定参数
+          "create_db_if_missing": "<bool>",
+          "lock_timeout_ms":      "<int>"
+        }
+      }
+    }
+  }
+}
+```
+
+`migration` 未声明 → migrate-db.sh 路由器会自动探测（prisma 路径 / SQL 目录）。详见 [MIGRATION-ARCHITECTURE.md](../../knowledge-repos/management/PRINCIPLES/MIGRATION-ARCHITECTURE.md)。
 
 ### `<app_key>` 命名规则
 

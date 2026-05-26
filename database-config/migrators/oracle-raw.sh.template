@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# TEMPLATE - NOT IMPLEMENTED
+# migrators/oracle-raw.sh.template
+#
+# 启用步骤：
+# 1. 服务器安装 oracle-instantclient-basic + sqlplus
+# 2. mv oracle-raw.sh.template oracle-raw.sh
+# 3. 实装 main() — 参考 raw-sql.sh 模式，但用 sqlplus
+# 4. 测试通过后在 MIGRATION-ARCHITECTURE.md 标记 ✅
+#
+# Oracle sqlplus 调用：
+#   sqlplus -S "$DB_USER/$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" <<EOF
+#   WHENEVER SQLERROR EXIT SQL.SQLCODE;
+#   @$sql_file
+#   EXIT;
+#   EOF
+#
+# 关键差异（与 raw-sql.sh 对比）：
+#   - 连接串用 service name 而非 db name： HOST:PORT/SERVICE_NAME
+#   - _migrations 表需 SEQUENCE + TRIGGER 模拟自增：
+#       CREATE TABLE _migrations (id NUMBER PRIMARY KEY, filename VARCHAR2(255) UNIQUE, applied_at TIMESTAMP DEFAULT SYSTIMESTAMP);
+#       CREATE SEQUENCE _migrations_seq START WITH 1;
+#       CREATE OR REPLACE TRIGGER _migrations_bi BEFORE INSERT ON _migrations FOR EACH ROW
+#         BEGIN :new.id := _migrations_seq.NEXTVAL; END;
+#   - 字符串引号用单引号，日期用 TO_DATE
+#   - 错误码：sqlplus 退出码 = SQL ORA-错误码
+#
+# 输出契约同 MIGRATION-ARCHITECTURE.md §五
+
+echo "[oracle-raw] TEMPLATE NOT IMPLEMENTED" >&2
+echo '{"status":"fail","tool":"oracle-raw","stage":"not-implemented","error":"TEMPLATE file. Install sqlplus, rename to oracle-raw.sh and implement main()."}'
+exit 5

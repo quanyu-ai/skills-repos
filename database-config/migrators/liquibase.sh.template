@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# TEMPLATE - NOT IMPLEMENTED
+# migrators/liquibase.sh.template
+#
+# 启用步骤：
+# 1. mv liquibase.sh.template liquibase.sh
+# 2. 实装 main()
+# 3. 测试通过后在 MIGRATION-ARCHITECTURE.md 标记 ✅
+#
+# Liquibase 调用：
+#   liquibase --changelog-file=$PROJECT_PATH/$SCHEMA_PATH/changelog.xml \
+#             --url=jdbc:postgresql://$DB_HOST:$DB_PORT/$DB_NAME \
+#             --username=$DB_USER --password=$DB_PASSWORD \
+#             update
+#
+# 注意：
+#   - liquibase CLI 需预装
+#   - SCHEMA_PATH 通常是 db/changelog 目录或 changelog.xml 文件
+#   - 同步支持多种 DB：postgresql / mysql / oracle / sqlserver
+#
+# 输出契约同 MIGRATION-ARCHITECTURE.md §五
+
+echo "[liquibase] TEMPLATE NOT IMPLEMENTED" >&2
+echo '{"status":"fail","tool":"liquibase","stage":"not-implemented","error":"TEMPLATE file. Rename to liquibase.sh and implement main()."}'
+exit 5
