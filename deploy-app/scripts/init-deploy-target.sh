@@ -80,22 +80,42 @@ esac
 PORT=$((ENV_BASE + 10#$PROJ_CODE))
 log_ok "依公式 PORT-ALLOCATION.md: $ENV_BASE + $PROJ_CODE = $PORT"
 
-# 3. 询问服务器
-echo
-echo "目标服务器候选:"
-echo "  1) localhost (本机)"
-echo "  2) 8.138.118.28 (阿里云)"
-echo "  3) 43.139.53.121 (腾讯云)"
-echo "  4) 自定义"
-read -p "选择 [1-4, 默认 1]: " -r SRV_CHOICE
-SRV_CHOICE="${SRV_CHOICE:-1}"
-case "$SRV_CHOICE" in
-    1) HOST="localhost" ;;
-    2) HOST="8.138.118.28" ;;
-    3) HOST="43.139.53.121" ;;
-    4) read -p "输入主机名/IP: " -r HOST ;;
-    *) die "非法选择" ;;
+# 3. 询问服务器（E 阶段：拒绝 localhost）
+validate_host_not_local_init() {
+    case "$1" in
+        localhost|127.0.0.1|::1|0.0.0.0|"") return 1 ;;
+        *) return 0 ;;
+    esac
+}
+# 从 baseline 读默认值（如不存在则用预设拓扑）
+BASELINE_JSON="$CONFIG_DIR/environments.json.baseline"
+DEFAULT_HOST=""
+if [ -f "$BASELINE_JSON" ]; then
+    DEFAULT_HOST="$(jq -r --arg e "$ENV_NAME" '.environments[$e].host // empty' "$BASELINE_JSON")"
+fi
+[ -n "$DEFAULT_HOST" ] || case "$ENV_NAME" in
+    prod) DEFAULT_HOST="43.139.53.121" ;;
+    *)    DEFAULT_HOST="8.138.118.28" ;;
 esac
+
+echo
+echo "目标服务器候选（禁止 localhost，AGENTS.md 铁律 6）:"
+echo "  1) 8.138.118.28 (阿里云)"
+echo "  2) 43.139.53.121 (腾讯云)"
+echo "  3) 自定义（公网 IP 或域名）"
+read -p "选择 [1-3, 默认从 baseline=$DEFAULT_HOST]: " -r SRV_CHOICE
+SRV_CHOICE="${SRV_CHOICE:-}"
+case "$SRV_CHOICE" in
+    "")  HOST="$DEFAULT_HOST" ;;
+    1)   HOST="8.138.118.28" ;;
+    2)   HOST="43.139.53.121" ;;
+    3)   read -p "输入主机名/IP（禁 localhost）: " -r HOST ;;
+    *)   die "非法选择" ;;
+esac
+
+if ! validate_host_not_local_init "$HOST"; then
+    die "host='$HOST' 是本地地址，被拒绝。请填公网 IP 或域名（SERVER-CONFIG.md）。"
+fi
 log_ok "目标主机: $HOST"
 
 # 4. DB 块构造（C 阶段：所有环境都规范化，不仅 prod；DB 服务器分离）
@@ -117,12 +137,15 @@ DB_SRV_CHOICE="${DB_SRV_CHOICE:-1}"
 case "$DB_SRV_CHOICE" in
     1) DB_HOST="$DEFAULT_DB_HOST"; DB_PORT="$DEFAULT_DB_PORT" ;;
     2)
-        read -p "输入 DB host: " -r DB_HOST
+        read -p "输入 DB host（禁 localhost）: " -r DB_HOST
         read -p "输入 DB port [5432]: " -r DB_PORT
         DB_PORT="${DB_PORT:-5432}"
         ;;
     *) die "非法选择" ;;
 esac
+if ! validate_host_not_local_init "$DB_HOST"; then
+    die "DB host='$DB_HOST' 是本地地址，被拒绝。请填公网 IP / 内网业务地址。"
+fi
 log_ok "DB 服务器: $DB_HOST:$DB_PORT"
 
 # 4.2 DB 名/用户名硬约束: <app_id>_<env>

@@ -1,12 +1,17 @@
 {
   "$schema": "./schema.md",
+  "_comment": "环境配置模板。三环境 host 必须公网 IP/域名（AGENTS.md 铁律 6）。DB 凭据放 apps.json.env_config.<env>.database。",
   "environments": {
     "demo": {
-      "host": "localhost",
+      "host": "PLACEHOLDER_DEMO_HOST",
       "ssh_user": "deploy",
       "ssh_key": "~/.ssh/deploy_local",
       "deploy_mode": "pm2",
       "deploy_base_path": "/var/www/demo",
+      "node_env": "production",
+      "use_https_cookies": "false",
+      "database_host": "PLACEHOLDER_DEMO_DB_HOST",
+      "database_port": 5432,
       "apps": {
         "console": {
           "port": 3101,
@@ -15,19 +20,27 @@
       }
     },
     "test": {
-      "host": "localhost",
+      "host": "PLACEHOLDER_TEST_HOST",
       "ssh_user": "deploy",
       "ssh_key": "~/.ssh/deploy_local",
       "deploy_mode": "pm2",
       "deploy_base_path": "/var/www/test",
+      "node_env": "production",
+      "use_https_cookies": "false",
+      "database_host": "PLACEHOLDER_TEST_DB_HOST",
+      "database_port": 5432,
       "apps": {}
     },
     "prod": {
       "host": "PLACEHOLDER_PROD_HOST",
       "ssh_user": "deploy",
       "ssh_key": "~/.ssh/deploy_prod",
-      "deploy_mode": "docker",
+      "deploy_mode": "pm2",
       "deploy_base_path": "/var/www/prod",
+      "node_env": "production",
+      "use_https_cookies": "true",
+      "database_host": "PLACEHOLDER_PROD_DB_HOST",
+      "database_port": 5432,
       "apps": {}
     }
   }

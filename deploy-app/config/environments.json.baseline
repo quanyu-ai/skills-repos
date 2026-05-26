@@ -1,0 +1,66 @@
+{
+  "$schema": "./schema.md",
+  "_comment": "BASELINE: 脱敏的环境配置基线，可入 git。三层覆盖：baseline → environments.json（本机覆盖，gitignore）→ environments.local.json（最终覆盖，gitignore）。详见 PRINCIPLES/SERVER-CONFIG.md。",
+  "_layers": {
+    "1_baseline": "environments.json.baseline（本文件，入 git，只含公开拓扑）",
+    "2_machine": "environments.json（本机覆盖，gitignore，可含敏感字段）",
+    "3_user": "environments.local.json（用户最终覆盖，gitignore）"
+  },
+  "environments": {
+    "demo": {
+      "host": "8.138.118.28",
+      "ssh_user": "deploy",
+      "ssh_key": "~/.ssh/deploy_local",
+      "deploy_mode": "pm2",
+      "deploy_base_path": "/var/www/demo",
+      "node_env": "production",
+      "use_https_cookies": "false",
+      "database_host": "8.138.118.28",
+      "database_port": 5432,
+      "apps": {
+        "console": {
+          "port": 3101,
+          "pm2_name": "demo-console"
+        },
+        "smartops": {
+          "port": 3204,
+          "pm2_name": "demo-smartops"
+        }
+      }
+    },
+    "test": {
+      "host": "8.138.118.28",
+      "ssh_user": "deploy",
+      "ssh_key": "~/.ssh/deploy_local",
+      "deploy_mode": "pm2",
+      "deploy_base_path": "/var/www/test",
+      "node_env": "production",
+      "use_https_cookies": "false",
+      "database_host": "8.138.118.28",
+      "database_port": 5432,
+      "apps": {
+        "smartops": {
+          "port": 3104,
+          "pm2_name": "test-smartops"
+        }
+      }
+    },
+    "prod": {
+      "host": "43.139.53.121",
+      "ssh_user": "deploy",
+      "ssh_key": "~/.ssh/deploy_prod",
+      "deploy_mode": "pm2",
+      "deploy_base_path": "/var/www/prod",
+      "node_env": "production",
+      "use_https_cookies": "true",
+      "database_host": "43.139.53.121",
+      "database_port": 5432,
+      "apps": {
+        "smartops": {
+          "port": 3904,
+          "pm2_name": "prod-smartops"
+        }
+      }
+    }
+  }
+}

@@ -175,4 +175,30 @@ deploy-app skill 的两份核心配置 schema 说明。**字段名严格按本�
 
 - ❌ 不要把真实 `apps.json` / `environments.json` 提交 git（已被 `.gitignore` 拦截）
 - ✅ 模板文件 `*.template` 可以入库（仅含示例，无敏感信息）
+- ✅ 基线文件 `environments.json.baseline` 必须入库（脱敏后的拓扑基准）
 - ✅ 任何含密码 / token 的字段不要进 environments.json，改走 OpenClaw env 注入
+
+---
+
+## E 阶段：environments.json 三层配置结构（2026-05-26）
+
+为了保证服务器拓扑基准能入 git、同时敏感凭据不泄露，environments.json 采用三层覆盖结构：
+
+| 层级 | 文件 | git 状态 | 用途 |
+|------|------|-----------|------|
+| L1 baseline | `environments.json.baseline` | ✅ 入 git | 脱敏拓扑基准（IP/SSH 用户/部署路径/端口）|
+| L2 machine | `environments.json` | ❌ gitignore | 本机覆盖（可含敏感字段）|
+| L3 user | `environments.local.json` | ❌ gitignore | 用户最终覆盖（调试、湽道路由）|
+
+**deploy.sh 读取顺序**：L2 是实际加载的定锐，L3 如存在则 deep merge 覆盖 L2。L1 仅作为拓扑基准 / 企业内可以共享参考。
+
+**服务器层 vs 应用层**（E 阶段划清责任）：
+
+| 字段类型 | 所在文件 |
+|----------|----------|
+| host / ssh_user / ssh_key / deploy_base_path / database_host / database_port | `environments.json` |
+| port / pm2_name / build/start_cmd / migration / database 凭据 | `apps.json`（env_config.<env>.database）|
+
+❗ `environments.json` 不再含 `database` 块（C 阶段后续清理，E 阶段完成彻底迁移）。
+
+**host 强制公网 IP（AGENTS.md 铁律 6）**：deploy.sh 启动时 `validate_host_not_local` 拒绝 `localhost / 127.0.0.1 / ::1 / 0.0.0.0`，需要临时豁免用 `--allow-localhost`。详见 `knowledge-repos/management/PRINCIPLES/SERVER-CONFIG.md`。

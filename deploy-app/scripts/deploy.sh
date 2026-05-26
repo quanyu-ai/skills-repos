@@ -37,7 +37,7 @@ die()     { log_err "$*"; exit 1; }
 # ============================================================
 usage() {
     cat <<USAGE
-Usage: $(basename "$0") <env> <app> [--version <ref>] [--approved-by <user>] [--skip-build] [--skip-db] [--db-only] [--dry-run]
+Usage: $(basename "$0") <env> <app> [--version <ref>] [--approved-by <user>] [--skip-build] [--skip-db] [--db-only] [--dry-run] [--allow-localhost]
   <env>             环境名: proto | test | demo | prod
   <app>             应用 key (apps.json 中定义)
   --version <ref>   指定 git tag/sha (默认: 当前默认分支 HEAD)
@@ -46,6 +46,7 @@ Usage: $(basename "$0") <env> <app> [--version <ref>] [--approved-by <user>] [--
   --skip-db         跳过 DB 联动（应急逃生口；将在 DEPLOY-LOG.md notes 标注）
   --db-only         只跑 DB 联动，不部署代码（调试用）
   --dry-run         只打印操作，不实际执行
+  --allow-localhost 显式允许 host=localhost/127.0.0.1（只用于应急，违反 AGENTS.md 铁律 6）
 USAGE
     exit 1
 }
@@ -61,17 +62,19 @@ SKIP_BUILD="false"
 SKIP_DB="false"
 DB_ONLY="false"
 DRY_RUN="false"
+ALLOW_LOCALHOST="false"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --version)      VERSION_REF="${2:-}"; shift 2 ;;
-        --approved-by)  APPROVED_BY="${2:-}"; shift 2 ;;
-        --skip-build)   SKIP_BUILD="true"; shift ;;
-        --skip-db)      SKIP_DB="true"; shift ;;
-        --db-only)      DB_ONLY="true"; shift ;;
-        --dry-run)      DRY_RUN="true"; shift ;;
-        -h|--help)      usage ;;
-        *)              die "未知参数: $1" ;;
+        --version)         VERSION_REF="${2:-}"; shift 2 ;;
+        --approved-by)     APPROVED_BY="${2:-}"; shift 2 ;;
+        --skip-build)      SKIP_BUILD="true"; shift ;;
+        --skip-db)         SKIP_DB="true"; shift ;;
+        --db-only)         DB_ONLY="true"; shift ;;
+        --dry-run)         DRY_RUN="true"; shift ;;
+        --allow-localhost) ALLOW_LOCALHOST="true"; shift ;;
+        -h|--help)         usage ;;
+        *)                 die "未知参数: $1" ;;
     esac
 done
 
@@ -417,6 +420,47 @@ SSH_KEY_EXPANDED="${SSH_KEY_RAW/#\~/$HOME}"
 
 log_ok "env: host=$HOST user=$SSH_USER mode=$DEPLOY_MODE port=$ENVAPP_PORT"
 log_ok "cookie: USE_HTTPS_COOKIES=$USE_HTTPS_COOKIES, NODE_ENV=$NODE_ENV_VAL"
+
+# ============================================================
+# 5.1 E 阶段：host 公网校验（AGENTS.md 铁律 6）
+# ============================================================
+validate_host_not_local() {
+    local h="$1"
+    case "$h" in
+        localhost|127.0.0.1|::1|0.0.0.0|"")
+            return 1 ;;
+        *)
+            return 0 ;;
+    esac
+}
+
+log "Step 3.5: host 公网校验 (validate_host_not_local)"
+if ! validate_host_not_local "$HOST"; then
+    if [ "$ALLOW_LOCALHOST" = "true" ]; then
+        log_warn "host='$HOST' 是本地地址，但 --allow-localhost 显式豁免，继续"
+    else
+        log_err "host='$HOST' 是本地地址，违反 AGENTS.md 铁律 6（公网 IP 必用）"
+        log_err "处理方式："
+        log_err "  1) 改 environments.json: .environments.${ENV_NAME}.host = \"<公网 IP 或域名>\""
+        log_err "     推荐值：demo/test=8.138.118.28、prod=43.139.53.121"
+        log_err "  2) 或加 --allow-localhost flag（仅限应急/本地调试）"
+        log_err "  3) 参见 knowledge-repos/management/PRINCIPLES/SERVER-CONFIG.md"
+        exit 2
+    fi
+else
+    log_ok "host 校验通过: $HOST"
+fi
+
+# database_host 同步校验（警告不中断）
+DB_HOST_DEFAULT="$(_env_get "$ENV_NAME" ".database_host")"
+if [ -n "$DB_HOST_DEFAULT" ] && ! validate_host_not_local "$DB_HOST_DEFAULT"; then
+    if [ "$ALLOW_LOCALHOST" = "true" ]; then
+        log_warn "database_host='$DB_HOST_DEFAULT' 是本地地址，--allow-localhost 豁免"
+    else
+        log_warn "database_host='$DB_HOST_DEFAULT' 是本地地址（environments.${ENV_NAME}.database_host）"
+        log_warn "  仅警告：apps.json.env_config.${ENV_NAME}.database.host 可能覆盖。建议同步改为公网 IP。"
+    fi
+fi
 
 # ============================================================
 # 6. 预检查

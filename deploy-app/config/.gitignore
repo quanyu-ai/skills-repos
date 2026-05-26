@@ -1,4 +1,19 @@
-apps.json
+# deploy-app/config/.gitignore
+# E 阶段（2026-05-26）三层配置：baseline 入 git，machine/local 不入 git
+# 详见 PRINCIPLES/SERVER-CONFIG.md
+
+# 本机覆盖（可能含密码/密钥）
 environments.json
+# 用户最终覆盖
 environments.local.json
 *.local.json
+
+# apps.json 含 DB 凭据，不入 git
+apps.json
+
+# 例外：baseline / template / example 必须入 git
+!environments.json.baseline
+!environments.json.template
+!environments.local.example
+!environments-prototype.json
+!apps.json.template

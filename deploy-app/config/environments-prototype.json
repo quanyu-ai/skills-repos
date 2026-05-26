@@ -3,8 +3,10 @@
   "_comment": "原型环境专门化配置。针对快速原型部署优化，采用轻量级部署策略。",
   "environments": {
     "proto": {
-      "_comment": "原型环境（专属原型部署）。快速原型验证，轻量级部署。",
-      "host": "localhost",
+      "_comment": "原型环境（专属原型部署）。快速原型验证，轻量级部署。host 走公网 IP（AGENTS.md 铁律 6），proto 跑在阿里云。",
+      "host": "8.138.118.28",
+      "database_host": "8.138.118.28",
+      "database_port": 5432,
       "ssh_user": "openclaw",
       "ssh_key": "~/.ssh/deploy_local",
       "deploy_mode": "pm2",
