@@ -179,6 +179,7 @@ docs-repos/<project>/
 
 | 系统 | 关系 |
 |------|------|
+| `planning` skill | `new-req.sh` 在创建 REQ 前会检查 `docs-repos/<project>/planning/PRD.md`，未发现时给出软提醒并引导跑 `init-planning.sh`。**不阻塞**，紧急 bug / hotfix 可继续建 REQ。静默软提醒：`REQ_TRIGGER_SKIP_PLANNING_WARN=1` |
 | `knowledge-repos/management/TASK-TRACKER.json` | 实施时 `status=implementing` 的 REQ 必须有对应 task |
 | 原型设计 skill（未来） | 读取 `requirements-map.json`，按 REQ 生成 wireframe |
 | 开发 skill | 读取 `related_files.code`，按 REQ 关联代码 |

@@ -58,6 +58,21 @@ done
 REQ_DIR="$WORKSPACE_ROOT/docs-repos/$PROJECT/requirements"
 mkdir -p "$REQ_DIR"
 
+# === planning skill 软提醒（不阻塞）===
+# 紧急 bug / hotfix 通道必须保留，所以这里只警告不退出。
+PLANNING_PRD="$WORKSPACE_ROOT/docs-repos/$PROJECT/planning/PRD.md"
+if [ ! -f "$PLANNING_PRD" ] && [ -z "$REQ_TRIGGER_SKIP_PLANNING_WARN" ]; then
+    echo "" >&2
+    echo -e "\033[0;33m⚠  planning 软提醒\033[0m" >&2
+    echo "   未发现 $PLANNING_PRD" >&2
+    echo "   本需求会被记下，但建议尽快补齐 PRD：" >&2
+    echo "     bash skills/planning/scripts/init-planning.sh $PROJECT" >&2
+    echo "   历史项目首次接入可用：" >&2
+    echo "     bash skills/planning/scripts/init-planning.sh $PROJECT --migrate" >&2
+    echo "   （静默此提示：REQ_TRIGGER_SKIP_PLANNING_WARN=1）" >&2
+    echo "" >&2
+fi
+
 TODAY="$(date +%Y%m%d)"
 TODAY_ISO="$(date +%Y-%m-%d)"
 

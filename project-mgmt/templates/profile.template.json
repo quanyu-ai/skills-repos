@@ -49,5 +49,13 @@
   "priority": "medium",
   "team_roles": [],
   "risk_level": "low",
-  "health": "green"
+  "health": "green",
+  "planning_docs": {
+    "prd": null,
+    "roadmap": null,
+    "okr": null,
+    "status": "draft",
+    "last_updated": null,
+    "legacy": false
+  }
 }

@@ -25,6 +25,7 @@ user-invocable: true
    - **不要事后用脚本从 README / PROJECT-BOARD / Git log 反向扫关键字**，关键字误判率高、上下文丢失、容易污染档案。`migrate-from-board.sh` 是历史一次性工具，已冻结，不再扩充关键字。
    - 跨项目 / 平台级 / 战略类用 `add-global-milestone.sh` 而不是塞到某个项目里。
 5. **stage 变更 / 字段变更必须带 `--reason "..."`（≥5 字符）**：`update-status.sh` 切阶段、`set-field.sh` 改字段都强制要求理由，缺失或敷衍（如 `--reason a`）直接拒绝。`--force` 跳转更需要解释，reason 仍然必填。
+6. **planning 阶段必须有产物**：`stage=planning` 或要从 `planning` 推进到 `requirement` 时，必须存在 `docs-repos/<id>/planning/PRD.md`（建议同时有 ROADMAP.md）。缺失时 `update-status.sh` 会给出警告并建议跑 `bash skills/planning/scripts/init-planning.sh <id>`。历史项目可用 `init-planning.sh <id> --migrate` 先补空壳。详见 `skills/planning/SKILL.md`。
 
 ---
 
@@ -225,6 +226,7 @@ bash {{SKILL_DIR}}/scripts/render-dashboard-html.sh --output /tmp/my-dashboard.h
 
 | Skill | 用法 |
 | --- | --- |
+| `planning` | profile.json 新增 `planning_docs` 字段，包含 PRD/ROADMAP/OKR 路径 + draft/approved 状态；建议 `stage=planning` 阶段必须有 PRD.md |
 | `requirement` | `sync-metrics` 读 `requirements-map.json` 算需求数 / 活跃数 |
 | `prototype-design` | `sync-metrics` 读 `prototype/meta/requirements-map.json` 算原型数 |
 | `deploy-app` | `sync-metrics` 在 `DEPLOY-LOG.md` 里 grep 项目名数 30 天部署条数 |
