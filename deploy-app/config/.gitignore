@@ -17,3 +17,5 @@ apps.json
 !environments.local.example
 !environments-prototype.json
 !apps.json.template
+
+demo-safe.json

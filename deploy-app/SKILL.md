@@ -57,6 +57,28 @@ bash {{SKILL_DIR}}/scripts/doctor.sh
 bash {{SKILL_DIR}}/scripts/deploy.sh <env> <app> [options]
 ```
 
+### 安全 Demo release（ENV-1a）
+
+需要精确 SHA、外部 secret 和可验证回滚的 Demo 应用使用独立的 fail-closed 入口：
+
+```bash
+bash {{SKILL_DIR}}/scripts/doctor.sh --demo-safe quanyu-cloud <full-sha>
+bash {{SKILL_DIR}}/scripts/demo-safe.sh preflight quanyu-cloud --version <full-sha>
+bash {{SKILL_DIR}}/scripts/demo-safe.sh dry-run quanyu-cloud --version <full-sha>
+```
+
+Review Gate 通过后才允许执行 `deploy`。该入口：
+
+- 从远程仓库把精确 SHA fetch 到隔离 release，不 checkout 共享工作区；
+- 从目标提交读取 `packageManager`，通过 Corepack 使用其精确 pnpm，并只允许 frozen lockfile；
+- 使用清空后的 build 环境，避免继承 `NODE_CHANNEL_FD` 或 runtime secrets；
+- 运行时由 release 外的 `0600` secret JSON 注入，不把值写入 Git、ecosystem 或日志；
+- 分别验证公网端口、内部端口、Nginx 反代、DB 连通性、PM2 cwd 和 source/release/running SHA；
+- 只允许回滚到已经完成 build/runtime attestation 的 release。
+
+本机配置从 gitignored 的 `config/demo-safe.json` 读取；结构见
+`config/demo-safe.json.template`。不要在配置中放 secret value。
+
 **参数说明**：
 
 | 参数 | 说明 |
