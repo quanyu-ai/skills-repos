@@ -1,0 +1,25 @@
+{
+  "apiVersion": "quanyu.ai/release-acceptance-catalog/v1alpha1",
+  "tests": [
+    { "id": "ENV1B-001", "incident": "ambient-package-manager-drift", "assertion": "exact repository packageManager is resolved through Corepack before frozen install", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-002", "incident": "pm2-ipc-environment-caused-node-exit-134", "assertion": "build and probe environments exclude NODE_CHANNEL_FD and NODE_UNIQUE_ID", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-003", "incident": "shared-worktree-not-requested-sha", "assertion": "isolated checkout matches full requested SHA before and after build", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-004", "incident": "missing-generated-prisma-client", "assertion": "declared prepare runs before build and missing output blocks activation", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-005", "incident": "application-specific-prepare-hard-coded-in-tool", "assertion": "engine invokes only contract actions and has no Prisma-specific branch", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-006", "incident": "tracked-next-env-mutation", "assertion": "unlisted mutation fails and listed mutation is restored before clean-tree attestation", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-007", "incident": "runtime-secret-injection-omitted", "assertion": "missing required secret name fails and no secret value enters contract or policy evidence", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-008", "incident": "internal-public-port-confusion", "assertion": "policy topology and listener ownership validate before replacement", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-009", "incident": "stale-pm2-dump", "assertion": "adapter persistence occurs only after runtime and health attestation", "phase": "ENV-1b-c" },
+    { "id": "ENV1B-010", "incident": "candidate-http-000", "assertion": "candidate failure restores exact prior handle and never commits candidate", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-011", "incident": "legacy-release-lacks-managed-runtime-files", "assertion": "legacy adoption observes and probes without mutating historical release", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-012", "incident": "dependent-local-path-alias", "assertion": "candidate and restore artifact roots derive from immutable explicit inputs and cannot alias", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-013", "incident": "noncanonical-ecosystem-file-executed-as-script", "assertion": "PM2 adapter uses explicit API object and compatibility fixture rejects unrecognized process-file semantics", "phase": "ENV-1b-c" },
+    { "id": "ENV1B-014", "incident": "delete-by-expected-name-left-wrong-name-record", "assertion": "ambiguous or overlapping inventory blocks mutation until exact reconciliation", "phase": "ENV-1b-c" },
+    { "id": "ENV1B-015", "incident": "pm2-force-created-duplicate", "assertion": "force start is unavailable and post-start inventory has one owned record", "phase": "ENV-1b-c" },
+    { "id": "ENV1B-016", "incident": "failed-immutable-directory-blocked-retry", "assertion": "failed artifact is terminal/auditable and retry uses a new attempt staging path", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-017", "incident": "first-managed-cutover-differs-from-managed-rollback", "assertion": "first-adoption failure restores exact legacy ProcessHandle before persistence", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-018", "incident": "canonical-rollback-target-integrity", "assertion": "rollback accepts only runtime-attested prior release and restores original on target failure", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-019", "incident": "implicit-database-action-risk", "assertion": "none performs no DB action and approval-gated stops before activation", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-020", "incident": "forged-name-only-process-handle", "assertion": "incomplete or synthesized handle fails schema and adapter re-observation requirements", "phase": "ENV-1b-a" }
+  ]
+}

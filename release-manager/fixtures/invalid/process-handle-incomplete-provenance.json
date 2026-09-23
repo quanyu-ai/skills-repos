@@ -1,0 +1,10 @@
+{
+  "apiVersion": "quanyu.ai/process-handle/v1alpha1",
+  "kind": "ProcessHandle",
+  "adapter": { "kind": "pm2", "version": "7.0.1", "instanceId": "123e4567-e89b-42d3-a456-426614174000" },
+  "identity": { "environmentId": "example-demo", "serviceId": "example-web", "namespace": "release-manager-demo", "adapterId": "42", "pid": 12345, "processStartId": "start" },
+  "runtime": { "executable": "/var/lib/example/app", "args": [], "cwd": "/var/lib/example" },
+  "releaseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "invocationFingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "provenance": { "origin": "started" }
+}

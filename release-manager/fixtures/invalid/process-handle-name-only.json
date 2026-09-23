@@ -1,0 +1,5 @@
+{
+  "apiVersion": "quanyu.ai/process-handle/v1alpha1",
+  "kind": "ProcessHandle",
+  "identity": { "serviceId": "example-web" }
+}

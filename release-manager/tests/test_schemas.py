@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location("release_validator", ROOT / "scripts" / "validate.py")
+validator = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader
+SPEC.loader.exec_module(validator)
+
+
+class SchemaHarnessTest(unittest.TestCase):
+    def load_valid(self, name: str) -> dict:
+        return json.loads((ROOT / "fixtures" / "valid" / name).read_text())
+
+    def test_valid_fixtures(self) -> None:
+        for path in sorted((ROOT / "fixtures" / "valid").glob("*.json")):
+            with self.subTest(path=path.name):
+                validator.validate_file(path)
+
+    def test_invalid_fixtures_fail_closed(self) -> None:
+        expected = {
+            "release-unknown-field.json",
+            "release-unsafe-path.json",
+            "release-interpolated-shell.json",
+            "release-invalid-migration.json",
+            "policy-secret-value.json",
+            "process-handle-name-only.json",
+            "process-handle-incomplete-provenance.json",
+            "transition-illegal.json",
+        }
+        found = {path.name for path in (ROOT / "fixtures" / "invalid").glob("*.json")}
+        self.assertEqual(expected, found)
+        for path in sorted((ROOT / "fixtures" / "invalid").glob("*.json")):
+            with self.subTest(path=path.name):
+                with self.assertRaises((validator.ValidationError, KeyError)):
+                    validator.validate_file(path)
+
+    def test_failed_candidate_cannot_become_current(self) -> None:
+        data = self.load_valid("state-record.json")
+        data["attempt"]["outcome"] = "failed"
+        data["attempt"]["phase"] = "failed"
+        with self.assertRaisesRegex(validator.ValidationError, "failed target"):
+            validator.validate_document(data)
+
+    def test_process_handle_sha_must_match_state(self) -> None:
+        data = self.load_valid("state-record.json")
+        data["current"]["handle"]["releaseSha"] = "f" * 40
+        with self.assertRaisesRegex(validator.ValidationError, "ProcessHandle SHA mismatch"):
+            validator.validate_document(data)
+
+    def test_migration_command_is_never_a_release_action(self) -> None:
+        data = self.load_valid("release-contract.json")
+        data["lifecycle"]["build"] = {"packageScript": "db:migrate"}
+        data["migration"]["mode"] = "approval-gated"
+        with self.assertRaisesRegex(validator.ValidationError, "database mutation"):
+            validator.validate_document(data)
+
+    def test_unknown_nested_field_fails_closed(self) -> None:
+        data = self.load_valid("release-contract.json")
+        data["runtime"]["typoedPort"] = 3104
+        with self.assertRaisesRegex(validator.ValidationError, "unknown fields"):
+            validator.validate_document(data)
+
+    def test_unsafe_absolute_repository_path_is_rejected(self) -> None:
+        data = self.load_valid("release-contract.json")
+        data["artifact"]["appRoot"] = "/tmp/build"
+        with self.assertRaisesRegex(validator.ValidationError, "pattern mismatch"):
+            validator.validate_document(data)
+
+    def test_interpolated_shell_argument_is_rejected(self) -> None:
+        data = self.load_valid("release-contract.json")
+        data["toolchain"]["install"] = {"argv": ["sh", "-c", "echo ${TOKEN}"]}
+        with self.assertRaisesRegex(validator.ValidationError, "schema match"):
+            validator.validate_document(data)
+
+    def test_secret_values_have_no_policy_extension_point(self) -> None:
+        data = self.load_valid("environment-policy.json")
+        data["secrets"]["values"] = {"DATABASE_URL": "must-not-be-accepted"}
+        with self.assertRaisesRegex(validator.ValidationError, "unknown fields"):
+            validator.validate_document(data)
+
+    def test_process_handle_cannot_be_name_only(self) -> None:
+        path = ROOT / "fixtures" / "invalid" / "process-handle-name-only.json"
+        with self.assertRaisesRegex(validator.ValidationError, "missing required"):
+            validator.validate_file(path)
+
+    def test_adapter_interface_has_no_state_commit_method(self) -> None:
+        declarations = (ROOT / "spec" / "process-adapter.d.ts").read_text()
+        adapter = declarations.split("export interface ProcessAdapter", 1)[1].split("}", 1)[0]
+        self.assertNotIn("commit", adapter.lower())
+        self.assertIn("commitAttestedState", declarations)
+
+    def test_state_machine_catalog_has_required_invariants(self) -> None:
+        spec = json.loads((ROOT / "spec" / "state-machines.json").read_text())
+        required = {
+            "engine-alone-writes-state-store",
+            "adapter-never-commits-release-state",
+            "process-handle-originates-from-adapter-observe-or-start",
+            "failed-candidate-never-current-previous-or-persisted-authority",
+            "unknown-process-inventory-fails-closed",
+        }
+        self.assertTrue(required.issubset(set(spec["invariants"])))
+        self.assertEqual({"build", "legacy-adoption", "activation", "rollback"}, set(spec["machines"]))
+        for name in ("legacy-adoption", "activation", "rollback"):
+            persisted_sources = {
+                source
+                for source, event, target in spec["machines"][name]["transitions"]
+                if event == "ADAPTER_PERSISTED" and target in spec["machines"][name]["terminal"]
+            }
+            self.assertTrue(persisted_sources)
+            self.assertNotIn("CANDIDATE_STARTED", persisted_sources)
+
+    def test_acceptance_catalog_is_unique_and_traceable(self) -> None:
+        catalog = json.loads((ROOT / "spec" / "acceptance-tests.json").read_text())
+        tests = catalog["tests"]
+        ids = [item["id"] for item in tests]
+        incidents = [item["incident"] for item in tests]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(len(incidents), len(set(incidents)))
+        self.assertGreaterEqual(len(tests), 20)
+        for item in tests:
+            self.assertTrue(item["assertion"])
+            self.assertRegex(item["phase"], r"^ENV-1b-[a-f]$")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

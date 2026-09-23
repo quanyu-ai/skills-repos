@@ -1,0 +1,6 @@
+{
+  "machine": "activation",
+  "transitions": [
+    { "from": "CURRENT_ATTESTED", "event": "STATE_COMMITTED", "to": "STATE_COMMITTED" }
+  ]
+}

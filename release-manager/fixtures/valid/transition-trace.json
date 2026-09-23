@@ -1,0 +1,13 @@
+{
+  "machine": "build",
+  "transitions": [
+    { "from": "REQUESTED", "event": "SOURCE_ACQUIRE_OK", "to": "SOURCE_ACQUIRED" },
+    { "from": "SOURCE_ACQUIRED", "event": "SOURCE_ATTEST_OK", "to": "SOURCE_ATTESTED" },
+    { "from": "SOURCE_ATTESTED", "event": "TOOLCHAIN_ATTEST_OK", "to": "TOOLCHAIN_ATTESTED" },
+    { "from": "TOOLCHAIN_ATTESTED", "event": "FROZEN_INSTALL_OK", "to": "INSTALLED_FROZEN" },
+    { "from": "INSTALLED_FROZEN", "event": "PREPARE_OK", "to": "PREPARED" },
+    { "from": "PREPARED", "event": "BUILD_OK", "to": "BUILT" },
+    { "from": "BUILT", "event": "ARTIFACT_VERIFY_OK", "to": "ARTIFACT_VERIFIED" },
+    { "from": "ARTIFACT_VERIFIED", "event": "CLEAN_TREE_OK", "to": "CANDIDATE_READY" }
+  ]
+}
