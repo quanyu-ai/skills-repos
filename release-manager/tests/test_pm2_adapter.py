@@ -100,7 +100,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             "allowedEnvNames": ["NODE_ENV", "NEXT_DIST_DIR", "HOST", "PORT", "TEST_SECRET", "TEST_HEALTH_STATUS", "TEST_ENV_REPORT"],
             "requiredSecretNames": ["TEST_SECRET", "TEST_HEALTH_STATUS", "TEST_ENV_REPORT"],
             "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}, {"name": "NEXT_DIST_DIR", "value": ".next-demo"}],
-            "configurationDigests": {"build": "sha256:" + "1" * 64, "runtime": "sha256:" + "2" * 64},
+            "configurationDigests": {"releaseContract": "sha256:" + "3" * 64, "environmentPolicy": "sha256:" + "4" * 64, "build": "sha256:" + "1" * 64, "runtime": "sha256:" + "2" * 64},
             "secretSource": {"provider": "external-json-file", "sourcePath": str(secrets)},
             "binding": {"HOST": "127.0.0.1", "PORT": str(port)},
             "listener": {"host": "127.0.0.1", "port": port},
@@ -199,6 +199,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             ("start identity", lambda value: value["identity"].__setitem__("processStartId", "tampered:start")),
             ("runtime", lambda value: value["runtime"].__setitem__("args", ["--tampered"])),
             ("release SHA", lambda value: value.__setitem__("releaseSha", SHA_B)),
+            ("contract digest context", lambda value: value["configurationDigests"].__setitem__("releaseContract", "sha256:" + "0" * 64)),
         )
         for label, mutate in mutations:
             with self.subTest(field=label):

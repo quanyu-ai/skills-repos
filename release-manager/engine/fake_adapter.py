@@ -118,6 +118,9 @@ class FakeProcessAdapter:
         receipt = record["provenance"]["adapterReceipt"]
         if receipt not in self.runtime.known_receipts:
             raise ProcessError("persisted handle cannot be re-observed")
+        live = self.runtime.records.get(record["identity"]["adapterId"], {}).get("record")
+        if live is not None and live.get("configurationDigests") != record.get("configurationDigests"):
+            raise ProcessError("persisted runtime configuration digest context mismatch")
         self.runtime.events.append("resolve-persisted")
         return AdapterHandle(copy.deepcopy(record), self.issuer)
 
@@ -186,6 +189,7 @@ class FakeProcessAdapter:
             "releaseSha": handle.record["releaseSha"],
             "runtime": copy.deepcopy(handle.record["runtime"]),
             "observedAt": handle.record["provenance"]["observedAt"],
+            "configurationDigests": copy.deepcopy(handle.record.get("configurationDigests")),
         }
         return self._new_handle(spec, "started")
 

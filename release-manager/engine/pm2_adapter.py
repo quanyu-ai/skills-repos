@@ -218,6 +218,12 @@ class PM2ProcessAdapter:
                     sidecar={
                         "stableName": observed["name"],
                         "listener": {"host": observed["ownedHost"], "port": observed["ownedPort"]},
+                        "configurationDigests": {
+                            "releaseContract": observed["releaseContractDigest"],
+                            "environmentPolicy": observed["environmentPolicyDigest"],
+                            "build": observed["buildConfigDigest"],
+                            "runtime": observed["runtimeConfigDigest"],
+                        } if all(observed.get(name) for name in ("releaseContractDigest", "environmentPolicyDigest", "buildConfigDigest", "runtimeConfigDigest")) else None,
                     },
                 ))
         return handles
@@ -239,6 +245,8 @@ class PM2ProcessAdapter:
             **record["runtime"],
             "buildConfigDigest": observed_ownership.get("buildConfigDigest", record.get("configurationDigests", {}).get("build")),
             "runtimeConfigDigest": observed_ownership.get("runtimeConfigDigest", record.get("configurationDigests", {}).get("runtime")),
+            "releaseContractDigest": observed_ownership.get("releaseContractDigest", record.get("configurationDigests", {}).get("releaseContract")),
+            "environmentPolicyDigest": observed_ownership.get("environmentPolicyDigest", record.get("configurationDigests", {}).get("environmentPolicy")),
         }
 
     def _restore_spec(self, record: dict[str, Any], observed: dict[str, Any]) -> dict[str, Any] | None:
@@ -412,7 +420,7 @@ class PM2ProcessAdapter:
                 "listener": copy.deepcopy(spec["listener"]),
                 "legacyDescriptor": copy.deepcopy(spec),
                 "legacyDescriptorDigest": self._descriptor_digest(spec),
-                "observedOwnership": {"environmentId": observed["environmentId"], "serviceId": observed["serviceId"], "releaseSha": observed["releaseSha"], "buildConfigDigest": observed.get("buildConfigDigest"), "runtimeConfigDigest": observed.get("runtimeConfigDigest")},
+                "observedOwnership": {"environmentId": observed["environmentId"], "serviceId": observed["serviceId"], "releaseSha": observed["releaseSha"], "buildConfigDigest": observed.get("buildConfigDigest"), "runtimeConfigDigest": observed.get("runtimeConfigDigest"), "releaseContractDigest": observed.get("releaseContractDigest"), "environmentPolicyDigest": observed.get("environmentPolicyDigest")},
             },
         )
 
@@ -436,6 +444,8 @@ class PM2ProcessAdapter:
                 "releaseSha": record["releaseSha"],
                 "buildConfigDigest": record.get("configurationDigests", {}).get("build"),
                 "runtimeConfigDigest": record.get("configurationDigests", {}).get("runtime"),
+                "releaseContractDigest": record.get("configurationDigests", {}).get("releaseContract"),
+                "environmentPolicyDigest": record.get("configurationDigests", {}).get("environmentPolicy"),
                 "executable": runtime["executable"],
                 "cwd": runtime["cwd"],
                 "args": runtime["args"],
@@ -479,7 +489,7 @@ class PM2ProcessAdapter:
                 "configurationDigests": copy.deepcopy(record.get("configurationDigests")),
                 "legacyDescriptor": copy.deepcopy(descriptor) if is_legacy else None,
                 "legacyDescriptorDigest": record.get("legacyRestoreDescriptorDigest"),
-                "observedOwnership": {"environmentId": observed["environmentId"], "serviceId": observed["serviceId"], "releaseSha": observed["releaseSha"], "buildConfigDigest": observed.get("buildConfigDigest"), "runtimeConfigDigest": observed.get("runtimeConfigDigest")} if is_legacy else None,
+                "observedOwnership": {"environmentId": observed["environmentId"], "serviceId": observed["serviceId"], "releaseSha": observed["releaseSha"], "buildConfigDigest": observed.get("buildConfigDigest"), "runtimeConfigDigest": observed.get("runtimeConfigDigest"), "releaseContractDigest": observed.get("releaseContractDigest"), "environmentPolicyDigest": observed.get("environmentPolicyDigest")} if is_legacy else None,
             },
         )
         return handle
@@ -487,7 +497,7 @@ class PM2ProcessAdapter:
     @staticmethod
     def _assert_observation(observed: dict[str, Any], expected: dict[str, Any], require_live: bool, compare_ownership: bool = True) -> None:
         fields = ["adapterId", "name", "namespace", "executable", "cwd", "args"]
-        if compare_ownership: fields.extend(("environmentId", "serviceId", "releaseSha", "buildConfigDigest", "runtimeConfigDigest"))
+        if compare_ownership: fields.extend(("environmentId", "serviceId", "releaseSha", "buildConfigDigest", "runtimeConfigDigest", "releaseContractDigest", "environmentPolicyDigest"))
         if any(observed.get(field) != expected.get(field) for field in fields):
             raise ProcessError("PM2 observation does not match exact ProcessHandle")
         if require_live and (
@@ -594,6 +604,8 @@ class PM2ProcessAdapter:
             "RELEASE_MANAGER_OWNED_PORT": str(spec["listener"]["port"]),
             "RELEASE_MANAGER_BUILD_CONFIG_DIGEST": spec["configurationDigests"]["build"],
             "RELEASE_MANAGER_RUNTIME_CONFIG_DIGEST": spec["configurationDigests"]["runtime"],
+            "RELEASE_MANAGER_RELEASE_CONTRACT_DIGEST": spec["configurationDigests"]["releaseContract"],
+            "RELEASE_MANAGER_ENVIRONMENT_POLICY_DIGEST": spec["configurationDigests"]["environmentPolicy"],
         })
         response = self._bridge({
             "action": "start",

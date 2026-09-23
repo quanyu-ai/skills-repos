@@ -222,6 +222,10 @@ def validate_state_semantics(data: dict[str, Any]) -> None:
         identity = release["handle"]["identity"]
         if identity["environmentId"] != data["environmentId"] or identity["serviceId"] != data["serviceId"]:
             raise ValidationError(f"$.{slot}: ProcessHandle environment/service identity mismatch")
+        if slot == "current" and data["status"] == "managed" and release["handle"]["provenance"]["origin"] == "started":
+            digests = release["handle"].get("configurationDigests", {})
+            if digests.get("releaseContract") != data["releaseContractDigest"] or digests.get("environmentPolicy") != data["environmentPolicyDigest"]:
+                raise ValidationError("$.current: ProcessHandle contract/policy digest context mismatch")
         attestation = release["attestation"]
         if attestation["sourceSha"] != sha or attestation["runtimeSha"] != sha:
             raise ValidationError(f"$.{slot}: attestation SHA mismatch")

@@ -71,6 +71,8 @@ function safeRecord(processDescription) {
     ownedPort: env.RELEASE_MANAGER_OWNED_PORT ? Number(env.RELEASE_MANAGER_OWNED_PORT) : null,
     buildConfigDigest: env.RELEASE_MANAGER_BUILD_CONFIG_DIGEST || null,
     runtimeConfigDigest: env.RELEASE_MANAGER_RUNTIME_CONFIG_DIGEST || null,
+    releaseContractDigest: env.RELEASE_MANAGER_RELEASE_CONTRACT_DIGEST || null,
+    environmentPolicyDigest: env.RELEASE_MANAGER_ENVIRONMENT_POLICY_DIGEST || null,
     pmUptime: env.pm_uptime || null,
     evidence,
   };
@@ -88,7 +90,7 @@ function assertExact(record, expected, requireLive) {
   if (JSON.stringify(record.args) !== JSON.stringify(expected.args)) throw new Error("PM2 args mismatch");
   if (record.environmentId !== expected.environmentId || record.serviceId !== expected.serviceId) throw new Error("PM2 ownership mismatch");
   if (record.releaseSha !== expected.releaseSha) throw new Error("PM2 release SHA mismatch");
-  if (record.buildConfigDigest !== (expected.buildConfigDigest || null) || record.runtimeConfigDigest !== (expected.runtimeConfigDigest || null)) throw new Error("PM2 configuration digest mismatch");
+  if (record.buildConfigDigest !== (expected.buildConfigDigest || null) || record.runtimeConfigDigest !== (expected.runtimeConfigDigest || null) || record.releaseContractDigest !== (expected.releaseContractDigest || null) || record.environmentPolicyDigest !== (expected.environmentPolicyDigest || null)) throw new Error("PM2 configuration digest mismatch");
   if (requireLive) {
     if (record.status !== "online" || record.pid !== Number(expected.pid)) throw new Error("PM2 live PID mismatch");
     if (!record.evidence || record.evidence.processStartId !== expected.processStartId) throw new Error("process start identity mismatch");

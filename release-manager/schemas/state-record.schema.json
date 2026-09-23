@@ -4,7 +4,7 @@
   "title": "Release Manager State Record",
   "type": "object",
   "additionalProperties": false,
-  "required": ["apiVersion", "kind", "environmentId", "serviceId", "generation", "updatedAt", "status", "attempt"],
+  "required": ["apiVersion", "kind", "environmentId", "serviceId", "generation", "updatedAt", "status", "releaseContractDigest", "environmentPolicyDigest", "attempt"],
   "properties": {
     "apiVersion": { "const": "quanyu.ai/state-record/v1alpha1" },
     "kind": { "const": "ReleaseState" },
@@ -15,19 +15,21 @@
     "status": {
       "enum": ["unmanaged", "adoption-ready", "candidate-ready", "activating", "managed", "restoring", "failed", "recovery-required"]
     },
-    "contractDigest": { "$ref": "#/$defs/digest" },
-    "policyDigest": { "$ref": "#/$defs/digest" },
+    "releaseContractDigest": { "$ref": "#/$defs/digest" },
+    "environmentPolicyDigest": { "$ref": "#/$defs/digest" },
     "current": { "$ref": "#/$defs/verifiedRelease" },
     "previous": { "$ref": "#/$defs/verifiedRelease" },
     "legacy": { "$ref": "#/$defs/verifiedRelease" },
     "attempt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["attemptId", "sequence", "targetSha", "phase", "outcome", "events"],
+      "required": ["attemptId", "sequence", "targetSha", "releaseContractDigest", "environmentPolicyDigest", "phase", "outcome", "events"],
       "properties": {
         "attemptId": { "$ref": "#/$defs/uuid" },
         "sequence": { "type": "integer", "minimum": 1 },
         "targetSha": { "$ref": "#/$defs/sha" },
+        "releaseContractDigest": { "$ref": "#/$defs/digest" },
+        "environmentPolicyDigest": { "$ref": "#/$defs/digest" },
         "phase": {
           "enum": ["requested", "building", "candidate-ready", "waiting-db-gate", "activating", "attesting", "committing", "restoring", "complete", "failed", "recovery-required"]
         },

@@ -25,7 +25,12 @@ export interface PersistedProcessHandle {
   };
   readonly releaseSha: string;
   readonly invocationFingerprint: `sha256:${string}`;
-  readonly configurationDigests?: { readonly build: `sha256:${string}`; readonly runtime: `sha256:${string}` };
+  readonly configurationDigests?: {
+    readonly releaseContract: `sha256:${string}`;
+    readonly environmentPolicy: `sha256:${string}`;
+    readonly build: `sha256:${string}`;
+    readonly runtime: `sha256:${string}`;
+  };
   readonly legacyRestoreDescriptorDigest?: `sha256:${string}`;
   readonly provenance: {
     readonly origin: "observed" | "started";

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
 from .errors import ContractError
 
 SECRET_LIKE = ("SECRET", "TOKEN", "PASSWORD", "PRIVATE_KEY", "API_KEY", "DATABASE_URL")
+
+
+def canonical_document_digest(document: dict[str, Any]) -> str:
+    """Digest one fully validated contract/policy document using canonical JSON."""
+    payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def _values(policy: dict[str, Any], phase: str) -> dict[str, str]:

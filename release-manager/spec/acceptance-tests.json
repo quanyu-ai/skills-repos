@@ -25,6 +25,7 @@
     { "id": "ENV1B-022", "incident": "first-adoption-has-no-canonical-previous", "assertion": "adapter-observed legacy record remains sole restore authority until managed state commit", "phase": "ENV-1b-a" },
     { "id": "ENV1B-023", "incident": "health-target-ownership-ambiguity", "assertion": "contract path composes with policy internal endpoint and public base while neither document overrides the other", "phase": "ENV-1b-a" },
     { "id": "ENV1B-024", "incident": "candidate-runtime-dist-dir-omitted", "assertion": "typed build/runtime non-secret bindings are complete, disjoint, phase-consistent and digest-attested", "phase": "ENV-1b-e" },
-    { "id": "ENV1B-025", "incident": "legacy-wrapper-environment-not-restorable", "assertion": "a restricted external Legacy Restore Descriptor passes an isolated probe and binds exact legacy restoration without persisting secrets", "phase": "ENV-1b-e" }
+    { "id": "ENV1B-025", "incident": "legacy-wrapper-environment-not-restorable", "assertion": "a restricted external Legacy Restore Descriptor passes an isolated probe and binds exact legacy restoration without persisting secrets", "phase": "ENV-1b-e" },
+    { "id": "ENV1B-026", "incident": "candidate-policy-digest-did-not-bind-release-contract", "assertion": "canonical Release Contract and Environment Policy digests bind candidate, attempt, runtime and persisted authority; contract-only or policy-only drift fails before process mutation", "phase": "ENV-1b-e" }
   ]
 }

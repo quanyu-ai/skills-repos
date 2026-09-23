@@ -46,8 +46,10 @@
     "configurationDigests": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["build", "runtime"],
+      "required": ["releaseContract", "environmentPolicy", "build", "runtime"],
       "properties": {
+        "releaseContract": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "environmentPolicy": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
         "build": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
         "runtime": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
       }
