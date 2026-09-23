@@ -42,6 +42,8 @@ The included Fake Adapter models process identity, runtime attestation, secret-n
 
 ENV-1b-c adds a PM2 ProcessAdapter behind the same interface. It uses PM2's programmatic API with explicit process objects, derives handles from PM2 plus Linux `/proc` evidence, resolves external secrets by required names, performs scoped fail-closed inventory checks, proves exact absence, attests internal/public health, reconstructs validated restore descriptors, and persists PM2 state only after attestation. Its tests use only temporary `PM2_HOME` directories, disposable processes and dynamic non-business ports; no application environment is configured or contacted.
 
+ENV-1b-e2a adds phase-owned non-secret configuration and a bootstrap-only `LegacyRestoreDescriptor`. Repository contracts classify allowed build/runtime names; external policy supplies literal non-secret values; cross-document validation requires runtime sources to be complete and disjoint from secret and listener bindings. Build and runtime configuration digests are attested across candidate creation and activation. First adoption loads its legacy descriptor from a restricted external file, validates exact authority and paths, and proves restoration on an isolated port before live mutation. Descriptor contents and secret values do not enter ProcessHandle or State Store evidence.
+
 ## Frozen deploy-app boundary
 
 `deploy-app` remains transitional recovery knowledge. ENV-1b does not extend it into a generic state engine, contract parser, process adapter, migration orchestrator, or environment registry. Migration proceeds through ENV-1b-b core engine, ENV-1b-c isolated PM2 adapter, ENV-1b-d Quanyu shadow adoption, and a separately authorized ENV-1b-e live adoption.

@@ -5,6 +5,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import unittest
+import tempfile
+import os
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +15,9 @@ SPEC = importlib.util.spec_from_file_location("release_validator", ROOT / "scrip
 validator = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(validator)
+sys.path.insert(0, str(ROOT))
+from engine.contracts import validate_contract_and_policy  # noqa: E402
+from engine import load_legacy_restore_descriptor  # noqa: E402
 
 
 class SchemaHarnessTest(unittest.TestCase):
@@ -141,6 +147,30 @@ class SchemaHarnessTest(unittest.TestCase):
     def test_policy_cannot_override_health_path(self) -> None:
         with self.assertRaisesRegex(validator.ValidationError, "unknown fields"):
             validator.validate_file(ROOT / "fixtures" / "invalid" / "policy-health-path-override.json")
+
+    def test_typed_configuration_sources_are_complete_disjoint_and_phase_consistent(self) -> None:
+        contract = self.load_valid("release-contract.json")
+        policy = self.load_valid("environment-policy.json")
+        validate_contract_and_policy(contract, policy)
+        missing = json.loads(json.dumps(policy)); missing["runtime"]["values"].pop()
+        with self.assertRaisesRegex(Exception, "incomplete or undeclared"): validate_contract_and_policy(contract, missing)
+        secret = json.loads(json.dumps(contract)); secret["runtime"]["nonSecretEnvNames"].append("DATABASE_URL")
+        with self.assertRaises(Exception): validate_contract_and_policy(secret, policy)
+        mismatch = json.loads(json.dumps(policy)); mismatch["runtime"]["values"][1]["value"] = ".next-wrong"
+        with self.assertRaisesRegex(Exception, "build/runtime binding mismatch"): validate_contract_and_policy(contract, mismatch)
+
+    def test_legacy_descriptor_parser_enforces_file_metadata(self) -> None:
+        descriptor = self.load_valid("legacy-restore-descriptor.json")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.json"
+            path.write_text(json.dumps(descriptor)); path.chmod(0o600)
+            loaded = load_legacy_restore_descriptor(path, os.geteuid())
+            self.assertRegex(loaded.digest, r"^sha256:[a-f0-9]{64}$")
+            path.chmod(0o644)
+            with self.assertRaisesRegex(Exception, "permissions are unsafe"): load_legacy_restore_descriptor(path, os.geteuid())
+            path.chmod(0o600)
+            link = Path(directory) / "link.json"; link.symlink_to(path)
+            with self.assertRaisesRegex(Exception, "regular non-symlink"): load_legacy_restore_descriptor(link, os.geteuid())
 
     def test_adapter_interface_has_no_state_commit_method(self) -> None:
         declarations = (ROOT / "spec" / "process-adapter.d.ts").read_text()

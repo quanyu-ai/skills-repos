@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanyu.ai/schemas/legacy-restore-descriptor/v1alpha1",
+  "title": "Bootstrap-only Legacy Restore Descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "authority", "launcher", "wrapper", "secrets", "listener", "probe", "health"],
+  "properties": {
+    "apiVersion": { "const": "quanyu.ai/legacy-restore-descriptor/v1alpha1" },
+    "kind": { "const": "LegacyRestoreDescriptor" },
+    "metadata": { "type": "object", "additionalProperties": false, "required": ["environmentId", "serviceId"], "properties": { "environmentId": { "$ref": "#/$defs/id" }, "serviceId": { "$ref": "#/$defs/id" } } },
+    "authority": { "type": "object", "additionalProperties": false, "required": ["releaseSha", "releasePath", "namespace", "stableName", "adapterId", "pid", "processStartId"], "properties": { "releaseSha": { "$ref": "#/$defs/sha" }, "releasePath": { "$ref": "#/$defs/absolutePath" }, "namespace": { "$ref": "#/$defs/id" }, "stableName": { "$ref": "#/$defs/id" }, "adapterId": { "type": "string", "minLength": 1 }, "pid": { "type": "integer", "minimum": 1 }, "processStartId": { "type": "string", "minLength": 1 } } },
+    "launcher": { "$ref": "#/$defs/invocation" },
+    "wrapper": { "type": "object", "additionalProperties": false, "required": ["executable", "args", "host", "internalPort", "requiredSecretNames", "runtimeSecretFile", "nonSecretValues"], "properties": { "executable": { "$ref": "#/$defs/absolutePath" }, "args": { "$ref": "#/$defs/args" }, "host": { "enum": ["127.0.0.1", "::1"] }, "internalPort": { "$ref": "#/$defs/port" }, "requiredSecretNames": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/envName" } }, "runtimeSecretFile": { "$ref": "#/$defs/absolutePath" }, "nonSecretValues": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/nameValue" } } } },
+    "secrets": { "type": "object", "additionalProperties": false, "required": ["provider", "sourcePath", "requiredNames"], "properties": { "provider": { "const": "external-json-file" }, "sourcePath": { "$ref": "#/$defs/absolutePath" }, "requiredNames": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/envName" } } } },
+    "listener": { "$ref": "#/$defs/listener" },
+    "probe": { "$ref": "#/$defs/listener" },
+    "health": { "type": "object", "additionalProperties": false, "required": ["path", "acceptedStatusClasses", "attempts", "intervalMs"], "properties": { "path": { "type": "string", "pattern": "^/(?!/)(?!.*//)(?!.*\\.\\.)[A-Za-z0-9_.~/-]*$" }, "acceptedStatusClasses": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 2, "maximum": 3 } }, "attempts": { "type": "integer", "minimum": 1, "maximum": 120 }, "intervalMs": { "type": "integer", "minimum": 100, "maximum": 60000 } } }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "envName": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+    "absolutePath": { "type": "string", "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[A-Za-z0-9._@+/-]+$" },
+    "args": { "type": "array", "maxItems": 64, "items": { "type": "string", "pattern": "^(?!.*(?:\\$\\{|\\$\\(|`|[;&|<>]|[\\r\\n])).*$" } },
+    "invocation": { "type": "object", "additionalProperties": false, "required": ["executable", "args", "cwd"], "properties": { "executable": { "$ref": "#/$defs/absolutePath" }, "args": { "$ref": "#/$defs/args" }, "cwd": { "$ref": "#/$defs/absolutePath" } } },
+    "listener": { "type": "object", "additionalProperties": false, "required": ["host", "port"], "properties": { "host": { "enum": ["127.0.0.1", "::1"] }, "port": { "$ref": "#/$defs/port" } } },
+    "nameValue": { "type": "object", "additionalProperties": false, "required": ["name", "value"], "properties": { "name": { "$ref": "#/$defs/envName" }, "value": { "type": "string", "maxLength": 1024, "pattern": "^(?!.*(?:\\$\\{|\\$\\(|`|[\\r\\n\\u0000])).*$" } } }
+  }
+}

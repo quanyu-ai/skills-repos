@@ -53,7 +53,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         )
         self.created_handles = []
 
-    def restarted_adapter(self, spec: dict, *, secret_owner_uid: int | None = None) -> PM2ProcessAdapter:
+    def restarted_adapter(self, spec: dict, *, secret_owner_uid: int | None = None, legacy_descriptor: dict | None = None) -> PM2ProcessAdapter:
         return PM2ProcessAdapter(
             pm2_home=self.pm2_home,
             node_modules=self.node_modules,
@@ -64,6 +64,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             health_attempts=30,
             health_interval_seconds=0.1,
             runtime_policy=self.runtime_policy(spec),
+            legacy_restore_descriptor=legacy_descriptor,
         )
 
     def tearDown(self) -> None:
@@ -96,8 +97,10 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             "releasePath": str(release),
             "runtime": {"executable": str(script.resolve()), "args": [], "cwd": str(release.resolve())},
             "observedAt": "2026-09-24T00:00:00Z",
-            "allowedEnvNames": ["HOST", "PORT", "TEST_SECRET", "TEST_HEALTH_STATUS", "TEST_ENV_REPORT"],
+            "allowedEnvNames": ["NODE_ENV", "NEXT_DIST_DIR", "HOST", "PORT", "TEST_SECRET", "TEST_HEALTH_STATUS", "TEST_ENV_REPORT"],
             "requiredSecretNames": ["TEST_SECRET", "TEST_HEALTH_STATUS", "TEST_ENV_REPORT"],
+            "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}, {"name": "NEXT_DIST_DIR", "value": ".next-demo"}],
+            "configurationDigests": {"build": "sha256:" + "1" * 64, "runtime": "sha256:" + "2" * 64},
             "secretSource": {"provider": "external-json-file", "sourcePath": str(secrets)},
             "binding": {"HOST": "127.0.0.1", "PORT": str(port)},
             "listener": {"host": "127.0.0.1", "port": port},
@@ -115,6 +118,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         return {
             "allowedEnvNames": copy.deepcopy(spec["allowedEnvNames"]),
             "requiredSecretNames": copy.deepcopy(spec["requiredSecretNames"]),
+            "nonSecretValues": copy.deepcopy(spec["nonSecretValues"]),
             "secretSource": copy.deepcopy(spec["secretSource"]),
             "binding": copy.deepcopy(spec["binding"]),
             "listener": copy.deepcopy(spec["listener"]),
@@ -145,7 +149,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         self.assertEqual(SHA_A, evidence["releaseSha"])
         self.adapter.persist(handle)
         report_data = json.loads(report.read_text())
-        self.assertEqual({"hasNodeChannelFd": False, "hasNodeUniqueId": False, "hasAmbientPoison": False}, report_data)
+        self.assertEqual({"hasNodeChannelFd": False, "hasNodeUniqueId": False, "hasAmbientPoison": False, "nodeEnv": "production", "nextDistDir": ".next-demo"}, report_data)
         self.remove(handle)
 
     def test_stop_is_not_delete_and_absence_proves_pid_and_port(self) -> None:
@@ -306,6 +310,53 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         finally:
             PM2ProcessAdapter.pinned_pm2_version = original
         self.assertFalse((self.pm2_home / "pm2.pid").exists())
+
+    def test_legacy_restore_descriptor_probe_and_exact_restore(self) -> None:
+        release = self.root / "legacy-release" / SHA_A
+        cwd = release / "apps/web"; cwd.mkdir(parents=True)
+        launcher = release / "legacy-wrapper.cjs"
+        shutil.copy2(ROOT / "tests/fixtures/disposable-legacy-wrapper.cjs", launcher)
+        secrets = self.root / "legacy-secrets.json"
+        secrets.write_text(json.dumps({"TEST_SECRET": "legacy-secret-must-not-leak"})); secrets.chmod(0o600)
+        descriptor = {
+            "apiVersion": "quanyu.ai/legacy-restore-descriptor/v1alpha1", "kind": "LegacyRestoreDescriptor",
+            "metadata": {"environmentId": "legacy-demo", "serviceId": "legacy-web"},
+            "authority": {"releaseSha": SHA_A, "releasePath": str(release), "namespace": "legacy-isolated", "stableName": "legacy-service", "adapterId": "pending", "pid": 1, "processStartId": "pending"},
+            "launcher": {"executable": str(launcher), "args": [], "cwd": str(cwd)},
+            "wrapper": {"executable": str(launcher), "args": [], "host": "127.0.0.1", "internalPort": free_port(), "requiredSecretNames": ["TEST_SECRET"], "runtimeSecretFile": str(secrets), "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}]},
+            "secrets": {"provider": "external-json-file", "sourcePath": str(secrets), "requiredNames": ["TEST_SECRET"]},
+            "listener": {"host": "127.0.0.1", "port": 0}, "probe": {"host": "127.0.0.1", "port": free_port()},
+            "health": {"path": "/api/health", "acceptedStatusClasses": [2], "attempts": 30, "intervalMs": 100},
+        }
+        descriptor["listener"]["port"] = descriptor["wrapper"]["internalPort"]
+        evidence = self.adapter.preflight_legacy_restore(descriptor)
+        self.assertEqual("pass", evidence["probe"])
+        self.assertEqual([], self.adapter._all_inventory())
+        env = self.adapter._legacy_environment(descriptor, descriptor["listener"]["port"])
+        env["RELEASE_MANAGER_LAUNCH_TOKEN"] = "legacy-observe-token"
+        observed = self.adapter._bridge({"action": "test-start", "app": {"name": "legacy-service", "namespace": "legacy-isolated", "script": str(launcher), "args": [], "cwd": str(cwd), "env": env}})["record"]
+        descriptor["authority"].update({"adapterId": observed["adapterId"], "pid": observed["pid"], "processStartId": observed["evidence"]["processStartId"]})
+        handle = self.adapter.observe_legacy(descriptor)
+        wrong = copy.deepcopy(descriptor); wrong["authority"]["releaseSha"] = SHA_B
+        restart_spec, _, _ = self.spec(SHA_B)
+        with self.assertRaisesRegex(ProcessError, "exact external restore descriptor"):
+            self.restarted_adapter(restart_spec, legacy_descriptor=wrong).resolve_persisted(handle.record)
+        reobserved = self.restarted_adapter(restart_spec, legacy_descriptor=descriptor).resolve_persisted(handle.record)
+        self.assertEqual(handle.record["identity"], reobserved.record["identity"])
+        target = f"http://127.0.0.1:{descriptor['listener']['port']}/api/health"
+        self.adapter.attest(handle, SHA_A, (target, target))
+        self.remove(handle)
+        restored = self.adapter.restore(handle)
+        self.adapter.attest(restored, SHA_A, (target, target))
+        self.assertEqual(SHA_A, restored.record["releaseSha"])
+        self.remove(restored)
+
+    def test_runtime_source_overlap_fails_before_pm2_mutation(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        spec["nonSecretValues"].append({"name": "TEST_SECRET", "value": "forbidden"})
+        with self.assertRaisesRegex(ProcessError, "sources overlap"):
+            self.adapter.start_candidate(spec)
+        self.assertEqual([], self.adapter._all_inventory())
 
 
 if __name__ == "__main__":

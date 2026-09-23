@@ -17,12 +17,14 @@ MACHINES = ROOT / "spec" / "state-machines.json"
 SCHEMA_BY_KIND = {
     "ReleaseContract": "release-contract.schema.json",
     "EnvironmentPolicy": "environment-policy.schema.json",
+    "LegacyRestoreDescriptor": "legacy-restore-descriptor.schema.json",
     "ProcessHandle": "process-handle.schema.json",
     "ReleaseState": "state-record.schema.json",
 }
 SCHEMA_BY_ID = {
     "https://quanyu.ai/schemas/release-contract/v1alpha1": "release-contract.schema.json",
     "https://quanyu.ai/schemas/environment-policy/v1alpha1": "environment-policy.schema.json",
+    "https://quanyu.ai/schemas/legacy-restore-descriptor/v1alpha1": "legacy-restore-descriptor.schema.json",
     "https://quanyu.ai/schemas/process-handle/v1alpha1": "process-handle.schema.json",
     "https://quanyu.ai/schemas/state-record/v1alpha1": "state-record.schema.json",
     "https://quanyu.ai/schemas/transition-trace/v1alpha1": "transition-trace.schema.json",
@@ -126,6 +128,8 @@ def validate_schema(value: Any, schema: dict[str, Any], path: str = "$", root: d
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0):
             raise ValidationError(f"{path}: string too short")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            raise ValidationError(f"{path}: string too long")
         if "pattern" in schema and re.search(schema["pattern"], value) is None:
             raise ValidationError(f"{path}: pattern mismatch")
 
@@ -165,6 +169,28 @@ def validate_policy_semantics(data: dict[str, Any]) -> None:
             raise ValidationError(f"$.storage.{name}: must be outside releaseRoot")
     if data["network"]["publicBaseUrl"].startswith("http://127.0.0.1"):
         raise ValidationError("$.network.publicBaseUrl: cannot be the internal listener")
+    for phase in ("build", "runtime"):
+        names = [item["name"] for item in data[phase]["values"]]
+        if len(names) != len(set(names)):
+            raise ValidationError(f"$.{phase}.values: duplicate names")
+
+
+def validate_legacy_restore_semantics(data: dict[str, Any]) -> None:
+    authority = data["authority"]
+    if not data["launcher"]["cwd"].startswith(authority["releasePath"].rstrip("/") + "/"):
+        raise ValidationError("$.launcher.cwd: must be contained by authority releasePath")
+    if data["listener"] == data["probe"]:
+        raise ValidationError("$.probe: must use an isolated listener")
+    if set(data["wrapper"]["requiredSecretNames"]) != set(data["secrets"]["requiredNames"]):
+        raise ValidationError("$.wrapper.requiredSecretNames: must equal secrets.requiredNames")
+    if data["wrapper"]["runtimeSecretFile"] != data["secrets"]["sourcePath"]:
+        raise ValidationError("$.wrapper.runtimeSecretFile: must equal secrets.sourcePath")
+    values = data["wrapper"]["nonSecretValues"]
+    names = [item["name"] for item in values]
+    if len(names) != len(set(names)):
+        raise ValidationError("$.wrapper.nonSecretValues: duplicate names")
+    if set(names) & set(data["secrets"]["requiredNames"]):
+        raise ValidationError("$.wrapper.nonSecretValues: secret names are forbidden")
 
 
 def compose_health_targets(contract: dict[str, Any], policy: dict[str, Any]) -> tuple[str, str]:
@@ -253,6 +279,8 @@ def validate_document(data: dict[str, Any], schema_name: str | None = None) -> N
         validate_release_semantics(data)
     elif kind == "EnvironmentPolicy":
         validate_policy_semantics(data)
+    elif kind == "LegacyRestoreDescriptor":
+        validate_legacy_restore_semantics(data)
     elif kind == "ReleaseState":
         validate_state_semantics(data)
     elif schema_name == "transition-trace.schema.json":

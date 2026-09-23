@@ -43,6 +43,16 @@
     },
     "releaseSha": { "$ref": "#/$defs/sha" },
     "invocationFingerprint": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "configurationDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build", "runtime"],
+      "properties": {
+        "build": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "runtime": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "legacyRestoreDescriptorDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "provenance": {
       "type": "object",
       "additionalProperties": false,

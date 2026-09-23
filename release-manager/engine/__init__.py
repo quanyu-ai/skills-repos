@@ -5,6 +5,7 @@ from .fake_adapter import FakeProcessAdapter, FakeProcessRuntime
 from .pm2_adapter import PM2ProcessAdapter
 from .ports import AdapterHandle, FakeLifecycleRunner, FakeSourceProvider
 from .state_store import AtomicStateStore, GenerationConflict
+from .legacy_restore import LoadedLegacyRestoreDescriptor, load_legacy_restore_descriptor
 
 __all__ = [
     "AdapterHandle",
@@ -17,7 +18,9 @@ __all__ = [
     "GenerationConflict",
     "MigrationGateRequired",
     "MigrationApprovalReceipt",
+    "LoadedLegacyRestoreDescriptor",
     "PM2ProcessAdapter",
     "ReleaseEngine",
     "ReleaseRequest",
+    "load_legacy_restore_descriptor",
 ]

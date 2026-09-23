@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .contracts import compose_health_targets, validate_contract_and_policy
+from .contracts import compose_health_targets, validate_contract_and_policy, validate_legacy_restore_descriptor
 from .errors import ArtifactError, ContractError, ProcessError, ReleaseError, StateError, ToolchainError
 from .ports import AdapterHandle, LifecycleRunner, ProcessAdapter, SourceProvider
 from .state_machine import StateMachine
@@ -18,7 +18,7 @@ from .state_store import AtomicStateStore
 
 SHA_PATTERN = re.compile(r"^[a-f0-9]{40}$")
 PACKAGE_MANAGER_PATTERN = re.compile(r"^(pnpm|npm|yarn)@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
-BUILD_ENV_ALLOWLIST = {"HOME", "CI", "NEXT_DIST_DIR"}
+BUILD_ENV_ALLOWLIST = {"HOME"}
 
 
 class MigrationGateRequired(ReleaseError):
@@ -55,6 +55,8 @@ class Candidate:
     attempt_sequence: int
     trace: tuple[tuple[str, str, str], ...]
     health_targets: tuple[str, str]
+    build_config_digest: str
+    runtime_config_digest: str
 
 
 class ReleaseEngine:
@@ -85,8 +87,9 @@ class ReleaseEngine:
         payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
         return "sha256:" + hashlib.sha256(payload).hexdigest()
 
-    def _sanitize_build_environment(self, environment: dict[str, str]) -> dict[str, str]:
+    def _sanitize_build_environment(self, environment: dict[str, str], policy: dict[str, Any]) -> dict[str, str]:
         clean = {key: value for key, value in environment.items() if key in BUILD_ENV_ALLOWLIST}
+        clean.update({item["name"]: item["value"] for item in policy["build"]["values"]})
         clean["CI"] = "true"
         clean["PATH"] = ":".join(self.trusted_path)
         return clean
@@ -147,7 +150,7 @@ class ReleaseEngine:
             raise ToolchainError("unsupported install operation")
         machine.send("TOOLCHAIN_ATTEST_OK", "TOOLCHAIN_ATTESTED")
 
-        environment = self._sanitize_build_environment(request.build_environment)
+        environment = self._sanitize_build_environment(request.build_environment, request.policy)
         self.runner.frozen_install(destination, package_manager, environment)
         machine.send("FROZEN_INSTALL_OK", "INSTALLED_FROZEN")
 
@@ -185,7 +188,9 @@ class ReleaseEngine:
             raise ArtifactError("tracked mutations remain after allowlisted restoration")
         workspace.attest_sha(request.target_sha)
         machine.send("CLEAN_TREE_OK", "CANDIDATE_READY")
-        return Candidate(destination, request.target_sha, attempt_id, sequence, tuple(machine.trace), health_targets)
+        build_digest = self._digest(request.policy["build"])
+        runtime_digest = self._digest({"runtime": request.policy["runtime"], "network": request.policy["network"], "secrets": request.policy["secrets"]})
+        return Candidate(destination, request.target_sha, attempt_id, sequence, tuple(machine.trace), health_targets, build_digest, runtime_digest)
 
     def _attempt(self, candidate: Candidate, phase: str, outcome: str, event: str) -> dict[str, Any]:
         return {
@@ -221,6 +226,11 @@ class ReleaseEngine:
         return record
 
     def _runtime_spec(self, request: ReleaseRequest, candidate: Candidate) -> dict[str, Any]:
+        if candidate.build_config_digest != self._digest(request.policy["build"]):
+            raise ContractError("build configuration drifted after candidate creation")
+        runtime_digest = self._digest({"runtime": request.policy["runtime"], "network": request.policy["network"], "secrets": request.policy["secrets"]})
+        if candidate.runtime_config_digest != runtime_digest:
+            raise ContractError("runtime configuration drifted after candidate creation")
         runtime = request.contract["runtime"]
         executable = self._resolve_release_path(candidate.path, runtime["executable"], "executable")
         cwd = self._resolve_release_path(candidate.path, runtime["cwd"], "cwd")
@@ -243,6 +253,8 @@ class ReleaseEngine:
             "observedAt": self.now(),
             "allowedEnvNames": list(runtime["envNames"]),
             "requiredSecretNames": list(request.policy["secrets"]["requiredNames"]),
+            "nonSecretValues": copy.deepcopy(request.policy["runtime"]["values"]),
+            "configurationDigests": {"build": candidate.build_config_digest, "runtime": candidate.runtime_config_digest},
             "secretSource": {
                 "provider": request.policy["secrets"]["provider"],
                 "sourcePath": request.policy["secrets"]["sourcePath"],
@@ -366,19 +378,15 @@ class ReleaseEngine:
             if not resuming_gate:
                 self._gate_or_stop(request, candidate, state)
             machine = StateMachine("legacy-adoption")
-            spec = copy.deepcopy(legacy_spec)
-            spec.update({
-                "environmentId": request.policy["metadata"]["environmentId"],
-                "serviceId": request.policy["metadata"]["serviceId"],
-                "namespace": request.policy["process"]["namespace"],
-                "stableName": request.policy["process"]["stableName"],
-                "listener": {
-                    "host": request.policy["network"]["internalHost"],
-                    "port": request.policy["network"]["internalPort"],
-                },
-                "observedAt": self.now(),
-            })
-            legacy_handle = self.adapter.observe_legacy(spec)
+            validate_legacy_restore_descriptor(legacy_spec)
+            if legacy_spec["metadata"] != {"environmentId": request.policy["metadata"]["environmentId"], "serviceId": request.policy["metadata"]["serviceId"]}:
+                raise ContractError("legacy descriptor environment/service mismatch")
+            if legacy_spec["authority"]["namespace"] != request.policy["process"]["namespace"] or legacy_spec["authority"]["stableName"] != request.policy["process"]["stableName"]:
+                raise ContractError("legacy descriptor process identity mismatch")
+            if legacy_spec["listener"] != {"host": request.policy["network"]["internalHost"], "port": request.policy["network"]["internalPort"]}:
+                raise ContractError("legacy descriptor listener mismatch")
+            self.adapter.preflight_legacy_restore(legacy_spec)
+            legacy_handle = self.adapter.observe_legacy(legacy_spec)
             self.adapter.assert_handle(legacy_handle)
             machine.send("LEGACY_OBSERVED", "LEGACY_OBSERVED")
             self.adapter.attest(legacy_handle, legacy_handle.record["releaseSha"], candidate.health_targets)
@@ -386,7 +394,7 @@ class ReleaseEngine:
             machine.send("RESTORE_PROBE_OK", "ADOPTION_READY")
             expected = 0 if state is None else state["generation"]
             adoption_generation = expected + 1
-            legacy_authority = self._authority(legacy_handle, legacy_spec["releasePath"], adoption_generation)
+            legacy_authority = self._authority(legacy_handle, legacy_spec["authority"]["releasePath"], adoption_generation)
             adoption = self._base_record(
                 request, adoption_generation, "adoption-ready", self._attempt(candidate, "candidate-ready", "pending", "LEGACY_ATTESTED"), legacy=legacy_authority
             )
@@ -509,7 +517,7 @@ class ReleaseEngine:
                 raise StateError("rollback requires managed current and previous authority")
             target = state["previous"]
             sequence = self._next_attempt_sequence(state)
-            candidate = Candidate(Path(target["releasePath"]), target["releaseSha"], self.new_id(), sequence, (), compose_health_targets(request.contract, request.policy))
+            candidate = Candidate(Path(target["releasePath"]), target["releaseSha"], self.new_id(), sequence, (), compose_health_targets(request.contract, request.policy), self._digest(request.policy["build"]), self._digest({"runtime": request.policy["runtime"], "network": request.policy["network"], "secrets": request.policy["secrets"]}))
             current_handle = self.adapter.resolve_persisted(state["current"]["handle"])
             target_handle = self.adapter.resolve_persisted(target["handle"])
             machine = StateMachine("rollback")
@@ -631,7 +639,7 @@ class ReleaseEngine:
             self.adapter.persist(restored)
             generation = state["generation"] + 1
             restored_authority = self._authority(restored, authority["releasePath"], generation)
-            candidate = Candidate(Path(authority["releasePath"]), state["attempt"]["targetSha"], state["attempt"]["attemptId"], state["attempt"]["sequence"], (), targets)
+            candidate = Candidate(Path(authority["releasePath"]), state["attempt"]["targetSha"], state["attempt"]["attemptId"], state["attempt"]["sequence"], (), targets, self._digest(request.policy["build"]), self._digest({"runtime": request.policy["runtime"], "network": request.policy["network"], "secrets": request.policy["secrets"]}))
             slot = "current" if "current" in state else "legacy"
             if slot == "legacy":
                 restored_authority = authority

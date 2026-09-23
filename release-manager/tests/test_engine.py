@@ -56,7 +56,6 @@ class EngineTest(unittest.TestCase):
         }))
         self.contract = json.loads((ROOT / "fixtures/valid/release-contract.json").read_text())
         self.policy = json.loads((ROOT / "fixtures/valid/environment-policy.json").read_text())
-        self.contract["runtime"]["envNames"].append("JWT_ACCESS_SECRET")
         self.runtime = FakeProcessRuntime()
         self.runtime.available_secret_names = set(self.policy["secrets"]["requiredNames"])
         self.ids = IdSequence()
@@ -73,7 +72,7 @@ class EngineTest(unittest.TestCase):
             build_environment={
                 "HOME": "/tmp/release-home",
                 "PATH": "/tmp/attacker-first:/usr/bin:/bin",
-                "NEXT_DIST_DIR": ".next-demo",
+                "NEXT_DIST_DIR": "caller-must-not-win",
                 "NODE_CHANNEL_FD": "forbidden",
                 "NODE_UNIQUE_ID": "forbidden",
                 "DATABASE_URL": "must-not-enter-build",
@@ -114,15 +113,14 @@ class EngineTest(unittest.TestCase):
         return MigrationApprovalReceipt(**values)
 
     def legacy_spec(self) -> dict:
-        return {
-            "releaseSha": "f" * 40,
-            "releasePath": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff",
-            "runtime": {
-                "executable": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff/apps/web/node_modules/next/dist/bin/next",
-                "args": ["start"],
-                "cwd": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff/apps/web",
-            },
-        }
+        descriptor = json.loads((ROOT / "fixtures/valid/legacy-restore-descriptor.json").read_text())
+        release = self.source_root.resolve()
+        descriptor["metadata"] = {"environmentId": self.policy["metadata"]["environmentId"], "serviceId": self.policy["metadata"]["serviceId"]}
+        descriptor["authority"].update({"releaseSha": "f" * 40, "releasePath": str(release), "namespace": self.policy["process"]["namespace"], "stableName": self.policy["process"]["stableName"]})
+        descriptor["launcher"] = {"executable": str((release / "node_modules/next/dist/bin/next").resolve()), "args": ["start"], "cwd": str((release / "apps/web").resolve())}
+        descriptor["wrapper"]["executable"] = descriptor["launcher"]["executable"]
+        descriptor["listener"] = {"host": self.policy["network"]["internalHost"], "port": self.policy["network"]["internalPort"]}
+        return descriptor
 
     def adopt_a(self):
         engine, source, runner, adapter, store = self.components(SHA_A)
@@ -159,7 +157,7 @@ class EngineTest(unittest.TestCase):
         request = self.request(SHA_A)
         request = ReleaseRequest(request.source, request.target_sha, request.contract, policy, request.build_environment)
         engine, source, *_ = self.components(SHA_A)
-        with self.assertRaisesRegex(ContractError, "absent from contract"):
+        with self.assertRaisesRegex(ContractError, "classification must be complete"):
             engine.build_candidate(request)
         self.assertEqual(0, source.acquisitions)
 
@@ -187,7 +185,36 @@ class EngineTest(unittest.TestCase):
             self.assertNotIn("NODE_CHANNEL_FD", env)
             self.assertNotIn("NODE_UNIQUE_ID", env)
             self.assertNotIn("DATABASE_URL", env)
+            self.assertEqual(".next-demo", env["NEXT_DIST_DIR"])
             self.assertEqual("/opt/release-manager/bin:/usr/bin:/bin", env["PATH"])
+
+    def test_runtime_configuration_is_complete_and_attested(self) -> None:
+        state, *_ = self.adopt_a()
+        handle = state["current"]["handle"]
+        self.assertRegex(handle["configurationDigests"]["build"], r"^sha256:[a-f0-9]{64}$")
+        self.assertRegex(handle["configurationDigests"]["runtime"], r"^sha256:[a-f0-9]{64}$")
+        started = self.runtime.started_specs[-1]
+        values = {item["name"]: item["value"] for item in started["nonSecretValues"]}
+        self.assertEqual(".next-demo", values["NEXT_DIST_DIR"])
+
+    def test_missing_runtime_non_secret_value_fails_before_source(self) -> None:
+        request = self.request(SHA_A)
+        request.policy["runtime"]["values"] = [item for item in request.policy["runtime"]["values"] if item["name"] != "NEXT_DIST_DIR"]
+        engine, source, *_ = self.components(SHA_A)
+        with self.assertRaisesRegex(ContractError, "incomplete or undeclared"):
+            engine.build_candidate(request)
+        self.assertEqual(0, source.acquisitions)
+
+    def test_secret_non_secret_and_phase_mismatch_fail_closed(self) -> None:
+        engine, source, *_ = self.components(SHA_A)
+        request = self.request(SHA_A)
+        request.contract["runtime"]["nonSecretEnvNames"].append("JWT_ACCESS_SECRET")
+        with self.assertRaises(ContractError): engine.build_candidate(request)
+        self.assertEqual(0, source.acquisitions)
+        request = self.request(SHA_A)
+        for item in request.policy["runtime"]["values"]:
+            if item["name"] == "NEXT_DIST_DIR": item["value"] = ".next-other"
+        with self.assertRaisesRegex(ContractError, "build/runtime binding mismatch"): engine.build_candidate(request)
 
     def test_missing_prepare_output_fails_before_process_mutation(self) -> None:
         engine, _, runner, adapter, *_ = self.components(SHA_A)
