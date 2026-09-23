@@ -60,7 +60,10 @@
       "additionalProperties": false,
       "required": ["appRoot", "required", "trackedMutationAllowlist"],
       "properties": {
-        "appRoot": { "$ref": "#/$defs/relativePath" },
+        "appRoot": {
+          "description": "Repository-root-relative application artifact boundary. It is not a base for runtime paths.",
+          "$ref": "#/$defs/relativePath"
+        },
         "required": {
           "type": "array",
           "minItems": 1,
@@ -79,8 +82,14 @@
       "additionalProperties": false,
       "required": ["cwd", "executable", "args", "envNames", "binding"],
       "properties": {
-        "cwd": { "$ref": "#/$defs/relativePath" },
-        "executable": { "$ref": "#/$defs/relativePath" },
+        "cwd": {
+          "description": "Repository/release-root-relative runtime working directory; canonical resolution must remain inside the immutable release root.",
+          "$ref": "#/$defs/relativePath"
+        },
+        "executable": {
+          "description": "Repository/release-root-relative runtime executable; canonical resolution must remain inside the immutable release root.",
+          "$ref": "#/$defs/relativePath"
+        },
         "args": {
           "type": "array",
           "maxItems": 64,

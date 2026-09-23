@@ -1,6 +1,6 @@
 # release-manager specifications
 
-ENV-1b-a defines the experimental `v1alpha1` contracts for a future release manager. It does not contain a production release engine or process adapter.
+ENV-1b-a defines the experimental `v1alpha1` contracts. ENV-1b-b adds the contract-driven core engine and a deterministic Fake Adapter for isolated verification. It does not contain a production process adapter or mutate a live environment.
 
 ## Files
 
@@ -9,11 +9,14 @@ ENV-1b-a defines the experimental `v1alpha1` contracts for a future release mana
 - `fixtures/`: valid and deliberately invalid examples.
 - `scripts/validate.py`: dependency-free schema/semantic validator used by the harness.
 - `tests/test_schemas.py`: valid, fail-closed, state-transition, and traceability tests.
+- `engine/`: core source/build/activation/adoption/rollback/recovery orchestration, atomic State Store, injected ports, and deterministic fakes.
+- `tests/test_engine.py`: restart/recovery, crash-boundary, migration-gate, lifecycle, attestation, and restore tests.
 
 ## Validation
 
 ```bash
 python3 release-manager/tests/test_schemas.py
+python3 release-manager/tests/test_engine.py
 python3 release-manager/scripts/validate.py all
 ```
 
@@ -22,6 +25,18 @@ Validation is intended to be the first engine step. Unknown fields, unsafe paths
 `toolchain.install` is deliberately not a generic command. In `v1alpha1` its only valid operation is `package-manager-frozen-install`; the future engine must resolve the exact repository-declared package manager through Corepack. Repository package scripts remain available only for the explicitly repository-owned prepare/build/verify phases.
 
 Health ownership is split without an override layer: the Release Contract owns the path, while Environment Policy owns the internal host/port and public base URL. Targets compose as `http://<internalHost>:<internalPort><contractPath>` and `<publicBaseUrl><contractPath>` after both documents validate.
+
+The core validates contract and policy before source or process work, acquires and re-attests an exact SHA, resolves an exact repository package manager, invokes only typed frozen install and declared lifecycle actions, verifies artifacts and a restored clean tree, and stops at an approval gate without executing database actions. The Engine alone commits the locked atomic State Store. Process handles must be issued or re-observed by the injected adapter.
+
+Runtime `cwd` and `executable` are always repository/release-root-relative. `artifact.appRoot` describes the application artifact boundary and is not a second runtime path base. The engine resolves runtime paths canonically and rejects symlink or other escapes from the immutable release root.
+
+The build request cannot provide executable lookup precedence. The engine receives a separately configured trusted path list and always replaces request `PATH` with that deterministic value. PM2 IPC variables and undeclared environment values are excluded.
+
+An approval-gated migration handoff uses a typed `MigrationApprovalReceipt`, not a boolean. It binds the approval to the target SHA, contract and policy digests, environment/service identity, waiting attempt, State Store generation, gate identity, and approval time. Only a digest and non-secret event evidence enter persisted release state; the engine still executes no database action.
+
+Interrupted recovery inventories the adapter scope before deciding authority. A uniquely identified uncommitted candidate is removed, then the exact persisted current or legacy handle is re-attested or restored. Ambiguous or unexpected inventory fails closed.
+
+The included Fake Adapter models process identity, runtime attestation, secret-name availability, ambiguity, replacement, persistence, and deterministic failures without invoking PM2 or mutating operating-system processes. Production PM2 behavior remains ENV-1b-c scope.
 
 ## Frozen deploy-app boundary
 
