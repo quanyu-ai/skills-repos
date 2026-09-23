@@ -1,6 +1,6 @@
 # Process Adapter Contract
 
-Status: `v1alpha1` specification. This document defines boundaries only; ENV-1b-a contains no production adapter.
+Status: `v1alpha1`. ENV-1b-c implements the PM2 adapter while preserving this Engine/Adapter boundary.
 
 ## Authority boundary
 
@@ -14,7 +14,7 @@ export type ProcessHandle = Readonly<PersistedProcessHandle> & {
 };
 
 export interface ProcessAdapter {
-  inspect(service: ServiceIdentity): Promise<ProcessInventory>;
+  inventory(service: ServiceIdentity): Promise<ProcessInventory>;
   validatePolicy(policy: ProcessPolicy): Promise<void>;
   observeLegacy(spec: LegacyObservationSpec): Promise<ProcessHandle>;
   assertReplaceable(current: ProcessHandle, candidate: RuntimeSpec): Promise<void>;
@@ -54,6 +54,6 @@ The State Store wraps an attested handle in a restorable runtime-authority recor
 - The adapter persists supervisor state only after the engine requests it with an attested handle.
 - Restore failure returns evidence and enters engine-owned `RECOVERY_REQUIRED`; the adapter does not pick another target.
 
-## PM2 v1 constraints for ENV-1b-c
+## PM2 v1 implementation constraints
 
-The future PM2 adapter uses the programmatic API with an explicit process object. A recognized `*.config.cjs` file is allowed only as a compatibility fixture. Cluster reload is not a v1 capability. Tests use an isolated `PM2_HOME`.
+The PM2 adapter uses the programmatic API with an explicit process object. A recognized `*.config.cjs` file is allowed only as a compatibility fixture. Cluster reload is not a v1 capability. Tests use an isolated `PM2_HOME`, disposable processes, fake secrets, Linux `/proc` evidence, and non-business ports.
