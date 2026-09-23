@@ -65,6 +65,7 @@ bash {{SKILL_DIR}}/scripts/deploy.sh <env> <app> [options]
 bash {{SKILL_DIR}}/scripts/doctor.sh --demo-safe quanyu-cloud <full-sha>
 bash {{SKILL_DIR}}/scripts/demo-safe.sh preflight quanyu-cloud --version <full-sha>
 bash {{SKILL_DIR}}/scripts/demo-safe.sh dry-run quanyu-cloud --version <full-sha>
+bash {{SKILL_DIR}}/scripts/demo-safe.sh build-only quanyu-cloud --version <full-sha>
 ```
 
 Review Gate 通过后才允许执行 `deploy`。该入口：
@@ -72,6 +73,8 @@ Review Gate 通过后才允许执行 `deploy`。该入口：
 - 从远程仓库把精确 SHA fetch 到隔离 release，不 checkout 共享工作区；
 - 从目标提交读取 `packageManager`，通过 Corepack 使用其精确 pnpm，并只允许 frozen lockfile；
 - 使用清空后的 build 环境，避免继承 `NODE_CHANNEL_FD` 或 runtime secrets；
+- frozen install 后执行仓库声明的 `db:generate`，验证配置的 generated outputs 后才执行 build；
+- `build-only` 完整验证生成与构建流程并在结束后清理，不启动或切换服务；
 - 运行时由 release 外的 `0600` secret JSON 注入，不把值写入 Git、ecosystem 或日志；
 - 分别验证公网端口、内部端口、Nginx 反代、DB 连通性、PM2 cwd 和 source/release/running SHA；
 - 只允许回滚到已经完成 build/runtime attestation 的 release。

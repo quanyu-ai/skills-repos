@@ -136,13 +136,16 @@ bash scripts/deploy.sh <env> <app> [--version <ref>] [--approved-by <user>] [--s
 bash scripts/doctor.sh --demo-safe <app> <full-sha>
 bash scripts/demo-safe.sh preflight <app> --version <full-sha>
 bash scripts/demo-safe.sh dry-run <app> --version <full-sha>
+bash scripts/demo-safe.sh build-only <app> --version <full-sha>
 # deterministic failure/rollback contract:
 bash tests/demo-safe-failure.sh
+bash tests/demo-safe-build-prepare.sh
 # 独立 Review 通过后才执行：
 bash scripts/demo-safe.sh deploy <app> --version <full-sha>
 ```
 
-该路径不会 checkout 共享工作树，也不会把 secret value 写入 release、PM2
+`build-only` 使用与部署相同的 clean release 流程执行 frozen install、仓库声明的
+`db:generate`、生成产物检查和 production build，但不会 activation。该路径不会 checkout 共享工作树，也不会把 secret value 写入 release、PM2
 ecosystem 或日志。配置使用 gitignored 的 `config/demo-safe.json`，模板中只包含
 路径、端口、变量名与 SHA。
 

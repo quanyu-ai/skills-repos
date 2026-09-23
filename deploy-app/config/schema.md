@@ -144,6 +144,8 @@ deploy-app skill 的两份核心配置 schema 说明。**字段名严格按本�
 - 当前已验证 rollback release path/SHA；
 - 明确允许恢复的 build-generated tracked files。未列入 allowlist 的 tracked build
   mutation 会使部署失败。
+- 仓库声明的 build preparation script 及其 expected generated outputs。当前窄范围
+  contract 只允许 `db:generate`，且不会执行 migrate、db push 或 seed。
 
 它不得包含任何 secret value。完整结构见 `demo-safe.json.template`。
 
