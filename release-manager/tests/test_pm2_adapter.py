@@ -323,7 +323,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             "metadata": {"environmentId": "legacy-demo", "serviceId": "legacy-web"},
             "authority": {"releaseSha": SHA_A, "releasePath": str(release), "namespace": "legacy-isolated", "stableName": "legacy-service", "adapterId": "pending", "pid": 1, "processStartId": "pending"},
             "launcher": {"executable": str(launcher), "args": [], "cwd": str(cwd)},
-            "wrapper": {"executable": str(launcher), "args": [], "host": "127.0.0.1", "internalPort": free_port(), "requiredSecretNames": ["TEST_SECRET"], "runtimeSecretFile": str(secrets), "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}]},
+            "wrapper": {"executable": str(launcher), "args": [], "host": "127.0.0.1", "internalPort": free_port(), "requiredSecretNames": ["TEST_SECRET"], "requiredSecretNamesFormat": "comma-separated", "runtimeSecretFile": str(secrets), "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}]},
             "secrets": {"provider": "external-json-file", "sourcePath": str(secrets), "requiredNames": ["TEST_SECRET"]},
             "listener": {"host": "127.0.0.1", "port": 0}, "probe": {"host": "127.0.0.1", "port": free_port()},
             "health": {"path": "/api/health", "acceptedStatusClasses": [2], "attempts": 30, "intervalMs": 100},
@@ -350,6 +350,28 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         self.adapter.attest(restored, SHA_A, (target, target))
         self.assertEqual(SHA_A, restored.record["releaseSha"])
         self.remove(restored)
+
+    def test_failed_legacy_restore_probe_is_removed_after_early_exit(self) -> None:
+        release = self.root / "legacy-release" / SHA_A
+        cwd = release / "apps/web"; cwd.mkdir(parents=True)
+        launcher = release / "legacy-wrapper.cjs"
+        launcher.write_text("setTimeout(() => process.exit(64), 25);\n")
+        secrets = self.root / "legacy-secrets.json"
+        secrets.write_text(json.dumps({"TEST_SECRET": "legacy-secret-must-not-leak"})); secrets.chmod(0o600)
+        descriptor = {
+            "apiVersion": "quanyu.ai/legacy-restore-descriptor/v1alpha1", "kind": "LegacyRestoreDescriptor",
+            "metadata": {"environmentId": "legacy-demo", "serviceId": "legacy-web"},
+            "authority": {"releaseSha": SHA_A, "releasePath": str(release), "namespace": "legacy-isolated", "stableName": "legacy-service", "adapterId": "pending", "pid": 1, "processStartId": "pending"},
+            "launcher": {"executable": str(launcher), "args": [], "cwd": str(cwd)},
+            "wrapper": {"executable": str(launcher), "args": [], "host": "127.0.0.1", "internalPort": free_port(), "requiredSecretNames": ["TEST_SECRET"], "requiredSecretNamesFormat": "json-array", "runtimeSecretFile": str(secrets), "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}]},
+            "secrets": {"provider": "external-json-file", "sourcePath": str(secrets), "requiredNames": ["TEST_SECRET"]},
+            "listener": {"host": "127.0.0.1", "port": 0}, "probe": {"host": "127.0.0.1", "port": free_port()},
+            "health": {"path": "/api/health", "acceptedStatusClasses": [2], "attempts": 2, "intervalMs": 100},
+        }
+        descriptor["listener"]["port"] = descriptor["wrapper"]["internalPort"]
+        with self.assertRaisesRegex(ProcessError, "health attestation failed|live process identity mismatch"):
+            self.adapter.preflight_legacy_restore(descriptor)
+        self.assertEqual([], self.adapter._all_inventory())
 
     def test_runtime_source_overlap_fails_before_pm2_mutation(self) -> None:
         spec, _, _ = self.spec(SHA_A)

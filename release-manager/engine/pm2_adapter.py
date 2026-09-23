@@ -308,12 +308,17 @@ class PM2ProcessAdapter:
 
     def _legacy_environment(self, descriptor: dict[str, Any], port: int) -> dict[str, str]:
         values = {item["name"]: item["value"] for item in descriptor["wrapper"]["nonSecretValues"]}
+        secret_names = descriptor["wrapper"]["requiredSecretNames"]
+        if descriptor["wrapper"]["requiredSecretNamesFormat"] == "json-array":
+            encoded_secret_names = json.dumps(secret_names, separators=(",", ":"))
+        else:
+            encoded_secret_names = ",".join(secret_names)
         values.update({
             "LEGACY_EXECUTABLE": descriptor["wrapper"]["executable"],
             "LEGACY_ARGS_JSON": json.dumps(descriptor["wrapper"]["args"], separators=(",", ":")),
             "LEGACY_HOST": descriptor["wrapper"]["host"],
             "LEGACY_INTERNAL_PORT": str(port),
-            "REQUIRED_RUNTIME_SECRETS": json.dumps(descriptor["wrapper"]["requiredSecretNames"], separators=(",", ":")),
+            "REQUIRED_RUNTIME_SECRETS": encoded_secret_names,
             "RUNTIME_SECRET_FILE": descriptor["wrapper"]["runtimeSecretFile"],
         })
         return values
@@ -334,11 +339,46 @@ class PM2ProcessAdapter:
             self.attest(handle, descriptor["authority"]["releaseSha"], (url, url))
         finally:
             if handle is not None:
-                self.stop_exact(handle); self.delete_exact(handle); self.await_absent(handle)
+                self._remove_probe_exact(handle, token)
             elif observed is not None:
                 expected = {**observed, "processStartId": observed["evidence"]["processStartId"]}
                 self._bridge({"action": "stop", "expected": expected}); self._bridge({"action": "delete", "expected": expected})
         return {"descriptorDigest": self._descriptor_digest(descriptor), "probe": "pass"}
+
+    def _remove_probe_exact(self, handle: AdapterHandle, launch_token: str) -> None:
+        """Remove a disposable probe even when it exited before health attestation."""
+        expected = self._exact_expected(handle)
+        matches = [
+            item for item in self._all_inventory()
+            if item["adapterId"] == expected["adapterId"]
+            and item.get("launchToken") == launch_token
+        ]
+        if len(matches) != 1:
+            raise ProcessError("legacy restore probe cannot be identified exactly for cleanup")
+        observed = matches[0]
+        self._assert_observation(observed, expected, require_live=False)
+        if observed["status"] == "online":
+            live = self._handle_from_observation(
+                observed,
+                environment_id=handle.record["identity"]["environmentId"],
+                service_id=handle.record["identity"]["serviceId"],
+                release_sha=handle.record["releaseSha"],
+                origin="observed",
+                observed_at=self._now(),
+                sidecar=self._sidecars[handle.record["provenance"]["adapterReceipt"]],
+            )
+            self.stop_exact(live)
+            matches = [
+                item for item in self._all_inventory()
+                if item["adapterId"] == expected["adapterId"]
+                and item.get("launchToken") == launch_token
+            ]
+            if len(matches) != 1:
+                raise ProcessError("legacy restore probe disappeared before exact delete")
+            observed = matches[0]
+            self._assert_observation(observed, expected, require_live=False)
+        self._bridge({"action": "delete", "expected": observed})
+        self.await_absent(handle)
 
     def observe_legacy(self, spec: dict[str, Any]) -> AdapterHandle:
         self._validate_legacy_paths(spec)
