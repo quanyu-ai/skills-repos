@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deterministic, external-secret Demo release path.
-# Usage: demo-safe.sh <doctor|preflight|dry-run|deploy|rollback> <app> --version <40-char-sha> [--config file]
+# Usage: demo-safe.sh <doctor|preflight|dry-run|build-only|deploy|rollback> <app> --version <40-char-sha> [--config file]
 set -euo pipefail
 
 cfg() { jq -er --arg a "$APP" ".apps[\$a].$1" "$CONFIG"; }
@@ -26,6 +26,8 @@ load_config() {
   BOOTSTRAP_SHA="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_rollback_sha // empty' "$CONFIG")"
   BOOTSTRAP_ALLOWED_GENERATED="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_allowed_generated_changes // [] | join(",")' "$CONFIG")"
   BUILD_ALLOWED_TRACKED="$(jq -r --arg a "$APP" '.apps[$a].build_allowed_tracked_changes // [] | join(",")' "$CONFIG")"
+  BUILD_PREPARE_SCRIPT="$(jq -er --arg a "$APP" '.apps[$a].build_prepare_script' "$CONFIG")"
+  BUILD_PREPARE_OUTPUTS="$(jq -er --arg a "$APP" '.apps[$a].build_prepare_outputs | join(",")' "$CONFIG")"
   RELEASES_DIR="$RELEASE_ROOT/releases"; CURRENT_LINK="$RELEASE_ROOT/current"; PREVIOUS_LINK="$RELEASE_ROOT/previous"
 }
 
@@ -129,6 +131,30 @@ check_toolchain() {
   [ "$actual" = "$pnpm_version" ] || { echo "ERROR: pnpm mismatch declared=$pnpm_version actual=$actual" >&2; return 1; }
   echo "toolchain=PASS node=$(node --version) corepack=$(corepack --version) pnpm=$actual"
 }
+
+check_build_prepare_contract() {
+  local repo="$1" command output package_script
+  [ "$BUILD_PREPARE_SCRIPT" = "db:generate" ] \
+    || { echo "ERROR: only the reviewed db:generate preparation contract is allowed" >&2; return 1; }
+  command="$(jq -er --arg script "$BUILD_PREPARE_SCRIPT" '.scripts[$script]' "$repo/package.json")" \
+    || { echo "ERROR: repository does not declare $BUILD_PREPARE_SCRIPT" >&2; return 1; }
+  [ -n "$BUILD_PREPARE_OUTPUTS" ] \
+    || { echo "ERROR: build_prepare_outputs must not be empty" >&2; return 1; }
+  IFS=',' read -r -a outputs <<< "$BUILD_PREPARE_OUTPUTS"
+  for output in "${outputs[@]}"; do
+    [ -n "$output" ] && [[ "$output" != /* ]] && [[ "$output" != *".."* ]] \
+      || { echo "ERROR: invalid build preparation output path" >&2; return 1; }
+  done
+  while IFS= read -r package_file; do
+    package_script="$(jq -r --arg script "$BUILD_PREPARE_SCRIPT" '.scripts[$script] // empty' "$repo/$package_file")"
+    [ -z "$package_script" ] && continue
+    if printf '%s\n' "$package_script" | grep -Eiq 'migrate|db[[:space:]:_-]*push|seed'; then
+      echo "ERROR: forbidden database mutation in $package_file $BUILD_PREPARE_SCRIPT" >&2
+      return 1
+    fi
+  done < <(git -C "$repo" ls-files 'package.json' '*/package.json')
+  echo "build_prepare_contract=PASS script=$BUILD_PREPARE_SCRIPT outputs=$BUILD_PREPARE_OUTPUTS"
+}
 preflight() {
   is_sha "$VERSION" || { echo "ERROR: --version must be a full 40-character lowercase SHA" >&2; return 1; }
   [ "$(id -u)" -ne 0 ] || { echo "ERROR: root deployment is forbidden" >&2; return 1; }
@@ -143,6 +169,7 @@ preflight() {
     trap 'rm -rf "$tmp"' EXIT
     checkout_for_preflight "$tmp"
     check_toolchain "$tmp"
+    check_build_prepare_contract "$tmp"
     [ -d "$tmp/$APP_SUBDIR" ] || { echo "ERROR: app_subdir missing at target SHA" >&2; return 1; }
   )
   if pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
@@ -205,8 +232,48 @@ module.exports = { apps: [{
 EOF2
   chmod 700 "$deploy_dir/start.cjs"; chmod 600 "$deploy_dir/ecosystem.cjs"
 }
+run_sanitized_pnpm() {
+  local release="$1"; shift
+  local shim="$release/.deployment-bin" node_dir
+  node_dir="$(dirname "$(command -v node)")"
+  (
+    cd "$release"
+    env -i HOME="$HOME" USER="$(id -un)" PATH="$shim:$node_dir:/usr/local/bin:/usr/bin:/bin" \
+      CI=true NEXT_DIST_DIR="$DIST_DIR" corepack pnpm "$@"
+  )
+}
+
+run_sanitized_build_prepare() {
+  local release="$1" database_url shim="$release/.deployment-bin" node_dir
+  node_dir="$(dirname "$(command -v node)")"
+  database_url="$(jq -er '.DATABASE_URL' "$SECRET_FILE")"
+  (
+    cd "$release"
+    env -i HOME="$HOME" USER="$(id -un)" PATH="$shim:$node_dir:/usr/local/bin:/usr/bin:/bin" \
+      CI=true NEXT_DIST_DIR="$DIST_DIR" DATABASE_URL="$database_url" \
+      corepack pnpm "$BUILD_PREPARE_SCRIPT"
+  )
+}
+
+run_repository_build() {
+  local release="$1" output
+  check_build_prepare_contract "$release" >/dev/null
+  run_sanitized_pnpm "$release" install --frozen-lockfile || return 1
+  echo "build_prepare=START script=$BUILD_PREPARE_SCRIPT"
+  run_sanitized_build_prepare "$release" \
+    || { echo "ERROR: build preparation failed: $BUILD_PREPARE_SCRIPT" >&2; return 1; }
+  IFS=',' read -r -a outputs <<< "$BUILD_PREPARE_OUTPUTS"
+  for output in "${outputs[@]}"; do
+    [ -e "$release/$output" ] \
+      || { echo "ERROR: expected generated output missing: $output" >&2; return 1; }
+  done
+  echo "build_prepare=PASS script=$BUILD_PREPARE_SCRIPT"
+  run_sanitized_pnpm "$release" build || return 1
+  clean_allowed_build_changes "$release" || return 1
+}
+
 build_release() {
-  local release="$1" package_manager pnpm_version shim node_dir
+  local release="$1" package_manager pnpm_version shim
   checkout_for_preflight "$release"
   package_manager="$(jq -er '.packageManager' "$release/package.json")"; pnpm_version="${package_manager#pnpm@}"
   shim="$release/.deployment-bin"; mkdir -p "$shim"
@@ -215,16 +282,8 @@ build_release() {
 exec corepack pnpm "$@"
 SH
   chmod 700 "$shim/pnpm"
-  node_dir="$(dirname "$(command -v node)")"
-  (
-    cd "$release"
-    env -i HOME="$HOME" USER="$(id -un)" PATH="$shim:$node_dir:/usr/local/bin:/usr/bin:/bin" CI=true NEXT_DIST_DIR="$DIST_DIR" \
-      corepack pnpm install --frozen-lockfile
-    env -i HOME="$HOME" USER="$(id -un)" PATH="$shim:$node_dir:/usr/local/bin:/usr/bin:/bin" CI=true NEXT_DIST_DIR="$DIST_DIR" \
-      corepack pnpm build
-    clean_allowed_build_changes "$release"
-    [ "$(corepack pnpm --version)" = "$pnpm_version" ]
-  )
+  run_repository_build "$release" || return 1
+  [ "$(cd "$release" && env -u NODE_CHANNEL_FD -u NODE_UNIQUE_ID corepack pnpm --version)" = "$pnpm_version" ]
   printf '%s\n' "$VERSION" > "$release/.release-sha"
   printf '%s\n' "$package_manager" > "$release/.release-package-manager"
   touch "$release/.build-verified"
@@ -341,6 +400,19 @@ activate_candidate() {
   echo "DEPLOY_PASS"
 }
 
+deploy_candidate_release() {
+  local release="$1" tmp="$2" known_good known_sha
+  build_release "$tmp" || return 1
+  mv "$tmp" "$release"
+  if [ ! -L "$PREVIOUS_LINK" ]; then
+    prepare_bootstrap_rollback
+  fi
+  known_good="$(live_release)" \
+    || { echo "ERROR: cannot capture current known-good release" >&2; return 1; }
+  known_sha="$(cat "$known_good/.release-sha")"
+  activate_candidate "$release" "$VERSION" "$known_good" "$known_sha"
+}
+
 main() {
   ACTION="${1:-}"; APP="${2:-}"; shift 2 2>/dev/null || true
   VERSION=""; CONFIG="$DEFAULT_CONFIG"; ROLLBACK_SHA=""
@@ -352,7 +424,7 @@ main() {
       *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
     esac
   done
-  case "$ACTION" in doctor|preflight|dry-run|deploy|rollback) ;; *) echo "Usage: $(basename "$0") <doctor|preflight|dry-run|deploy|rollback> <app> --version <sha> [--config file]" >&2; exit 2;; esac
+  case "$ACTION" in doctor|preflight|dry-run|build-only|deploy|rollback) ;; *) echo "Usage: $(basename "$0") <doctor|preflight|dry-run|build-only|deploy|rollback> <app> --version <sha> [--config file]" >&2; exit 2;; esac
   [ -n "$APP" ] || { echo "ERROR: app is required" >&2; exit 2; }
   [ -f "$CONFIG" ] || { echo "ERROR: config missing: $CONFIG" >&2; exit 2; }
   command -v jq >/dev/null || { echo "ERROR: jq missing" >&2; exit 1; }
@@ -369,6 +441,16 @@ main() {
     echo "plan=fetch-clean-build-immutable-release,capture-known-good,start-and-attest,commit-metadata-or-exact-restore"
     echo "DRY_RUN_PASS"
     ;;
+  build-only)
+    preflight
+    mkdir -p "$LOCK_DIR" "$RELEASES_DIR"
+    exec 9>"$LOCK_DIR/$APP.safe-demo.lock"; flock -n 9 || { echo "ERROR: deployment lock busy" >&2; exit 1; }
+    tmp="$RELEASES_DIR/.build-only-$VERSION-$$"; trap 'rm -rf "${tmp:-}"' EXIT
+    build_release "$tmp"
+    attest_release "$tmp" "$VERSION"
+    echo "action=BUILD_ONLY_NO_ACTIVATION"
+    echo "BUILD_ONLY_PASS source_sha=$VERSION"
+    ;;
   deploy)
     preflight
     mkdir -p "$LOCK_DIR" "$RELEASES_DIR"
@@ -376,13 +458,7 @@ main() {
     release="$RELEASES_DIR/$VERSION"
     [ ! -e "$release" ] || { echo "ERROR: immutable release already exists: $release" >&2; exit 1; }
     tmp="$RELEASES_DIR/.building-$VERSION-$$"; trap 'rm -rf "${tmp:-}"' EXIT
-    build_release "$tmp"; mv "$tmp" "$release"; tmp=""
-    if [ ! -L "$PREVIOUS_LINK" ]; then
-      prepare_bootstrap_rollback
-    fi
-    known_good="$(live_release)" || { echo "ERROR: cannot capture current known-good release" >&2; exit 1; }
-    known_sha="$(cat "$known_good/.release-sha")"
-    activate_candidate "$release" "$VERSION" "$known_good" "$known_sha"
+    deploy_candidate_release "$release" "$tmp"; tmp=""
     ;;
   rollback)
     secret_metadata_ok >/dev/null; check_topology >/dev/null
