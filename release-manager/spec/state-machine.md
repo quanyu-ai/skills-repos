@@ -21,6 +21,9 @@ The executable transition table is [`state-machines.json`](./state-machines.json
 - `generation` and attempt `sequence` increase monotonically.
 - Attempts and attestation evidence remain auditable.
 - `current` and `previous` require full ProcessHandle plus health/SHA attestation.
+- Every runtime authority carries the State Store generation that introduced it and `restorable=true`.
+- Canonical `previous` must be older than and distinct from `current`, match the same environment/service identity, and remain fully runtime-attested.
+- During first adoption there is no canonical `previous`; the adapter-observed `legacy` record is the sole restore authority until the candidate is attested and the managed state is atomically committed.
 - A failed attempt target cannot become `current` or `previous`.
 - Filesystem symlinks are derived compatibility outputs, never canonical authority.
 - Only the engine writes the State Store. Adapters return evidence and receipts.
@@ -28,3 +31,12 @@ The executable transition table is [`state-machines.json`](./state-machines.json
 ## Database gate
 
 `migration.mode=none` performs no database action. `approval-gated` stops before process mutation. The release manager never detects an ORM and never runs migrate, db push, or seed implicitly.
+
+## Health target composition
+
+The Release Contract exclusively owns `health.path`. Environment Policy cannot override it and owns the internal bind host/port plus `publicBaseUrl`. After independent validation, the engine composes:
+
+- internal: `http://<internalHost>:<internalPort><contract.health.path>`;
+- public: `<publicBaseUrl><contract.health.path>`.
+
+The contract path is origin-relative and cannot contain a scheme, host, traversal, or double slash. The policy base URL cannot contain a path or user information.

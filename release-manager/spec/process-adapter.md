@@ -43,6 +43,8 @@ A handle is opaque to the engine. It can only be returned by `observeLegacy`, `s
 
 Name and namespace are selectors. Neither is authority on its own.
 
+The State Store wraps an attested handle in a restorable runtime-authority record with its introducing generation. `previous` is canonical rollback authority only through that record. A filesystem symlink cannot substitute for it. Before the first managed commit, the adapter-observed legacy handle is the only restore authority and canonical `previous` is absent.
+
 ## Fail-closed requirements
 
 - Unknown fields in policy/contract/state fail schema validation.

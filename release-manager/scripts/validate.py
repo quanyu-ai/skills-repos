@@ -137,7 +137,7 @@ def validate_schema(value: Any, schema: dict[str, Any], path: str = "$", root: d
 
 
 def _actions(contract: dict[str, Any]) -> list[dict[str, Any]]:
-    actions = [contract["toolchain"]["install"], contract["lifecycle"]["build"]]
+    actions = [contract["lifecycle"]["build"]]
     prepare = contract["lifecycle"].get("prepare")
     if prepare:
         actions.append(prepare["action"])
@@ -167,6 +167,16 @@ def validate_policy_semantics(data: dict[str, Any]) -> None:
         raise ValidationError("$.network.publicBaseUrl: cannot be the internal listener")
 
 
+def compose_health_targets(contract: dict[str, Any], policy: dict[str, Any]) -> tuple[str, str]:
+    """Compose targets without allowing either document to override the other's authority."""
+    path = contract["health"]["path"]
+    host = policy["network"]["internalHost"]
+    rendered_host = f"[{host}]" if ":" in host else host
+    internal = f"http://{rendered_host}:{policy['network']['internalPort']}{path}"
+    public = f"{policy['network']['publicBaseUrl']}{path}"
+    return internal, public
+
+
 def validate_state_semantics(data: dict[str, Any]) -> None:
     attempt = data["attempt"]
     event_sequences = [event["sequence"] for event in attempt["events"]]
@@ -179,13 +189,35 @@ def validate_state_semantics(data: dict[str, Any]) -> None:
         if not release:
             continue
         sha = release["releaseSha"]
+        if release["generation"] > data["generation"]:
+            raise ValidationError(f"$.{slot}: release generation exceeds state generation")
         if release["handle"]["releaseSha"] != sha:
             raise ValidationError(f"$.{slot}: ProcessHandle SHA mismatch")
+        identity = release["handle"]["identity"]
+        if identity["environmentId"] != data["environmentId"] or identity["serviceId"] != data["serviceId"]:
+            raise ValidationError(f"$.{slot}: ProcessHandle environment/service identity mismatch")
         attestation = release["attestation"]
         if attestation["sourceSha"] != sha or attestation["runtimeSha"] != sha:
             raise ValidationError(f"$.{slot}: attestation SHA mismatch")
     if data["status"] == "managed" and "current" not in data:
         raise ValidationError("$: managed state requires current")
+    if "previous" in data and "current" not in data:
+        raise ValidationError("$.previous: rollback authority requires current")
+    if "current" in data and "previous" in data:
+        current, previous = data["current"], data["previous"]
+        if previous["generation"] >= current["generation"]:
+            raise ValidationError("$.previous: generation must precede current")
+        if previous["releaseSha"] == current["releaseSha"]:
+            raise ValidationError("$.previous: release must differ from current")
+    if "legacy" in data:
+        if data["legacy"]["handle"]["provenance"]["origin"] != "observed":
+            raise ValidationError("$.legacy: authority must originate from adapter observation")
+        if "current" in data or "previous" in data:
+            raise ValidationError("$.legacy: first-adoption authority cannot coexist with canonical authority")
+    if data["status"] in {"adoption-ready", "activating"} and "current" not in data and "legacy" not in data:
+        raise ValidationError("$: first adoption requires legacy restore authority until managed commit")
+    if data["status"] == "managed" and "legacy" in data:
+        raise ValidationError("$: managed commit supersedes legacy restore authority")
     if attempt["outcome"] == "failed":
         for slot in ("current", "previous"):
             if data.get(slot, {}).get("releaseSha") == attempt["targetSha"]:

@@ -1,7 +1,7 @@
 {
   "apiVersion": "quanyu.ai/release-acceptance-catalog/v1alpha1",
   "tests": [
-    { "id": "ENV1B-001", "incident": "ambient-package-manager-drift", "assertion": "exact repository packageManager is resolved through Corepack before frozen install", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-001", "incident": "ambient-package-manager-drift", "assertion": "typed frozen-install resolves exact repository packageManager through Corepack and exposes no arbitrary install executable", "phase": "ENV-1b-b" },
     { "id": "ENV1B-002", "incident": "pm2-ipc-environment-caused-node-exit-134", "assertion": "build and probe environments exclude NODE_CHANNEL_FD and NODE_UNIQUE_ID", "phase": "ENV-1b-b" },
     { "id": "ENV1B-003", "incident": "shared-worktree-not-requested-sha", "assertion": "isolated checkout matches full requested SHA before and after build", "phase": "ENV-1b-b" },
     { "id": "ENV1B-004", "incident": "missing-generated-prisma-client", "assertion": "declared prepare runs before build and missing output blocks activation", "phase": "ENV-1b-b" },
@@ -20,6 +20,9 @@
     { "id": "ENV1B-017", "incident": "first-managed-cutover-differs-from-managed-rollback", "assertion": "first-adoption failure restores exact legacy ProcessHandle before persistence", "phase": "ENV-1b-b" },
     { "id": "ENV1B-018", "incident": "canonical-rollback-target-integrity", "assertion": "rollback accepts only runtime-attested prior release and restores original on target failure", "phase": "ENV-1b-b" },
     { "id": "ENV1B-019", "incident": "implicit-database-action-risk", "assertion": "none performs no DB action and approval-gated stops before activation", "phase": "ENV-1b-b" },
-    { "id": "ENV1B-020", "incident": "forged-name-only-process-handle", "assertion": "incomplete or synthesized handle fails schema and adapter re-observation requirements", "phase": "ENV-1b-a" }
+    { "id": "ENV1B-020", "incident": "forged-name-only-process-handle", "assertion": "incomplete or synthesized handle fails schema and adapter re-observation requirements", "phase": "ENV-1b-a" },
+    { "id": "ENV1B-021", "incident": "state-symlink-used-as-rollback-authority", "assertion": "canonical previous contains an older distinct generation with complete restorable ProcessHandle and attestation", "phase": "ENV-1b-a" },
+    { "id": "ENV1B-022", "incident": "first-adoption-has-no-canonical-previous", "assertion": "adapter-observed legacy record remains sole restore authority until managed state commit", "phase": "ENV-1b-a" },
+    { "id": "ENV1B-023", "incident": "health-target-ownership-ambiguity", "assertion": "contract path composes with policy internal endpoint and public base while neither document overrides the other", "phase": "ENV-1b-a" }
   ]
 }

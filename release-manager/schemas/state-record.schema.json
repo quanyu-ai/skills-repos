@@ -72,10 +72,12 @@
     "verifiedRelease": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["releaseSha", "releasePath", "handle", "attestation"],
+      "required": ["generation", "releaseSha", "releasePath", "restorable", "handle", "attestation"],
       "properties": {
+        "generation": { "type": "integer", "minimum": 1 },
         "releaseSha": { "$ref": "#/$defs/sha" },
         "releasePath": { "type": "string", "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[A-Za-z0-9._@+/-]+$" },
+        "restorable": { "const": true },
         "handle": { "$ref": "https://quanyu.ai/schemas/process-handle/v1alpha1" },
         "attestation": { "$ref": "#/$defs/attestation" }
       }

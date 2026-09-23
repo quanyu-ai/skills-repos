@@ -19,6 +19,6 @@
     "sourcePath": "/var/lib/example/secrets/example-app/demo.json",
     "requiredNames": ["DATABASE_URL", "JWT_ACCESS_SECRET"]
   },
-  "health": { "path": "/api/health", "attempts": 20, "intervalMs": 2000 },
+  "health": { "attempts": 20, "intervalMs": 2000 },
   "retention": { "verifiedReleases": 3, "failedAttempts": 5 }
 }

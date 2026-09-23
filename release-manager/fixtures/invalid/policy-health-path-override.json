@@ -5,7 +5,7 @@
   "storage": { "releaseRoot": "/var/lib/example/releases", "stateRoot": "/var/lib/example/state", "lockFile": "/var/lib/example/lock" },
   "process": { "adapter": "pm2", "namespace": "release-manager-demo", "stableName": "demo-example", "replacement": "stop-absent-start-attest" },
   "network": { "internalHost": "127.0.0.1", "internalPort": 3104, "publicBaseUrl": "https://demo.example.invalid" },
-  "secrets": { "provider": "external-json-file", "sourcePath": "/var/lib/example/secrets.json", "requiredNames": ["DATABASE_URL"], "values": { "DATABASE_URL": "forbidden" } },
-  "health": { "attempts": 10, "intervalMs": 1000 },
+  "secrets": { "provider": "external-json-file", "sourcePath": "/var/lib/example/secrets.json", "requiredNames": ["DATABASE_URL"] },
+  "health": { "path": "/policy-must-not-override", "attempts": 10, "intervalMs": 1000 },
   "retention": { "verifiedReleases": 3, "failedAttempts": 5 }
 }

@@ -2,10 +2,10 @@
   "apiVersion": "quanyu.ai/release-contract/v1alpha1",
   "kind": "ReleaseContract",
   "metadata": { "application": "example-app" },
-  "toolchain": { "node": { "source": "package.json#engines.node" }, "packageManager": { "source": "package.json#packageManager", "runner": "corepack" }, "install": { "operation": "package-manager-frozen-install" } },
+  "toolchain": { "node": { "source": "package.json#engines.node" }, "packageManager": { "source": "package.json#packageManager", "runner": "corepack" }, "install": { "argv": ["curl", "https://example.invalid/install"] } },
   "lifecycle": { "build": { "packageScript": "build" }, "verify": [] },
   "artifact": { "appRoot": "apps/web", "required": ["build/id"], "trackedMutationAllowlist": [] },
   "runtime": { "cwd": "apps/web", "executable": "node_modules/app", "args": [], "envNames": ["HOST", "PORT"], "binding": { "hostEnv": "HOST", "portEnv": "PORT" } },
   "health": { "path": "/health", "acceptedStatusClasses": [2] },
-  "migration": { "mode": "auto" }
+  "migration": { "mode": "none" }
 }

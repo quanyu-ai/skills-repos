@@ -25,13 +25,18 @@ class SchemaHarnessTest(unittest.TestCase):
 
     def test_invalid_fixtures_fail_closed(self) -> None:
         expected = {
+            "policy-health-path-override.json",
             "release-unknown-field.json",
+            "release-arbitrary-install.json",
             "release-unsafe-path.json",
             "release-interpolated-shell.json",
             "release-invalid-migration.json",
+            "release-non-frozen-install.json",
             "policy-secret-value.json",
             "process-handle-name-only.json",
             "process-handle-incomplete-provenance.json",
+            "state-record-failed-candidate-previous.json",
+            "state-record-previous-identity-mismatch.json",
             "transition-illegal.json",
         }
         found = {path.name for path in (ROOT / "fixtures" / "invalid").glob("*.json")}
@@ -75,9 +80,20 @@ class SchemaHarnessTest(unittest.TestCase):
 
     def test_interpolated_shell_argument_is_rejected(self) -> None:
         data = self.load_valid("release-contract.json")
-        data["toolchain"]["install"] = {"argv": ["sh", "-c", "echo ${TOKEN}"]}
+        data["lifecycle"]["build"] = {"argv": ["sh", "-c", "echo ${TOKEN}"]}
         with self.assertRaisesRegex(validator.ValidationError, "schema match"):
             validator.validate_document(data)
+
+    def test_install_is_typed_and_frozen(self) -> None:
+        data = self.load_valid("release-contract.json")
+        self.assertEqual(
+            {"operation": "package-manager-frozen-install"},
+            data["toolchain"]["install"],
+        )
+        for invalid in ("release-arbitrary-install.json", "release-non-frozen-install.json"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(validator.ValidationError):
+                    validator.validate_file(ROOT / "fixtures" / "invalid" / invalid)
 
     def test_secret_values_have_no_policy_extension_point(self) -> None:
         data = self.load_valid("environment-policy.json")
@@ -89,6 +105,42 @@ class SchemaHarnessTest(unittest.TestCase):
         path = ROOT / "fixtures" / "invalid" / "process-handle-name-only.json"
         with self.assertRaisesRegex(validator.ValidationError, "missing required"):
             validator.validate_file(path)
+
+    def test_canonical_previous_is_distinct_and_restorable(self) -> None:
+        data = self.load_valid("state-record-current-previous.json")
+        validator.validate_document(data)
+        self.assertTrue(data["previous"]["restorable"])
+        self.assertLess(data["previous"]["generation"], data["current"]["generation"])
+        self.assertNotEqual(data["previous"]["releaseSha"], data["current"]["releaseSha"])
+
+    def test_first_adoption_uses_legacy_without_canonical_previous(self) -> None:
+        data = self.load_valid("state-record-first-adoption.json")
+        validator.validate_document(data)
+        self.assertIn("legacy", data)
+        self.assertNotIn("current", data)
+        self.assertNotIn("previous", data)
+        self.assertEqual("observed", data["legacy"]["handle"]["provenance"]["origin"])
+
+    def test_previous_cannot_share_current_generation(self) -> None:
+        data = self.load_valid("state-record-current-previous.json")
+        data["previous"]["generation"] = data["current"]["generation"]
+        with self.assertRaisesRegex(validator.ValidationError, "generation must precede"):
+            validator.validate_document(data)
+
+    def test_health_targets_have_split_ownership(self) -> None:
+        contract = self.load_valid("release-contract.json")
+        policy = self.load_valid("environment-policy.json")
+        self.assertEqual(
+            ("http://127.0.0.1:3104/api/health", "https://demo.example.invalid/api/health"),
+            validator.compose_health_targets(contract, policy),
+        )
+        contract["health"]["path"] = "https://attacker.invalid/health"
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_document(contract)
+
+    def test_policy_cannot_override_health_path(self) -> None:
+        with self.assertRaisesRegex(validator.ValidationError, "unknown fields"):
+            validator.validate_file(ROOT / "fixtures" / "invalid" / "policy-health-path-override.json")
 
     def test_adapter_interface_has_no_state_commit_method(self) -> None:
         declarations = (ROOT / "spec" / "process-adapter.d.ts").read_text()

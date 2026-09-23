@@ -67,9 +67,8 @@
     "health": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "attempts", "intervalMs"],
+      "required": ["attempts", "intervalMs"],
       "properties": {
-        "path": { "type": "string", "pattern": "^/[A-Za-z0-9_./-]*$" },
         "attempts": { "type": "integer", "minimum": 1, "maximum": 120 },
         "intervalMs": { "type": "integer", "minimum": 100, "maximum": 60000 }
       }

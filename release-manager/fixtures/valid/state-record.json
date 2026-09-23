@@ -9,8 +9,10 @@
   "contractDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "policyDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "current": {
+    "generation": 2,
     "releaseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "releasePath": "/var/lib/example/releases/example-app/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "restorable": true,
     "handle": {
       "apiVersion": "quanyu.ai/process-handle/v1alpha1",
       "kind": "ProcessHandle",

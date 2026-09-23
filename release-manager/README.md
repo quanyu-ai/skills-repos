@@ -19,6 +19,10 @@ python3 release-manager/scripts/validate.py all
 
 Validation is intended to be the first engine step. Unknown fields, unsafe paths, interpolated shell syntax, secret-value fields, invalid migration modes, incomplete ProcessHandles, and illegal state transitions fail closed.
 
+`toolchain.install` is deliberately not a generic command. In `v1alpha1` its only valid operation is `package-manager-frozen-install`; the future engine must resolve the exact repository-declared package manager through Corepack. Repository package scripts remain available only for the explicitly repository-owned prepare/build/verify phases.
+
+Health ownership is split without an override layer: the Release Contract owns the path, while Environment Policy owns the internal host/port and public base URL. Targets compose as `http://<internalHost>:<internalPort><contractPath>` and `<publicBaseUrl><contractPath>` after both documents validate.
+
 ## Frozen deploy-app boundary
 
 `deploy-app` remains transitional recovery knowledge. ENV-1b does not extend it into a generic state engine, contract parser, process adapter, migration orchestrator, or environment registry. Migration proceeds through ENV-1b-b core engine, ENV-1b-c isolated PM2 adapter, ENV-1b-d Quanyu shadow adoption, and a separately authorized ENV-1b-e live adoption.

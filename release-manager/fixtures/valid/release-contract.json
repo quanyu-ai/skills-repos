@@ -5,7 +5,7 @@
   "toolchain": {
     "node": { "source": "package.json#engines.node" },
     "packageManager": { "source": "package.json#packageManager", "runner": "corepack" },
-    "install": { "argv": ["pnpm", "install", "--frozen-lockfile"] }
+    "install": { "operation": "package-manager-frozen-install" }
   },
   "lifecycle": {
     "prepare": { "action": { "packageScript": "db:generate" }, "outputs": ["packages/db/generated"] },
