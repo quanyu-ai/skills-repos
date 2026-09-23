@@ -141,13 +141,20 @@ deploy-app skill 的两份核心配置 schema 说明。**字段名严格按本�
 - Git repository URL、隔离 release root 和 app subdirectory；
 - PM2 name、public/internal ports、health path 与 Nginx config path；
 - external secret file path 和 required secret **names**；
-- 当前已验证 rollback release path/SHA；
+- 首次 canonical cutover 使用的 legacy rollback descriptor。它绑定精确 release
+  path/SHA，并只描述 cwd、release-local executable、args/host/ports、Next distDir、
+  external secret file path、required secret names 与非敏感 runtime env；
 - 明确允许恢复的 build-generated tracked files。未列入 allowlist 的 tracked build
   mutation 会使部署失败。
 - 仓库声明的 build preparation script 及其 expected generated outputs。当前窄范围
   contract 只允许 `db:generate`，且不会执行 migrate、db push 或 seed。
 
 它不得包含任何 secret value。完整结构见 `demo-safe.json.template`。
+
+首次 cutover 的 preflight 会在独立 probe port 重建 legacy invocation 并验证健康，
+不会替换 live PM2 process。legacy release 不会被写入或要求存在 canonical
+`.deployment` 文件。首次 canonical activation 成功后，后续 rollback 继续使用
+canonical release metadata；legacy descriptor 不参与 canonical-to-canonical rollback。
 
 ---
 

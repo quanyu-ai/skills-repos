@@ -22,8 +22,18 @@ load_config() {
   DIST_DIR="$(jq -r --arg a "$APP" '.apps[$a].next_dist_dir // ".next"' "$CONFIG")"
   LOCK_DIR="$(jq -r --arg a "$APP" '.apps[$a].lock_dir // "/var/lib/openclaw/deploy-locks"' "$CONFIG")"
   REQUIRED_SECRETS="$(jq -er --arg a "$APP" '.apps[$a].required_runtime_secrets | join(",")' "$CONFIG")"
-  BOOTSTRAP_RELEASE="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_rollback_release // empty' "$CONFIG")"
-  BOOTSTRAP_SHA="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_rollback_sha // empty' "$CONFIG")"
+  LEGACY_RELEASE="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.release // empty' "$CONFIG")"
+  LEGACY_SHA="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.sha // empty' "$CONFIG")"
+  LEGACY_CWD="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.cwd // empty' "$CONFIG")"
+  LEGACY_EXECUTABLE="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.executable // empty' "$CONFIG")"
+  LEGACY_ARGS_JSON="$(jq -c --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.args // []' "$CONFIG")"
+  LEGACY_HOST="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.host // empty' "$CONFIG")"
+  LEGACY_INTERNAL_PORT="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.internal_port // empty' "$CONFIG")"
+  LEGACY_PROBE_PORT="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.probe_port // empty' "$CONFIG")"
+  LEGACY_DIST_DIR="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.next_dist_dir // empty' "$CONFIG")"
+  LEGACY_SECRET_FILE="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.secret_file // empty' "$CONFIG")"
+  LEGACY_REQUIRED_SECRETS="$(jq -r --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.required_runtime_secrets // [] | join(",")' "$CONFIG")"
+  LEGACY_SAFE_ENV_JSON="$(jq -c --arg a "$APP" '.apps[$a].legacy_bootstrap_rollback.safe_env // {}' "$CONFIG")"
   BOOTSTRAP_ALLOWED_GENERATED="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_allowed_generated_changes // [] | join(",")' "$CONFIG")"
   BUILD_ALLOWED_TRACKED="$(jq -r --arg a "$APP" '.apps[$a].build_allowed_tracked_changes // [] | join(",")' "$CONFIG")"
   BUILD_PREPARE_SCRIPT="$(jq -er --arg a "$APP" '.apps[$a].build_prepare_script' "$CONFIG")"
@@ -73,19 +83,54 @@ checkout_for_preflight() {
   [ "$actual" = "$VERSION" ] || { echo "ERROR: fetched SHA mismatch" >&2; return 1; }
   [ -z "$(git -C "$dst" status --porcelain)" ] || { echo "ERROR: preflight checkout is dirty" >&2; return 1; }
 }
-check_bootstrap_rollback() {
-  if [ -z "$BOOTSTRAP_RELEASE" ] || [ -z "$BOOTSTRAP_SHA" ]; then
-    echo "ERROR: bootstrap rollback release and SHA are required for the first managed cutover" >&2
+check_legacy_bootstrap_descriptor() {
+  if [ -z "$LEGACY_RELEASE" ] || [ -z "$LEGACY_SHA" ] || [ -z "$LEGACY_CWD" ] \
+    || [ -z "$LEGACY_EXECUTABLE" ] || [ -z "$LEGACY_HOST" ] || [ -z "$LEGACY_INTERNAL_PORT" ] \
+    || [ -z "$LEGACY_PROBE_PORT" ] || [ -z "$LEGACY_DIST_DIR" ] || [ -z "$LEGACY_SECRET_FILE" ] \
+    || [ -z "$LEGACY_REQUIRED_SECRETS" ]; then
+    echo "ERROR: complete legacy bootstrap rollback descriptor is required for the first managed cutover" >&2
     return 1
   fi
-  is_sha "$BOOTSTRAP_SHA" || { echo "ERROR: invalid bootstrap rollback SHA" >&2; return 1; }
-  [ -d "$BOOTSTRAP_RELEASE" ] || { echo "ERROR: bootstrap rollback release missing" >&2; return 1; }
-  [ "$(git -C "$BOOTSTRAP_RELEASE" rev-parse HEAD)" = "$BOOTSTRAP_SHA" ] \
+  is_sha "$LEGACY_SHA" || { echo "ERROR: invalid legacy bootstrap rollback SHA" >&2; return 1; }
+  [ -d "$LEGACY_RELEASE" ] || { echo "ERROR: legacy bootstrap rollback release missing" >&2; return 1; }
+  [ "$(git -C "$LEGACY_RELEASE" rev-parse HEAD)" = "$LEGACY_SHA" ] \
     || { echo "ERROR: bootstrap rollback SHA mismatch" >&2; return 1; }
-  [ -d "$BOOTSTRAP_RELEASE/$APP_SUBDIR/$DIST_DIR" ] \
+  [ "$(readlink -f "$LEGACY_CWD")" = "$(readlink -f "$LEGACY_RELEASE/$APP_SUBDIR")" ] \
+    || { echo "ERROR: legacy cwd does not match exact release/app path" >&2; return 1; }
+  [ "$(readlink -f "$LEGACY_EXECUTABLE")" = "$(readlink -f "$LEGACY_CWD/node_modules/next/dist/bin/next")" ] \
+    || { echo "ERROR: legacy executable is not release-local Next" >&2; return 1; }
+  [ -x "$LEGACY_EXECUTABLE" ] || { echo "ERROR: legacy executable missing or not executable" >&2; return 1; }
+  [ -f "$LEGACY_CWD/$LEGACY_DIST_DIR/BUILD_ID" ] \
     || { echo "ERROR: bootstrap rollback build artifact missing" >&2; return 1; }
+  [[ "$LEGACY_INTERNAL_PORT" =~ ^[0-9]+$ ]] && [ "$LEGACY_INTERNAL_PORT" -ge 1 ] && [ "$LEGACY_INTERNAL_PORT" -le 65535 ] \
+    || { echo "ERROR: invalid legacy internal port" >&2; return 1; }
+  [ "$LEGACY_INTERNAL_PORT" = "$INTERNAL_PORT" ] \
+    || { echo "ERROR: legacy internal port mismatch" >&2; return 1; }
+  [ "$LEGACY_HOST" = "127.0.0.1" ] \
+    || { echo "ERROR: legacy host must be 127.0.0.1" >&2; return 1; }
+  [[ "$LEGACY_PROBE_PORT" =~ ^[0-9]+$ ]] && [ "$LEGACY_PROBE_PORT" -ge 1 ] && [ "$LEGACY_PROBE_PORT" -le 65535 ] \
+    && [ "$LEGACY_PROBE_PORT" != "$INTERNAL_PORT" ] && [ "$LEGACY_PROBE_PORT" != "$PUBLIC_PORT" ] \
+    || { echo "ERROR: legacy probe port must be numeric and isolated" >&2; return 1; }
+  [ "$LEGACY_DIST_DIR" = "$DIST_DIR" ] \
+    || { echo "ERROR: legacy Next distDir mismatch" >&2; return 1; }
+  [ "$LEGACY_SECRET_FILE" = "$SECRET_FILE" ] \
+    || { echo "ERROR: legacy descriptor must use the canonical external secret source" >&2; return 1; }
+  [ "$LEGACY_REQUIRED_SECRETS" = "$REQUIRED_SECRETS" ] \
+    || { echo "ERROR: legacy descriptor required secret names mismatch" >&2; return 1; }
+  jq -e 'type == "array" and length == 1 and .[0] == "start"' <<< "$LEGACY_ARGS_JSON" >/dev/null \
+    || { echo "ERROR: legacy args must be the reviewed Next start contract" >&2; return 1; }
+  jq -e 'type == "object"
+    and all(keys[]; test("^[A-Z_][A-Z0-9_]*$") and (test("(SECRET|TOKEN|PASSWORD|KEY|DATABASE_URL)") | not))
+    and all(.[]; type == "string")' <<< "$LEGACY_SAFE_ENV_JSON" >/dev/null \
+    || { echo "ERROR: legacy safe_env must contain safe string environment entries" >&2; return 1; }
+  local name
+  IFS=',' read -r -a names <<< "$LEGACY_REQUIRED_SECRETS"
+  for name in "${names[@]}"; do
+    jq -e --arg n "$name" 'has($n) | not' <<< "$LEGACY_SAFE_ENV_JSON" >/dev/null \
+      || { echo "ERROR: secret name is forbidden in legacy safe_env: $name" >&2; return 1; }
+  done
   local dirty path allowed
-  dirty="$(git -C "$BOOTSTRAP_RELEASE" status --porcelain --untracked-files=no)"
+  dirty="$(git -C "$LEGACY_RELEASE" status --porcelain --untracked-files=no)"
   if [ -n "$dirty" ]; then
     while IFS= read -r line; do
       path="${line:3}"; allowed="false"
@@ -96,29 +141,80 @@ check_bootstrap_rollback() {
       echo "rollback_generated_change=ALLOWED path=$path"
     done <<< "$dirty"
   fi
+  echo "legacy_descriptor=PASS release=$LEGACY_RELEASE sha=$LEGACY_SHA"
+}
+
+check_legacy_bootstrap_live() {
+  check_legacy_bootstrap_descriptor >/dev/null
   local pid cwd
   pid="$(pm2 pid "$PM2_NAME")"; [ -n "$pid" ] && [ "$pid" != "0" ] \
     || { echo "ERROR: current PM2 process is not running" >&2; return 1; }
   cwd="$(readlink -f "$PROC_ROOT/$pid/cwd")"
-  [ "$cwd" = "$BOOTSTRAP_RELEASE/$APP_SUBDIR" ] \
+  [ "$cwd" = "$(readlink -f "$LEGACY_CWD")" ] \
     || { echo "ERROR: bootstrap rollback is not the current PM2 release" >&2; return 1; }
-  echo "rollback_release=PASS path=$BOOTSTRAP_RELEASE sha=$BOOTSTRAP_SHA"
+  echo "rollback_release=PASS path=$LEGACY_RELEASE sha=$LEGACY_SHA contract=legacy-descriptor"
 }
-prepare_bootstrap_rollback() {
-  check_bootstrap_rollback >/dev/null
-  if [ -n "$BOOTSTRAP_ALLOWED_GENERATED" ]; then
-    IFS=',' read -r -a generated <<< "$BOOTSTRAP_ALLOWED_GENERATED"
-    local path
-    for path in "${generated[@]}"; do
-      [ -z "$path" ] || git -C "$BOOTSTRAP_RELEASE" checkout -- "$path"
+
+build_legacy_runtime_env() {
+  local port="$1" entry key value reserved
+  LEGACY_RUNTIME_ENV=(
+    "RUNTIME_SECRET_FILE=$LEGACY_SECRET_FILE"
+    "REQUIRED_RUNTIME_SECRETS=$LEGACY_REQUIRED_SECRETS"
+    "LEGACY_EXECUTABLE=$LEGACY_EXECUTABLE"
+    "LEGACY_ARGS_JSON=$LEGACY_ARGS_JSON"
+    "LEGACY_HOST=$LEGACY_HOST"
+    "LEGACY_INTERNAL_PORT=$port"
+    "NEXT_DIST_DIR=$LEGACY_DIST_DIR"
+  )
+  while IFS= read -r entry; do
+    key="$(printf '%s' "$entry" | base64 -d | jq -r '.key')"
+    value="$(printf '%s' "$entry" | base64 -d | jq -r '.value')"
+    reserved="false"
+    case "$key" in
+      RUNTIME_SECRET_FILE|REQUIRED_RUNTIME_SECRETS|LEGACY_EXECUTABLE|LEGACY_ARGS_JSON|LEGACY_HOST|LEGACY_INTERNAL_PORT|NEXT_DIST_DIR)
+        reserved="true" ;;
+    esac
+    [ "$reserved" = "false" ] || { echo "ERROR: reserved legacy runtime env key: $key" >&2; return 1; }
+    LEGACY_RUNTIME_ENV+=("$key=$value")
+  done < <(jq -r 'to_entries[] | @base64' <<< "$LEGACY_SAFE_ENV_JSON")
+}
+
+probe_legacy_bootstrap() {
+  check_legacy_bootstrap_descriptor >/dev/null
+  local before_pid before_cwd probe_pid="" code="000" i log node_dir
+  before_pid="$(pm2 pid "$PM2_NAME")"
+  before_cwd="$(readlink -f "$PROC_ROOT/$before_pid/cwd")"
+  code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${LEGACY_PROBE_PORT}${HEALTH_PATH}" || true)"
+  [ "$code" = "000" ] || { echo "ERROR: legacy probe port is already serving HTTP" >&2; return 1; }
+  log="$(mktemp -t demo-safe-legacy-probe-XXXXXX)"; chmod 600 "$log"
+  build_legacy_runtime_env "$LEGACY_PROBE_PORT"
+  node_dir="$(dirname "$(command -v node)")"
+  (
+    cd "$LEGACY_CWD"
+    exec env -i HOME="$HOME" USER="$(id -un)" PATH="$node_dir:/usr/local/bin:/usr/bin:/bin" \
+      "${LEGACY_RUNTIME_ENV[@]}" node "$SCRIPT_DIR/legacy-bootstrap-start.cjs"
+  ) >"$log" 2>&1 & probe_pid=$!
+  for i in $(seq 1 "${DEMO_SAFE_HEALTH_ATTEMPTS:-20}"); do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${LEGACY_PROBE_PORT}${HEALTH_PATH}" || true)"
+    [[ "$code" =~ ^(2|3) ]] && break
+    kill -0 "$probe_pid" 2>/dev/null || break
+    sleep "${DEMO_SAFE_HEALTH_SLEEP:-2}"
+  done
+  kill "$probe_pid" 2>/dev/null || true; wait "$probe_pid" 2>/dev/null || true
+  if ! [[ "$code" =~ ^(2|3) ]]; then
+    echo "ERROR: legacy isolated-port startup probe failed HTTP=$code" >&2
+    for pattern in 'Incomplete legacy bootstrap runtime metadata' 'Runtime secret file permissions are too broad' \
+      'Missing runtime secret' 'Cannot find module' 'EADDRINUSE' 'SyntaxError'; do
+      printf 'legacy_probe_error_%s=%s\n' "$(tr -c '[:alnum:]' '_' <<< "$pattern")" "$(grep -Fc "$pattern" "$log" || true)" >&2
     done
+    rm -f "$log"
+    return 1
   fi
-  [ -z "$(git -C "$BOOTSTRAP_RELEASE" status --porcelain --untracked-files=no)" ] \
-    || { echo "ERROR: bootstrap rollback release is not clean after generated-file cleanup" >&2; return 1; }
-  write_runtime_files "$BOOTSTRAP_RELEASE"
-  printf '%s\n' "$BOOTSTRAP_SHA" > "$BOOTSTRAP_RELEASE/.release-sha"
-  touch "$BOOTSTRAP_RELEASE/.build-verified" "$BOOTSTRAP_RELEASE/.runtime-verified"
-  ln -sfn "$BOOTSTRAP_RELEASE" "$PREVIOUS_LINK"
+  rm -f "$log"
+  [ "$(pm2 pid "$PM2_NAME")" = "$before_pid" ] \
+    && [ "$(readlink -f "$PROC_ROOT/$before_pid/cwd")" = "$before_cwd" ] \
+    || { echo "ERROR: legacy probe changed the live PM2 process" >&2; return 1; }
+  echo "legacy_isolated_probe=PASS port=$LEGACY_PROBE_PORT live_service=UNCHANGED"
 }
 check_toolchain() {
   local repo="$1" package_manager pnpm_version actual
@@ -162,7 +258,21 @@ preflight() {
   secret_metadata_ok
   check_topology
   check_db
-  check_bootstrap_rollback
+  if [ -L "$CURRENT_LINK" ]; then
+    local managed_current managed_sha
+    managed_current="$(readlink -f "$CURRENT_LINK")"
+    [ -f "$managed_current/.runtime-verified" ] \
+      || { echo "ERROR: canonical current release is not runtime verified" >&2; return 1; }
+    managed_sha="$(cat "$managed_current/.release-sha")"
+    attest_release "$managed_current" "$managed_sha" \
+      || { echo "ERROR: canonical current release attestation failed" >&2; return 1; }
+    attest_live_process "$managed_current" "$managed_sha" >/dev/null \
+      || { echo "ERROR: canonical current release is not live" >&2; return 1; }
+    echo "rollback_release=PASS path=$managed_current sha=$managed_sha contract=canonical"
+  else
+    check_legacy_bootstrap_live
+    probe_legacy_bootstrap
+  fi
   (
     local tmp
     tmp="$(mktemp -d -t demo-safe-preflight-XXXXXX)"
@@ -187,12 +297,25 @@ preflight() {
   fi
   echo "target_sha=$VERSION"
   echo "release_path=$RELEASES_DIR/$VERSION"
-  echo "rollback_target=$BOOTSTRAP_RELEASE rollback_sha=$BOOTSTRAP_SHA"
+  if [ -L "$CURRENT_LINK" ]; then
+    echo "rollback_target=$(readlink -f "$CURRENT_LINK") rollback_sha=$(cat "$(readlink -f "$CURRENT_LINK")/.release-sha") contract=canonical"
+  else
+    echo "rollback_target=$LEGACY_RELEASE rollback_sha=$LEGACY_SHA contract=legacy-descriptor"
+  fi
   echo "build_env=SANITIZED runtime_env=EXTERNAL_FILE"
   echo "PREFLIGHT_PASS"
 }
 write_runtime_files() {
-  local release="$1" deploy_dir="$release/.deployment"
+  local release="$1"
+  local deploy_dir="$release/.deployment"
+  local pm2_json release_json app_subdir_json port_json secret_json required_json dist_json
+  pm2_json="$(jq -Rn --arg v "$PM2_NAME" '$v')"
+  release_json="$(jq -Rn --arg v "$release" '$v')"
+  app_subdir_json="$(jq -Rn --arg v "$APP_SUBDIR" '$v')"
+  port_json="$(jq -Rn --arg v "$INTERNAL_PORT" '$v')"
+  secret_json="$(jq -Rn --arg v "$SECRET_FILE" '$v')"
+  required_json="$(jq -Rn --arg v "$REQUIRED_SECRETS" '$v')"
+  dist_json="$(jq -Rn --arg v "$DIST_DIR" '$v')"
   mkdir -p "$deploy_dir"
   cat > "$deploy_dir/start.cjs" <<'JS'
 const fs = require('node:fs');
@@ -213,9 +336,9 @@ require(nextBin);
 JS
   cat > "$deploy_dir/ecosystem.cjs" <<EOF2
 module.exports = { apps: [{
-  name: ${PM2_NAME@Q},
-  cwd: ${release@Q} + '/' + ${APP_SUBDIR@Q},
-  script: ${release@Q} + '/.deployment/start.cjs',
+  name: $pm2_json,
+  cwd: $release_json + '/' + $app_subdir_json,
+  script: $release_json + '/.deployment/start.cjs',
   instances: 1,
   exec_mode: 'fork',
   autorestart: true,
@@ -223,10 +346,10 @@ module.exports = { apps: [{
   max_memory_restart: '1G',
   env: {
     NODE_ENV: 'production',
-    INTERNAL_PORT: ${INTERNAL_PORT@Q},
-    RUNTIME_SECRET_FILE: ${SECRET_FILE@Q},
-    REQUIRED_RUNTIME_SECRETS: ${REQUIRED_SECRETS@Q},
-    NEXT_DIST_DIR: ${DIST_DIR@Q}
+    INTERNAL_PORT: $port_json,
+    RUNTIME_SECRET_FILE: $secret_json,
+    REQUIRED_RUNTIME_SECRETS: $required_json,
+    NEXT_DIST_DIR: $dist_json
   }
 }] };
 EOF2
@@ -234,7 +357,8 @@ EOF2
 }
 run_sanitized_pnpm() {
   local release="$1"; shift
-  local shim="$release/.deployment-bin" node_dir
+  local shim node_dir
+  shim="$release/.deployment-bin"
   node_dir="$(dirname "$(command -v node)")"
   (
     cd "$release"
@@ -244,7 +368,8 @@ run_sanitized_pnpm() {
 }
 
 run_sanitized_build_prepare() {
-  local release="$1" database_url shim="$release/.deployment-bin" node_dir
+  local release="$1" database_url shim node_dir
+  shim="$release/.deployment-bin"
   node_dir="$(dirname "$(command -v node)")"
   database_url="$(jq -er '.DATABASE_URL' "$SECRET_FILE")"
   (
@@ -359,6 +484,40 @@ start_release() {
   pm2 start "$release/.deployment/ecosystem.cjs" --only "$PM2_NAME" >/dev/null
 }
 
+start_legacy_bootstrap() {
+  local entry
+  build_legacy_runtime_env "$LEGACY_INTERNAL_PORT"
+  pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
+  (
+    for entry in "${LEGACY_RUNTIME_ENV[@]}"; do export "$entry"; done
+    pm2 start "$SCRIPT_DIR/legacy-bootstrap-start.cjs" \
+      --name "$PM2_NAME" --cwd "$LEGACY_CWD" --interpreter "$(command -v node)" --update-env >/dev/null
+  )
+}
+
+attest_legacy_live_process() {
+  local pid cwd git_sha
+  pid="$(pm2 pid "$PM2_NAME")"; [ -n "$pid" ] && [ "$pid" != "0" ] \
+    || { echo "ERROR: legacy PM2 process is not running" >&2; return 1; }
+  cwd="$(readlink -f "$PROC_ROOT/$pid/cwd")"
+  [ "$cwd" = "$(readlink -f "$LEGACY_CWD")" ] \
+    || { echo "ERROR: live legacy cwd mismatch" >&2; return 1; }
+  git_sha="$(git -C "$cwd" rev-parse HEAD)"
+  [ "$git_sha" = "$LEGACY_SHA" ] \
+    || { echo "ERROR: live legacy SHA mismatch" >&2; return 1; }
+  echo "legacy_live_attestation=PASS source_sha=$git_sha running_sha=$git_sha"
+}
+
+restore_legacy_bootstrap() {
+  check_legacy_bootstrap_descriptor >/dev/null
+  start_legacy_bootstrap || return 1
+  health_check || return 1
+  attest_legacy_live_process || return 1
+  rm -f "$CURRENT_LINK" "$PREVIOUS_LINK"
+  pm2 save >/dev/null || return 1
+  echo "LEGACY_RESTORE_PASS running_sha=$LEGACY_SHA"
+}
+
 restore_known_good() {
   local release="$1" expected="$2"
   [ -f "$release/.runtime-verified" ] \
@@ -400,12 +559,37 @@ activate_candidate() {
   echo "DEPLOY_PASS"
 }
 
+activate_first_candidate() {
+  local release="$1" expected="$2"
+  attest_release "$release" "$expected" \
+    || { echo "ERROR: release attestation failed" >&2; return 1; }
+  check_legacy_bootstrap_live >/dev/null
+  secret_metadata_ok >/dev/null
+  if ! start_release "$release" || ! health_check || ! attest_live_process "$release" "$expected"; then
+    echo "ERROR: first-cutover candidate activation failed; restoring exact legacy SHA=$LEGACY_SHA" >&2
+    restore_legacy_bootstrap
+    return 1
+  fi
+  if ! touch "$release/.runtime-verified" \
+    || ! ln -sfn "$release" "$CURRENT_LINK" \
+    || ! rm -f "$PREVIOUS_LINK" \
+    || ! pm2 save >/dev/null \
+    || ! attest_live_process "$release" "$expected"; then
+    rm -f "$release/.runtime-verified" "$CURRENT_LINK"
+    echo "ERROR: first-cutover metadata commit failed; restoring exact legacy SHA=$LEGACY_SHA" >&2
+    restore_legacy_bootstrap
+    return 1
+  fi
+  echo "DEPLOY_PASS transition=legacy-to-canonical"
+}
+
 deploy_candidate_release() {
   local release="$1" tmp="$2" known_good known_sha
   build_release "$tmp" || return 1
   mv "$tmp" "$release"
-  if [ ! -L "$PREVIOUS_LINK" ]; then
-    prepare_bootstrap_rollback
+  if [ ! -L "$CURRENT_LINK" ]; then
+    activate_first_candidate "$release" "$VERSION"
+    return
   fi
   known_good="$(live_release)" \
     || { echo "ERROR: cannot capture current known-good release" >&2; return 1; }

@@ -19,8 +19,30 @@
       "next_dist_dir": ".next-demo",
       "nginx_config": "/etc/nginx/conf.d/demo-quanyu-cloud.conf",
       "lock_dir": "/var/lib/openclaw/deploy-locks",
-      "bootstrap_rollback_release": "/var/lib/openclaw/.openclaw/workspace/code-repos/.sec1a-releases/quanyu-REPLACE_WITH_SHA",
-      "bootstrap_rollback_sha": "REPLACE_WITH_FULL_40_CHARACTER_SHA",
+      "legacy_bootstrap_rollback": {
+        "release": "/var/lib/openclaw/.openclaw/workspace/code-repos/.sec1a-releases/quanyu-REPLACE_WITH_SHA",
+        "sha": "REPLACE_WITH_FULL_40_CHARACTER_SHA",
+        "cwd": "/var/lib/openclaw/.openclaw/workspace/code-repos/.sec1a-releases/quanyu-REPLACE_WITH_SHA/apps/web",
+        "executable": "/var/lib/openclaw/.openclaw/workspace/code-repos/.sec1a-releases/quanyu-REPLACE_WITH_SHA/apps/web/node_modules/next/dist/bin/next",
+        "args": ["start"],
+        "host": "127.0.0.1",
+        "internal_port": 3104,
+        "probe_port": 3114,
+        "next_dist_dir": ".next-demo",
+        "secret_file": "/var/lib/openclaw/.openclaw/workspace/.secrets/quanyu-cloud/demo.json",
+        "required_runtime_secrets": [
+          "DATABASE_URL",
+          "JWT_ACCESS_SECRET",
+          "JWT_REFRESH_SECRET",
+          "SYNC_OUTBOX_TOKEN"
+        ],
+        "safe_env": {
+          "NODE_ENV": "production",
+          "DEPLOY_ENV": "demo",
+          "HOST": "127.0.0.1",
+          "PORT": "3104"
+        }
+      },
       "bootstrap_allowed_generated_changes": ["apps/web/next-env.d.ts"],
       "build_allowed_tracked_changes": ["apps/web/next-env.d.ts"],
       "build_prepare_script": "db:generate",
