@@ -21,7 +21,8 @@
       "lock_dir": "/var/lib/openclaw/deploy-locks",
       "bootstrap_rollback_release": "/var/lib/openclaw/.openclaw/workspace/code-repos/.sec1a-releases/quanyu-REPLACE_WITH_SHA",
       "bootstrap_rollback_sha": "REPLACE_WITH_FULL_40_CHARACTER_SHA",
-      "bootstrap_allowed_generated_changes": ["apps/web/next-env.d.ts"]
+      "bootstrap_allowed_generated_changes": ["apps/web/next-env.d.ts"],
+      "build_allowed_tracked_changes": ["apps/web/next-env.d.ts"]
     }
   }
 }

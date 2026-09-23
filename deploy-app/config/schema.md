@@ -142,7 +142,8 @@ deploy-app skill 的两份核心配置 schema 说明。**字段名严格按本�
 - PM2 name、public/internal ports、health path 与 Nginx config path；
 - external secret file path 和 required secret **names**；
 - 当前已验证 rollback release path/SHA；
-- 明确允许清理的 build-generated tracked files。
+- 明确允许恢复的 build-generated tracked files。未列入 allowlist 的 tracked build
+  mutation 会使部署失败。
 
 它不得包含任何 secret value。完整结构见 `demo-safe.json.template`。
 

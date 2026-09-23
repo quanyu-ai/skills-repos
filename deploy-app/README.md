@@ -136,6 +136,8 @@ bash scripts/deploy.sh <env> <app> [--version <ref>] [--approved-by <user>] [--s
 bash scripts/doctor.sh --demo-safe <app> <full-sha>
 bash scripts/demo-safe.sh preflight <app> --version <full-sha>
 bash scripts/demo-safe.sh dry-run <app> --version <full-sha>
+# deterministic failure/rollback contract:
+bash tests/demo-safe-failure.sh
 # 独立 Review 通过后才执行：
 bash scripts/demo-safe.sh deploy <app> --version <full-sha>
 ```

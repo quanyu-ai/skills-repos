@@ -3,42 +3,31 @@
 # Usage: demo-safe.sh <doctor|preflight|dry-run|deploy|rollback> <app> --version <40-char-sha> [--config file]
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEFAULT_CONFIG="$SCRIPT_DIR/../config/demo-safe.json"
-ACTION="${1:-}"; APP="${2:-}"; shift 2 2>/dev/null || true
-VERSION=""; CONFIG="$DEFAULT_CONFIG"; ROLLBACK_SHA=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --version) VERSION="${2:-}"; shift 2 ;;
-    --config) CONFIG="${2:-}"; shift 2 ;;
-    --target-sha) ROLLBACK_SHA="${2:-}"; shift 2 ;;
-    *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
-  esac
-done
-case "$ACTION" in doctor|preflight|dry-run|deploy|rollback) ;; *) echo "Usage: $(basename "$0") <doctor|preflight|dry-run|deploy|rollback> <app> --version <sha> [--config file]" >&2; exit 2;; esac
-[ -n "$APP" ] || { echo "ERROR: app is required" >&2; exit 2; }
-[ -f "$CONFIG" ] || { echo "ERROR: config missing: $CONFIG" >&2; exit 2; }
-command -v jq >/dev/null || { echo "ERROR: jq missing" >&2; exit 1; }
-jq -e . "$CONFIG" >/dev/null || { echo "ERROR: invalid JSON config" >&2; exit 1; }
-
 cfg() { jq -er --arg a "$APP" ".apps[\$a].$1" "$CONFIG"; }
-REPO_URL="$(cfg repo_url)"
-RELEASE_ROOT="$(cfg release_root)"
-APP_SUBDIR="$(cfg app_subdir)"
-PM2_NAME="$(cfg pm2_name)"
-SECRET_FILE="$(cfg secret_file)"
-PUBLIC_PORT="$(cfg public_port)"
-INTERNAL_PORT="$(cfg internal_port)"
-PUBLIC_HOST="$(cfg public_host)"
-HEALTH_PATH="$(cfg health_path)"
-NGINX_CONFIG="$(cfg nginx_config)"
-DIST_DIR="$(jq -r --arg a "$APP" '.apps[$a].next_dist_dir // ".next"' "$CONFIG")"
-LOCK_DIR="$(jq -r --arg a "$APP" '.apps[$a].lock_dir // "/var/lib/openclaw/deploy-locks"' "$CONFIG")"
-REQUIRED_SECRETS="$(jq -er --arg a "$APP" '.apps[$a].required_runtime_secrets | join(",")' "$CONFIG")"
-BOOTSTRAP_RELEASE="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_rollback_release // empty' "$CONFIG")"
-BOOTSTRAP_SHA="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_rollback_sha // empty' "$CONFIG")"
-BOOTSTRAP_ALLOWED_GENERATED="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_allowed_generated_changes // [] | join(",")' "$CONFIG")"
-RELEASES_DIR="$RELEASE_ROOT/releases"; CURRENT_LINK="$RELEASE_ROOT/current"; PREVIOUS_LINK="$RELEASE_ROOT/previous"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_CONFIG="$SCRIPT_DIR/../config/demo-safe.json"
+PROC_ROOT="${DEMO_SAFE_PROC_ROOT:-/proc}"
+
+load_config() {
+  REPO_URL="$(cfg repo_url)"
+  RELEASE_ROOT="$(cfg release_root)"
+  APP_SUBDIR="$(cfg app_subdir)"
+  PM2_NAME="$(cfg pm2_name)"
+  SECRET_FILE="$(cfg secret_file)"
+  PUBLIC_PORT="$(cfg public_port)"
+  INTERNAL_PORT="$(cfg internal_port)"
+  PUBLIC_HOST="$(cfg public_host)"
+  HEALTH_PATH="$(cfg health_path)"
+  NGINX_CONFIG="$(cfg nginx_config)"
+  DIST_DIR="$(jq -r --arg a "$APP" '.apps[$a].next_dist_dir // ".next"' "$CONFIG")"
+  LOCK_DIR="$(jq -r --arg a "$APP" '.apps[$a].lock_dir // "/var/lib/openclaw/deploy-locks"' "$CONFIG")"
+  REQUIRED_SECRETS="$(jq -er --arg a "$APP" '.apps[$a].required_runtime_secrets | join(",")' "$CONFIG")"
+  BOOTSTRAP_RELEASE="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_rollback_release // empty' "$CONFIG")"
+  BOOTSTRAP_SHA="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_rollback_sha // empty' "$CONFIG")"
+  BOOTSTRAP_ALLOWED_GENERATED="$(jq -r --arg a "$APP" '.apps[$a].bootstrap_allowed_generated_changes // [] | join(",")' "$CONFIG")"
+  BUILD_ALLOWED_TRACKED="$(jq -r --arg a "$APP" '.apps[$a].build_allowed_tracked_changes // [] | join(",")' "$CONFIG")"
+  RELEASES_DIR="$RELEASE_ROOT/releases"; CURRENT_LINK="$RELEASE_ROOT/current"; PREVIOUS_LINK="$RELEASE_ROOT/previous"
+}
 
 is_sha() { [[ "$1" =~ ^[0-9a-f]{40}$ ]]; }
 secret_metadata_ok() {
@@ -108,7 +97,7 @@ check_bootstrap_rollback() {
   local pid cwd
   pid="$(pm2 pid "$PM2_NAME")"; [ -n "$pid" ] && [ "$pid" != "0" ] \
     || { echo "ERROR: current PM2 process is not running" >&2; return 1; }
-  cwd="$(readlink -f "/proc/$pid/cwd")"
+  cwd="$(readlink -f "$PROC_ROOT/$pid/cwd")"
   [ "$cwd" = "$BOOTSTRAP_RELEASE/$APP_SUBDIR" ] \
     || { echo "ERROR: bootstrap rollback is not the current PM2 release" >&2; return 1; }
   echo "rollback_release=PASS path=$BOOTSTRAP_RELEASE sha=$BOOTSTRAP_SHA"
@@ -158,7 +147,7 @@ preflight() {
   )
   if pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
     local pid cwd running_sha
-    pid="$(pm2 pid "$PM2_NAME")"; cwd="$(readlink -f "/proc/$pid/cwd")"
+    pid="$(pm2 pid "$PM2_NAME")"; cwd="$(readlink -f "$PROC_ROOT/$pid/cwd")"
     running_sha="UNKNOWN"
     if [ -f "$cwd/.release-sha" ]; then
       running_sha="$(cat "$cwd/.release-sha")"
@@ -233,14 +222,32 @@ SH
       corepack pnpm install --frozen-lockfile
     env -i HOME="$HOME" USER="$(id -un)" PATH="$shim:$node_dir:/usr/local/bin:/usr/bin:/bin" CI=true NEXT_DIST_DIR="$DIST_DIR" \
       corepack pnpm build
-    git checkout -- .
-    [ -z "$(git status --porcelain --untracked-files=no)" ]
+    clean_allowed_build_changes "$release"
     [ "$(corepack pnpm --version)" = "$pnpm_version" ]
   )
   printf '%s\n' "$VERSION" > "$release/.release-sha"
   printf '%s\n' "$package_manager" > "$release/.release-package-manager"
   touch "$release/.build-verified"
   write_runtime_files "$release"
+}
+
+clean_allowed_build_changes() {
+  local release="$1" dirty line path allowed candidate
+  dirty="$(git -C "$release" status --porcelain --untracked-files=no)"
+  [ -n "$dirty" ] || return 0
+  while IFS= read -r line; do
+    path="${line:3}"; allowed="false"
+    IFS=',' read -r -a generated <<< "$BUILD_ALLOWED_TRACKED"
+    for candidate in "${generated[@]}"; do
+      [ -n "$candidate" ] && [ "$path" = "$candidate" ] && allowed="true"
+    done
+    [ "$allowed" = "true" ] \
+      || { echo "ERROR: unexpected tracked build mutation: $path" >&2; return 1; }
+    git -C "$release" checkout -- "$path"
+    echo "build_tracked_change=RESTORED path=$path"
+  done <<< "$dirty"
+  [ -z "$(git -C "$release" status --porcelain --untracked-files=no)" ] \
+    || { echo "ERROR: tracked build mutations remain after cleanup" >&2; return 1; }
 }
 attest_release() {
   local release="$1" expected="$2"
@@ -249,38 +256,117 @@ attest_release() {
   [ "$(git -C "$release" rev-parse HEAD)" = "$expected" ] || return 1
   [ -z "$(git -C "$release" status --porcelain --untracked-files=no)" ] || return 1
 }
-activate() {
-  local release="$1" expected="$2"
-  attest_release "$release" "$expected" || { echo "ERROR: release attestation failed" >&2; return 1; }
-  secret_metadata_ok >/dev/null
-  local old=""
-  [ -L "$CURRENT_LINK" ] && old="$(readlink -f "$CURRENT_LINK")"
-  [ -z "$old" ] || ln -sfn "$old" "$PREVIOUS_LINK"
-  ln -sfn "$release" "$CURRENT_LINK"
+
+live_release() {
+  local pid cwd suffix="/$APP_SUBDIR"
+  pid="$(pm2 pid "$PM2_NAME")"
+  [ -n "$pid" ] && [ "$pid" != "0" ] || return 1
+  cwd="$(readlink -f "$PROC_ROOT/$pid/cwd")"
+  [[ "$cwd" = *"$suffix" ]] || return 1
+  printf '%s\n' "${cwd%$suffix}"
+}
+
+attest_live_process() {
+  local expected_release="$1" expected_sha="$2" actual_release marker git_sha
+  expected_release="$(cd "$expected_release" && pwd -P)"
+  actual_release="$(live_release)" \
+    || { echo "ERROR: cannot resolve live PM2 release" >&2; return 1; }
+  [ "$actual_release" = "$expected_release" ] \
+    || { echo "ERROR: live PM2 release mismatch" >&2; return 1; }
+  marker="$(cat "$actual_release/.release-sha")"
+  git_sha="$(git -C "$actual_release" rev-parse HEAD)"
+  [ "$marker" = "$expected_sha" ] && [ "$git_sha" = "$expected_sha" ] \
+    || { echo "ERROR: live source/release SHA mismatch" >&2; return 1; }
+  echo "live_attestation=PASS source_sha=$git_sha release_sha=$marker running_sha=$marker"
+}
+
+health_check() {
+  local code="000" i
+  for i in $(seq 1 "${DEMO_SAFE_HEALTH_ATTEMPTS:-20}"); do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${INTERNAL_PORT}${HEALTH_PATH}" || true)"
+    [[ "$code" =~ ^(2|3) ]] && break
+    sleep "${DEMO_SAFE_HEALTH_SLEEP:-2}"
+  done
+  [[ "$code" =~ ^(2|3) ]] \
+    || { echo "ERROR: internal health failed HTTP=$code" >&2; return 1; }
+  code="$(curl -sS -o /dev/null -w '%{http_code}' "http://${PUBLIC_HOST}:${PUBLIC_PORT}${HEALTH_PATH}" || true)"
+  [[ "$code" =~ ^(2|3) ]] \
+    || { echo "ERROR: public health failed HTTP=$code" >&2; return 1; }
+}
+
+start_release() {
+  local release="$1"
   pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
   pm2 start "$release/.deployment/ecosystem.cjs" --only "$PM2_NAME" >/dev/null
-  pm2 save >/dev/null
-  local code="000" i
-  for i in $(seq 1 20); do code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${INTERNAL_PORT}${HEALTH_PATH}" || true)"; [[ "$code" =~ ^(2|3) ]] && break; sleep 2; done
-  [[ "$code" =~ ^(2|3) ]] || { echo "ERROR: internal health failed HTTP=$code" >&2; return 1; }
-  code="$(curl -sS -o /dev/null -w '%{http_code}' "http://${PUBLIC_HOST}:${PUBLIC_PORT}${HEALTH_PATH}" || true)"
-  [[ "$code" =~ ^(2|3) ]] || { echo "ERROR: public health failed HTTP=$code" >&2; return 1; }
-  local pid cwd
-  pid="$(pm2 pid "$PM2_NAME")"; cwd="$(readlink -f "/proc/$pid/cwd")"
-  [ "$cwd" = "$release/$APP_SUBDIR" ] || { echo "ERROR: PM2 cwd attestation failed" >&2; return 1; }
-  touch "$release/.runtime-verified"
-  echo "source_sha=$expected release_sha=$(cat "$release/.release-sha") running_sha=$(cat "$release/.release-sha")"
+}
+
+restore_known_good() {
+  local release="$1" expected="$2"
+  [ -f "$release/.runtime-verified" ] \
+    || { echo "ERROR: known-good release lacks runtime verification" >&2; return 1; }
+  attest_release "$release" "$expected" \
+    || { echo "ERROR: known-good release attestation failed" >&2; return 1; }
+  start_release "$release" || return 1
+  health_check || return 1
+  attest_live_process "$release" "$expected" || return 1
+  ln -sfn "$release" "$CURRENT_LINK"
+  pm2 save >/dev/null || return 1
+  echo "RESTORE_PASS running_sha=$expected"
+}
+
+activate_candidate() {
+  local release="$1" expected="$2" known_good="$3" known_sha="$4"
+  attest_release "$release" "$expected" \
+    || { echo "ERROR: release attestation failed" >&2; return 1; }
+  [ -f "$known_good/.runtime-verified" ] \
+    || { echo "ERROR: rollback target was never runtime verified" >&2; return 1; }
+  attest_release "$known_good" "$known_sha" \
+    || { echo "ERROR: rollback target attestation failed" >&2; return 1; }
+  secret_metadata_ok >/dev/null
+  if ! start_release "$release" || ! health_check || ! attest_live_process "$release" "$expected"; then
+    echo "ERROR: candidate activation failed; restoring exact known-good SHA=$known_sha" >&2
+    restore_known_good "$known_good" "$known_sha"
+    return 1
+  fi
+  if ! touch "$release/.runtime-verified" \
+    || ! ln -sfn "$known_good" "$PREVIOUS_LINK" \
+    || ! ln -sfn "$release" "$CURRENT_LINK" \
+    || ! pm2 save >/dev/null \
+    || ! attest_live_process "$release" "$expected"; then
+    rm -f "$release/.runtime-verified"
+    echo "ERROR: activation metadata commit failed; restoring exact known-good SHA=$known_sha" >&2
+    restore_known_good "$known_good" "$known_sha"
+    return 1
+  fi
   echo "DEPLOY_PASS"
 }
 
-case "$ACTION" in
+main() {
+  ACTION="${1:-}"; APP="${2:-}"; shift 2 2>/dev/null || true
+  VERSION=""; CONFIG="$DEFAULT_CONFIG"; ROLLBACK_SHA=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --version) VERSION="${2:-}"; shift 2 ;;
+      --config) CONFIG="${2:-}"; shift 2 ;;
+      --target-sha) ROLLBACK_SHA="${2:-}"; shift 2 ;;
+      *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
+    esac
+  done
+  case "$ACTION" in doctor|preflight|dry-run|deploy|rollback) ;; *) echo "Usage: $(basename "$0") <doctor|preflight|dry-run|deploy|rollback> <app> --version <sha> [--config file]" >&2; exit 2;; esac
+  [ -n "$APP" ] || { echo "ERROR: app is required" >&2; exit 2; }
+  [ -f "$CONFIG" ] || { echo "ERROR: config missing: $CONFIG" >&2; exit 2; }
+  command -v jq >/dev/null || { echo "ERROR: jq missing" >&2; exit 1; }
+  jq -e . "$CONFIG" >/dev/null || { echo "ERROR: invalid JSON config" >&2; exit 1; }
+  load_config
+
+  case "$ACTION" in
   doctor|preflight)
     preflight
     ;;
   dry-run)
     preflight
     echo "action=DRY_RUN_NO_MUTATION"
-    echo "plan=fetch-clean-build-immutable-release,atomic-current-switch,pm2-delete-start,health-and-sha-attestation"
+    echo "plan=fetch-clean-build-immutable-release,capture-known-good,start-and-attest,commit-metadata-or-exact-restore"
     echo "DRY_RUN_PASS"
     ;;
   deploy)
@@ -294,11 +380,9 @@ case "$ACTION" in
     if [ ! -L "$PREVIOUS_LINK" ]; then
       prepare_bootstrap_rollback
     fi
-    if ! activate "$release" "$VERSION"; then
-      echo "ERROR: activation failed; invoking verified rollback" >&2
-      "$0" rollback "$APP" --version "$VERSION" --config "$CONFIG"
-      exit 1
-    fi
+    known_good="$(live_release)" || { echo "ERROR: cannot capture current known-good release" >&2; exit 1; }
+    known_sha="$(cat "$known_good/.release-sha")"
+    activate_candidate "$release" "$VERSION" "$known_good" "$known_sha"
     ;;
   rollback)
     secret_metadata_ok >/dev/null; check_topology >/dev/null
@@ -307,7 +391,19 @@ case "$ACTION" in
     [ -n "$target" ] && [ -d "$target" ] || { echo "ERROR: verified rollback release unavailable" >&2; exit 1; }
     target_sha="$(cat "$target/.release-sha")"
     [ -f "$target/.runtime-verified" ] || { echo "ERROR: rollback target was never runtime verified" >&2; exit 1; }
-    activate "$target" "$target_sha"
+    current="$(live_release)" || { echo "ERROR: cannot capture current release" >&2; exit 1; }
+    current_sha="$(cat "$current/.release-sha")"
+    if ! restore_known_good "$target" "$target_sha"; then
+      echo "ERROR: rollback target failed; restoring original running release" >&2
+      restore_known_good "$current" "$current_sha"
+      exit 1
+    fi
+    [ "$current" = "$target" ] || ln -sfn "$current" "$PREVIOUS_LINK"
     echo "ROLLBACK_PASS running_sha=$target_sha"
     ;;
-esac
+  esac
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi
