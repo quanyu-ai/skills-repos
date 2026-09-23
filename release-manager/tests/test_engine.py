@@ -19,6 +19,7 @@ from engine import (  # noqa: E402
     FakeProcessRuntime,
     FakeSourceProvider,
     GenerationConflict,
+    MigrationApprovalReceipt,
     MigrationGateRequired,
     ReleaseEngine,
     ReleaseRequest,
@@ -71,7 +72,7 @@ class EngineTest(unittest.TestCase):
             policy=copy.deepcopy(self.policy),
             build_environment={
                 "HOME": "/tmp/release-home",
-                "PATH": "/usr/bin:/bin",
+                "PATH": "/tmp/attacker-first:/usr/bin:/bin",
                 "NEXT_DIST_DIR": ".next-demo",
                 "NODE_CHANNEL_FD": "forbidden",
                 "NODE_UNIQUE_ID": "forbidden",
@@ -85,8 +86,32 @@ class EngineTest(unittest.TestCase):
         runner.outputs = ["packages/db/generated", "apps/web/.next-demo/BUILD_ID"]
         adapter = FakeProcessAdapter(runtime or self.runtime, instance_id="123e4567-e89b-42d3-a456-426614174010")
         store = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock")
-        engine = ReleaseEngine(source, runner, adapter, store, self.root / f"work-{sha[0]}", now=lambda: "2026-09-23T15:00:00Z", new_id=self.ids)
+        engine = ReleaseEngine(
+            source,
+            runner,
+            adapter,
+            store,
+            self.root / f"work-{sha[0]}",
+            trusted_path=("/opt/release-manager/bin", "/usr/bin", "/bin"),
+            now=lambda: "2026-09-23T15:00:00Z",
+            new_id=self.ids,
+        )
         return engine, source, runner, adapter, store
+
+    def approval(self, request: ReleaseRequest, state: dict, **overrides) -> MigrationApprovalReceipt:
+        values = {
+            "target_sha": request.target_sha,
+            "contract_digest": ReleaseEngine._digest(request.contract),
+            "policy_digest": ReleaseEngine._digest(request.policy),
+            "environment_id": request.policy["metadata"]["environmentId"],
+            "service_id": request.policy["metadata"]["serviceId"],
+            "attempt_id": state["attempt"]["attemptId"],
+            "state_generation": state["generation"],
+            "gate_id": "db-gate:approval-0001",
+            "approved_at": "2026-09-23T15:00:00Z",
+        }
+        values.update(overrides)
+        return MigrationApprovalReceipt(**values)
 
     def legacy_spec(self) -> dict:
         return {
@@ -162,6 +187,7 @@ class EngineTest(unittest.TestCase):
             self.assertNotIn("NODE_CHANNEL_FD", env)
             self.assertNotIn("NODE_UNIQUE_ID", env)
             self.assertNotIn("DATABASE_URL", env)
+            self.assertEqual("/opt/release-manager/bin:/usr/bin:/bin", env["PATH"])
 
     def test_missing_prepare_output_fails_before_process_mutation(self) -> None:
         engine, _, runner, adapter, *_ = self.components(SHA_A)
@@ -182,6 +208,36 @@ class EngineTest(unittest.TestCase):
         candidate = engine.build_candidate(self.request(SHA_A))
         self.assertEqual("baseline\n", (candidate.path / "apps/web/next-env.d.ts").read_text())
 
+    def test_runtime_paths_are_repository_root_relative_and_canonical(self) -> None:
+        state, *_ = self.adopt_a()
+        release_root = Path(state["current"]["releasePath"])
+        runtime = state["current"]["handle"]["runtime"]
+        self.assertEqual((release_root / "node_modules/next/dist/bin/next").resolve(), Path(runtime["executable"]))
+        self.assertEqual((release_root / "apps/web").resolve(), Path(runtime["cwd"]))
+
+    def test_runtime_executable_symlink_cannot_escape_release_root(self) -> None:
+        outside = self.root / "outside-next"
+        outside.write_text("outside\n")
+        executable = self.source_root / "node_modules/next/dist/bin/next"
+        executable.unlink()
+        executable.symlink_to(outside)
+        engine, _, _, adapter, *_ = self.components(SHA_A)
+        with self.assertRaisesRegex(ArtifactError, "runtime executable escapes release root"):
+            engine.build_candidate(self.request(SHA_A))
+        self.assertEqual([], adapter.runtime.events)
+
+    def test_runtime_cwd_symlink_cannot_escape_release_root(self) -> None:
+        outside = self.root / "outside-cwd"
+        outside.mkdir()
+        cwd = self.source_root / "apps/web"
+        (cwd / "next-env.d.ts").unlink()
+        cwd.rmdir()
+        cwd.symlink_to(outside, target_is_directory=True)
+        engine, _, _, adapter, *_ = self.components(SHA_A)
+        with self.assertRaisesRegex(ArtifactError, "runtime cwd escapes release root"):
+            engine.build_candidate(self.request(SHA_A))
+        self.assertEqual([], adapter.runtime.events)
+
     def test_migration_gate_persists_wait_state_without_adapter_use(self) -> None:
         contract = copy.deepcopy(self.contract)
         contract["migration"]["mode"] = "approval-gated"
@@ -197,13 +253,42 @@ class EngineTest(unittest.TestCase):
         contract = copy.deepcopy(self.contract)
         contract["migration"]["mode"] = "approval-gated"
         engine, _, _, _, store = self.components(SHA_A)
+        request = self.request(SHA_A, contract)
         with self.assertRaises(MigrationGateRequired):
-            engine.adopt(self.request(SHA_A, contract), self.legacy_spec())
+            engine.adopt(request, self.legacy_spec())
         waiting = store.load()
-        resumed = engine.adopt(self.request(SHA_A, contract), self.legacy_spec(), migration_approved=True)
+        resumed = engine.adopt(request, self.legacy_spec(), approval=self.approval(request, waiting))
         self.assertEqual("managed", resumed["status"])
         self.assertGreater(resumed["attempt"]["sequence"], waiting["attempt"]["sequence"])
         self.assertNotEqual(resumed["attempt"]["attemptId"], waiting["attempt"]["attemptId"])
+        self.assertEqual("DB_GATE_APPROVED", resumed["attempt"]["events"][0]["type"])
+        self.assertIn("evidenceDigest", resumed["attempt"]["events"][0])
+
+    def test_migration_receipt_mismatch_fails_before_source_or_process_mutation(self) -> None:
+        contract = copy.deepcopy(self.contract)
+        contract["migration"]["mode"] = "approval-gated"
+        engine, source, _, adapter, store = self.components(SHA_A)
+        request = self.request(SHA_A, contract)
+        with self.assertRaises(MigrationGateRequired):
+            engine.adopt(request, self.legacy_spec())
+        waiting = store.load()
+        acquisitions = source.acquisitions
+        events = list(adapter.runtime.events)
+        mismatches = (
+            ("target_sha", SHA_B),
+            ("contract_digest", "sha256:" + "0" * 64),
+            ("policy_digest", "sha256:" + "1" * 64),
+            ("environment_id", "other-demo"),
+            ("service_id", "other-web"),
+            ("attempt_id", "00000000-0000-4000-8000-999999999999"),
+            ("state_generation", waiting["generation"] + 1),
+        )
+        for field, wrong in mismatches:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ContractError, "receipt .* mismatch"):
+                    engine.adopt(request, self.legacy_spec(), approval=self.approval(request, waiting, **{field: wrong}))
+                self.assertEqual(acquisitions, source.acquisitions)
+                self.assertEqual(events, adapter.runtime.events)
 
     def test_adoption_success_commits_only_attested_candidate(self) -> None:
         state, _, _, _, adapter, store = self.adopt_a()
@@ -311,6 +396,37 @@ class EngineTest(unittest.TestCase):
         self.assertEqual("failed", recovered["status"])
         self.assertEqual(SHA_A, recovered["current"]["releaseSha"])
         self.assertEqual(recovered, store.load())
+
+    def test_interrupted_activation_reconciles_started_candidate_before_restore(self) -> None:
+        state, *_ = self.adopt_a()
+        engine, _, _, adapter, store = self.components(SHA_B)
+        request = self.request(SHA_B)
+        candidate = engine.build_candidate(request, state)
+        interrupted = copy.deepcopy(state)
+        interrupted["generation"] += 1
+        interrupted["status"] = "activating"
+        interrupted["updatedAt"] = "2026-09-23T15:00:00Z"
+        interrupted["attempt"] = {
+            "attemptId": candidate.attempt_id, "sequence": candidate.attempt_sequence,
+            "targetSha": SHA_B, "phase": "activating", "outcome": "pending",
+            "events": [{"sequence": 1, "at": "2026-09-23T15:00:00Z", "type": "ACTIVATION_STARTED"}],
+        }
+        store.commit(state["generation"], interrupted)
+        current = adapter.resolve_persisted(state["current"]["handle"])
+        adapter.stop_exact(current)
+        adapter.delete_exact(current)
+        adapter.await_absent(current)
+        started = adapter.start_candidate(engine._runtime_spec(request, candidate))
+        started_id = started.record["identity"]["adapterId"]
+
+        recovered = engine.recover(request)
+
+        self.assertEqual("failed", recovered["status"])
+        self.assertEqual(SHA_A, recovered["current"]["releaseSha"])
+        self.assertNotIn(started_id, adapter.runtime.records)
+        online = [item["record"]["releaseSha"] for item in adapter.runtime.records.values() if item["status"] == "online"]
+        self.assertEqual([SHA_A], online)
+        self.assertIn("inventory", adapter.runtime.events)
 
     def test_atomic_store_failure_before_replace_preserves_prior_generation(self) -> None:
         state, *_ = self.adopt_a()

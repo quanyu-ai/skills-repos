@@ -69,6 +69,23 @@ class FakeProcessAdapter:
         if handle.record["provenance"]["adapterReceipt"] not in self.runtime.known_receipts:
             raise ProcessError("unknown ProcessHandle provenance")
 
+    def inventory(self, environment_id: str, service_id: str, namespace: str) -> list[AdapterHandle]:
+        if self.runtime.ambiguous_inventory:
+            raise ProcessError("ambiguous process inventory")
+        self.runtime.events.append("inventory")
+        handles = []
+        for item in self.runtime.records.values():
+            record = item["record"]
+            identity = record["identity"]
+            if (
+                item["status"] == "online"
+                and identity["environmentId"] == environment_id
+                and identity["serviceId"] == service_id
+                and identity["namespace"] == namespace
+            ):
+                handles.append(AdapterHandle(copy.deepcopy(record), self.issuer))
+        return handles
+
     def observe_legacy(self, spec: dict[str, Any]) -> AdapterHandle:
         self.runtime.events.append("observe-legacy")
         return self._new_handle(spec, "observed")

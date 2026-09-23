@@ -35,6 +35,7 @@ class AdapterHandle:
 
 
 class ProcessAdapter(Protocol):
+    def inventory(self, environment_id: str, service_id: str, namespace: str) -> list[AdapterHandle]: ...
     def observe_legacy(self, spec: dict[str, Any]) -> AdapterHandle: ...
     def resolve_persisted(self, record: dict[str, Any]) -> AdapterHandle: ...
     def assert_replaceable(self, current: AdapterHandle, candidate: dict[str, Any]) -> None: ...
@@ -86,7 +87,7 @@ class FakeSourceProvider:
         self.acquisitions += 1
         if sha != self.sha:
             raise SourceAttestationError("requested SHA unavailable")
-        shutil.copytree(self.source_root, destination)
+        shutil.copytree(self.source_root, destination, symlinks=True)
         baseline = {
             str(path.relative_to(destination)): path.read_bytes()
             for path in destination.rglob("*")

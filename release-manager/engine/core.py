@@ -4,7 +4,6 @@ import copy
 import hashlib
 import json
 import re
-import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,7 +18,7 @@ from .state_store import AtomicStateStore
 
 SHA_PATTERN = re.compile(r"^[a-f0-9]{40}$")
 PACKAGE_MANAGER_PATTERN = re.compile(r"^(pnpm|npm|yarn)@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
-BUILD_ENV_ALLOWLIST = {"HOME", "PATH", "CI", "NEXT_DIST_DIR"}
+BUILD_ENV_ALLOWLIST = {"HOME", "CI", "NEXT_DIST_DIR"}
 
 
 class MigrationGateRequired(ReleaseError):
@@ -33,6 +32,19 @@ class ReleaseRequest:
     contract: dict[str, Any]
     policy: dict[str, Any]
     build_environment: dict[str, str]
+
+
+@dataclass(frozen=True)
+class MigrationApprovalReceipt:
+    target_sha: str
+    contract_digest: str
+    policy_digest: str
+    environment_id: str
+    service_id: str
+    attempt_id: str
+    state_generation: int
+    gate_id: str
+    approved_at: str
 
 
 @dataclass(frozen=True)
@@ -53,6 +65,7 @@ class ReleaseEngine:
         adapter: ProcessAdapter,
         store: AtomicStateStore,
         workspace_root: Path,
+        trusted_path: tuple[str, ...],
         now: Callable[[], str] | None = None,
         new_id: Callable[[], str] | None = None,
     ) -> None:
@@ -61,6 +74,9 @@ class ReleaseEngine:
         self.adapter = adapter
         self.store = store
         self.workspace_root = workspace_root
+        if not trusted_path or any(not Path(entry).is_absolute() or ":" in entry for entry in trusted_path):
+            raise ContractError("trusted PATH entries must be non-empty absolute paths")
+        self.trusted_path = tuple(dict.fromkeys(trusted_path))
         self.now = now or (lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
         self.new_id = new_id or (lambda: str(uuid.uuid4()))
 
@@ -69,11 +85,22 @@ class ReleaseEngine:
         payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
         return "sha256:" + hashlib.sha256(payload).hexdigest()
 
-    @staticmethod
-    def _sanitize_build_environment(environment: dict[str, str]) -> dict[str, str]:
+    def _sanitize_build_environment(self, environment: dict[str, str]) -> dict[str, str]:
         clean = {key: value for key, value in environment.items() if key in BUILD_ENV_ALLOWLIST}
         clean["CI"] = "true"
+        clean["PATH"] = ":".join(self.trusted_path)
         return clean
+
+    @staticmethod
+    def _resolve_release_path(release_root: Path, relative: str, kind: str) -> Path:
+        try:
+            root = release_root.resolve(strict=True)
+            resolved = (root / relative).resolve(strict=True)
+        except OSError as error:
+            raise ArtifactError(f"runtime {kind} is unavailable") from error
+        if not resolved.is_relative_to(root):
+            raise ArtifactError(f"runtime {kind} escapes release root")
+        return resolved
 
     def _validate_request(self, request: ReleaseRequest) -> tuple[str, str]:
         validate_contract_and_policy(request.contract, request.policy)
@@ -137,9 +164,11 @@ class ReleaseEngine:
             if not (destination / relative).is_file():
                 raise ArtifactError(f"required artifact missing: {relative}")
         runtime = request.contract["runtime"]
-        if not (destination / runtime["cwd"]).is_dir():
+        runtime_cwd = self._resolve_release_path(destination, runtime["cwd"], "cwd")
+        runtime_executable = self._resolve_release_path(destination, runtime["executable"], "executable")
+        if not runtime_cwd.is_dir():
             raise ArtifactError("runtime cwd missing")
-        if not (destination / runtime["executable"]).is_file():
+        if not runtime_executable.is_file():
             raise ArtifactError("runtime executable missing")
         machine.send("ARTIFACT_VERIFY_OK", "ARTIFACT_VERIFIED")
 
@@ -192,7 +221,12 @@ class ReleaseEngine:
 
     def _runtime_spec(self, request: ReleaseRequest, candidate: Candidate) -> dict[str, Any]:
         runtime = request.contract["runtime"]
-        app_root = candidate.path / request.contract["artifact"]["appRoot"]
+        executable = self._resolve_release_path(candidate.path, runtime["executable"], "executable")
+        cwd = self._resolve_release_path(candidate.path, runtime["cwd"], "cwd")
+        if not executable.is_file():
+            raise ArtifactError("runtime executable is not a file")
+        if not cwd.is_dir():
+            raise ArtifactError("runtime cwd is not a directory")
         return {
             "environmentId": request.policy["metadata"]["environmentId"],
             "serviceId": request.policy["metadata"]["serviceId"],
@@ -200,12 +234,11 @@ class ReleaseEngine:
             "releaseSha": candidate.sha,
             "releasePath": str(candidate.path),
             "runtime": {
-                "executable": str(candidate.path / runtime["executable"]),
+                "executable": str(executable),
                 "args": list(runtime["args"]),
-                "cwd": str(candidate.path / runtime["cwd"]),
+                "cwd": str(cwd),
             },
             "observedAt": self.now(),
-            "appRoot": str(app_root),
             "allowedEnvNames": list(runtime["envNames"]),
             "requiredSecretNames": list(request.policy["secrets"]["requiredNames"]),
             "secretSource": {
@@ -238,14 +271,60 @@ class ReleaseEngine:
             },
         }
 
-    def _gate_or_continue(
+    def _approval_digest(self, receipt: MigrationApprovalReceipt) -> str:
+        return self._digest(receipt.__dict__)
+
+    def _record_approval(self, attempt: dict[str, Any], approval_digest: str | None) -> dict[str, Any]:
+        if approval_digest:
+            attempt["events"].insert(0, {
+                "sequence": 1,
+                "at": self.now(),
+                "type": "DB_GATE_APPROVED",
+                "evidenceDigest": approval_digest,
+            })
+            for sequence, event in enumerate(attempt["events"], 1):
+                event["sequence"] = sequence
+        return attempt
+
+    def _validate_approval(
+        self,
+        request: ReleaseRequest,
+        state: dict[str, Any],
+        receipt: MigrationApprovalReceipt | None,
+    ) -> str:
+        if receipt is None:
+            raise MigrationGateRequired("typed migration approval receipt required")
+        if not isinstance(receipt, MigrationApprovalReceipt):
+            raise ContractError("migration approval must be a typed MigrationApprovalReceipt")
+        expected = {
+            "target_sha": request.target_sha,
+            "contract_digest": self._digest(request.contract),
+            "policy_digest": self._digest(request.policy),
+            "environment_id": request.policy["metadata"]["environmentId"],
+            "service_id": request.policy["metadata"]["serviceId"],
+            "attempt_id": state["attempt"]["attemptId"],
+            "state_generation": state["generation"],
+        }
+        for field, value in expected.items():
+            if getattr(receipt, field) != value:
+                raise ContractError(f"migration approval receipt {field} mismatch")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", receipt.gate_id):
+            raise ContractError("migration approval receipt gate_id is invalid")
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", receipt.approved_at):
+            raise ContractError("migration approval receipt approved_at is invalid")
+        try:
+            datetime.strptime(receipt.approved_at, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError as error:
+            raise ContractError("migration approval receipt approved_at is invalid") from error
+        return self._approval_digest(receipt)
+
+    def _gate_or_stop(
         self,
         request: ReleaseRequest,
         candidate: Candidate,
         state: dict[str, Any] | None,
-        migration_approved: bool,
     ) -> None:
-        if request.contract["migration"]["mode"] != "approval-gated" or migration_approved:
+        if request.contract["migration"]["mode"] != "approval-gated":
             return
         expected = 0 if state is None else state["generation"]
         authorities = {key: state.get(key) if state else None for key in ("current", "previous", "legacy")}
@@ -259,15 +338,22 @@ class ReleaseEngine:
         self.store.commit(expected, record)
         raise MigrationGateRequired("independent database approval gate required before activation")
 
-    def adopt(self, request: ReleaseRequest, legacy_spec: dict[str, Any], migration_approved: bool = False) -> dict[str, Any]:
+    def adopt(
+        self,
+        request: ReleaseRequest,
+        legacy_spec: dict[str, Any],
+        approval: MigrationApprovalReceipt | None = None,
+    ) -> dict[str, Any]:
         self._validate_request(request)
         with self.store.locked():
             state = self.store.load()
             resuming_gate = bool(state and state["status"] == "candidate-ready" and state["attempt"]["phase"] == "waiting-db-gate")
-            if state is not None and not (resuming_gate and migration_approved and "current" not in state):
+            if state is not None and not (resuming_gate and "current" not in state):
                 raise StateError("adoption requires an empty State Store")
+            approval_digest = self._validate_approval(request, state, approval) if resuming_gate else None
             candidate = self.build_candidate(request, state)
-            self._gate_or_continue(request, candidate, state, migration_approved)
+            if not resuming_gate:
+                self._gate_or_stop(request, candidate, state)
             machine = StateMachine("legacy-adoption")
             spec = copy.deepcopy(legacy_spec)
             spec.update({
@@ -305,9 +391,10 @@ class ReleaseEngine:
                 machine.send("CANDIDATE_ATTESTED", "CANDIDATE_ATTESTED")
                 final_generation = adoption_generation + 1
                 current = self._authority(candidate_handle, str(candidate.path), final_generation)
-                final = self._base_record(
-                    request, final_generation, "managed", self._attempt(candidate, "complete", "succeeded", "RUNTIME_ATTESTED"), current=current
+                attempt = self._record_approval(
+                    self._attempt(candidate, "complete", "succeeded", "RUNTIME_ATTESTED"), approval_digest
                 )
+                final = self._base_record(request, final_generation, "managed", attempt, current=current)
                 self.store.commit(adoption_generation, final)
                 machine.send("STATE_COMMITTED", "MANAGED_COMMITTED")
                 self.adapter.persist(candidate_handle)
@@ -322,21 +409,28 @@ class ReleaseEngine:
                 self.adapter.attest(restored, legacy_handle.record["releaseSha"], candidate.health_targets)
                 self.adapter.persist(restored)
                 failed_generation = adoption_generation + 1
-                failed = self._base_record(
-                    request, failed_generation, "failed", self._attempt(candidate, "failed", "failed", "ADOPTION_FAILED"), legacy=legacy_authority
+                attempt = self._record_approval(
+                    self._attempt(candidate, "failed", "failed", "ADOPTION_FAILED"), approval_digest
                 )
+                failed = self._base_record(request, failed_generation, "failed", attempt, legacy=legacy_authority)
                 self.store.commit(adoption_generation, failed)
                 raise
 
-    def activate(self, request: ReleaseRequest, migration_approved: bool = False) -> dict[str, Any]:
+    def activate(
+        self,
+        request: ReleaseRequest,
+        approval: MigrationApprovalReceipt | None = None,
+    ) -> dict[str, Any]:
         self._validate_request(request)
         with self.store.locked():
             state = self.store.load()
             resuming_gate = bool(state and state["status"] == "candidate-ready" and state["attempt"]["phase"] == "waiting-db-gate")
-            if not state or "current" not in state or (state["status"] != "managed" and not (resuming_gate and migration_approved)):
+            if not state or "current" not in state or (state["status"] != "managed" and not resuming_gate):
                 raise StateError("canonical activation requires managed current authority")
+            approval_digest = self._validate_approval(request, state, approval) if resuming_gate else None
             candidate = self.build_candidate(request, state)
-            self._gate_or_continue(request, candidate, state, migration_approved)
+            if not resuming_gate:
+                self._gate_or_stop(request, candidate, state)
             expected = state["generation"]
             if not resuming_gate:
                 pending = self._base_record(
@@ -365,10 +459,10 @@ class ReleaseEngine:
                 machine.send("CANDIDATE_ATTESTED", "CANDIDATE_ATTESTED")
                 generation = expected + 1
                 current = self._authority(candidate_handle, str(candidate.path), generation)
-                final = self._base_record(
-                    request, generation, "managed", self._attempt(candidate, "complete", "succeeded", "RUNTIME_ATTESTED"),
-                    current=current, previous=state["current"]
+                attempt = self._record_approval(
+                    self._attempt(candidate, "complete", "succeeded", "RUNTIME_ATTESTED"), approval_digest
                 )
+                final = self._base_record(request, generation, "managed", attempt, current=current, previous=state["current"])
                 self.store.commit(expected, final)
                 machine.send("STATE_COMMITTED", "STATE_COMMITTED")
                 self.adapter.persist(candidate_handle)
@@ -384,10 +478,10 @@ class ReleaseEngine:
                 self.adapter.persist(restored)
                 generation = expected + 1
                 current = self._authority(restored, state["current"]["releasePath"], generation)
-                failed = self._base_record(
-                    request, generation, "failed", self._attempt(candidate, "failed", "failed", "ACTIVATION_FAILED"),
-                    current=current, previous=state.get("previous")
+                attempt = self._record_approval(
+                    self._attempt(candidate, "failed", "failed", "ACTIVATION_FAILED"), approval_digest
                 )
+                failed = self._base_record(request, generation, "failed", attempt, current=current, previous=state.get("previous"))
                 self.store.commit(expected, failed)
                 raise
 
@@ -466,8 +560,52 @@ class ReleaseEngine:
                 failed["attempt"]["outcome"] = "failed"
                 failed["attempt"]["events"].append({"sequence": len(failed["attempt"]["events"]) + 1, "at": self.now(), "type": "RECOVERY_NO_PROCESS_MUTATION"})
                 return self.store.commit(state["generation"], failed)
-            handle = self.adapter.resolve_persisted(authority["handle"])
             targets = compose_health_targets(request.contract, request.policy)
+            handle = self.adapter.resolve_persisted(authority["handle"])
+            identity = authority["handle"]["identity"]
+            inventory = self.adapter.inventory(
+                identity["environmentId"], identity["serviceId"], identity["namespace"]
+            )
+            for observed in inventory:
+                self.adapter.assert_handle(observed)
+            current_id = identity["adapterId"]
+            target_sha = state["attempt"]["targetSha"]
+            expected_candidate_root = (
+                self.workspace_root
+                / "attempts"
+                / f"{state['attempt']['sequence']}-{state['attempt']['attemptId']}"
+                / target_sha
+            ).resolve()
+
+            def is_expected_candidate(observed: AdapterHandle) -> bool:
+                if observed.record["releaseSha"] != target_sha:
+                    return False
+                runtime = observed.record["runtime"]
+                try:
+                    return (
+                        Path(runtime["cwd"]).resolve().is_relative_to(expected_candidate_root)
+                        and Path(runtime["executable"]).resolve().is_relative_to(expected_candidate_root)
+                    )
+                except (KeyError, OSError):
+                    return False
+
+            candidates = [
+                observed for observed in inventory
+                if observed.record["identity"]["adapterId"] != current_id
+                and is_expected_candidate(observed)
+            ]
+            unexpected = [
+                observed for observed in inventory
+                if observed.record["identity"]["adapterId"] != current_id
+                and observed not in candidates
+            ]
+            if len(candidates) > 1 or unexpected:
+                raise ProcessError("interrupted release inventory is ambiguous")
+            if candidates:
+                candidate = candidates[0]
+                self.adapter.stop_exact(candidate)
+                self.adapter.delete_exact(candidate)
+                self.adapter.await_absent(candidate)
             try:
                 self.adapter.attest(handle, authority["releaseSha"], targets)
                 restored = handle
