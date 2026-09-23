@@ -1,0 +1,5 @@
+{
+  "apiVersion": "quanyu.ai/release-contract/v1alpha1",
+  "kind": "ReleaseContract",
+  "unexpected": true
+}

@@ -1,0 +1,85 @@
+{
+  "apiVersion": "quanyu.ai/state-machines/v1alpha1",
+  "machines": {
+    "build": {
+      "initial": "REQUESTED",
+      "terminal": ["CANDIDATE_READY", "BUILD_FAILED", "WAITING_DB_GATE"],
+      "transitions": [
+        ["REQUESTED", "SOURCE_ACQUIRE_OK", "SOURCE_ACQUIRED"],
+        ["SOURCE_ACQUIRED", "SOURCE_ATTEST_OK", "SOURCE_ATTESTED"],
+        ["SOURCE_ATTESTED", "TOOLCHAIN_ATTEST_OK", "TOOLCHAIN_ATTESTED"],
+        ["TOOLCHAIN_ATTESTED", "FROZEN_INSTALL_OK", "INSTALLED_FROZEN"],
+        ["INSTALLED_FROZEN", "PREPARE_OK", "PREPARED"],
+        ["PREPARED", "BUILD_OK", "BUILT"],
+        ["BUILT", "ARTIFACT_VERIFY_OK", "ARTIFACT_VERIFIED"],
+        ["ARTIFACT_VERIFIED", "CLEAN_TREE_OK", "CANDIDATE_READY"],
+        ["CANDIDATE_READY", "DB_GATE_REQUIRED", "WAITING_DB_GATE"]
+      ],
+      "failureTarget": "BUILD_FAILED",
+      "processMutationAllowed": false
+    },
+    "legacy-adoption": {
+      "initial": "UNMANAGED_LIVE",
+      "terminal": ["PERSISTED", "ADOPTION_FAILED", "RECOVERY_REQUIRED"],
+      "transitions": [
+        ["UNMANAGED_LIVE", "LEGACY_OBSERVED", "LEGACY_OBSERVED"],
+        ["LEGACY_OBSERVED", "LEGACY_HEALTH_OK", "LEGACY_HEALTH_ATTESTED"],
+        ["LEGACY_HEALTH_ATTESTED", "RESTORE_PROBE_OK", "ADOPTION_READY"],
+        ["ADOPTION_READY", "OLD_EXACTLY_ABSENT", "OLD_HANDLE_ABSENT"],
+        ["OLD_HANDLE_ABSENT", "CANDIDATE_STARTED", "CANDIDATE_STARTED"],
+        ["CANDIDATE_STARTED", "CANDIDATE_ATTESTED", "CANDIDATE_ATTESTED"],
+        ["CANDIDATE_ATTESTED", "STATE_COMMITTED", "MANAGED_COMMITTED"],
+        ["MANAGED_COMMITTED", "ADAPTER_PERSISTED", "PERSISTED"],
+        ["CANDIDATE_STARTED", "CANDIDATE_FAILED", "RESTORING_LEGACY"],
+        ["RESTORING_LEGACY", "LEGACY_RESTORED_AND_ATTESTED", "LEGACY_RESTORED"],
+        ["LEGACY_RESTORED", "ADAPTER_PERSISTED", "ADOPTION_FAILED"],
+        ["RESTORING_LEGACY", "RESTORE_FAILED", "RECOVERY_REQUIRED"]
+      ]
+    },
+    "activation": {
+      "initial": "CURRENT_ATTESTED",
+      "terminal": ["PERSISTED", "ACTIVATION_FAILED", "RECOVERY_REQUIRED"],
+      "transitions": [
+        ["CURRENT_ATTESTED", "HANDLE_CAPTURED", "CURRENT_HANDLE_CAPTURED"],
+        ["CURRENT_HANDLE_CAPTURED", "REPLACEABILITY_PROVED", "REPLACEABLE"],
+        ["REPLACEABLE", "CURRENT_EXACTLY_ABSENT", "CURRENT_ABSENT"],
+        ["CURRENT_ABSENT", "CANDIDATE_STARTED", "CANDIDATE_STARTED"],
+        ["CANDIDATE_STARTED", "CANDIDATE_ATTESTED", "CANDIDATE_ATTESTED"],
+        ["CANDIDATE_ATTESTED", "STATE_COMMITTED", "STATE_COMMITTED"],
+        ["STATE_COMMITTED", "ADAPTER_PERSISTED", "PERSISTED"],
+        ["CANDIDATE_STARTED", "CANDIDATE_FAILED", "RESTORING_CURRENT"],
+        ["RESTORING_CURRENT", "CURRENT_RESTORED_AND_ATTESTED", "CURRENT_RESTORED"],
+        ["CURRENT_RESTORED", "ADAPTER_PERSISTED", "ACTIVATION_FAILED"],
+        ["RESTORING_CURRENT", "RESTORE_FAILED", "RECOVERY_REQUIRED"]
+      ]
+    },
+    "rollback": {
+      "initial": "CURRENT_ATTESTED",
+      "terminal": ["PERSISTED", "ROLLBACK_FAILED", "RECOVERY_REQUIRED"],
+      "transitions": [
+        ["CURRENT_ATTESTED", "TARGET_VERIFIED", "TARGET_ATTESTED"],
+        ["TARGET_ATTESTED", "CURRENT_HANDLE_CAPTURED", "CURRENT_HANDLE_CAPTURED"],
+        ["CURRENT_HANDLE_CAPTURED", "CURRENT_EXACTLY_ABSENT", "CURRENT_ABSENT"],
+        ["CURRENT_ABSENT", "TARGET_STARTED", "TARGET_STARTED"],
+        ["TARGET_STARTED", "TARGET_RUNTIME_ATTESTED", "TARGET_RUNTIME_ATTESTED"],
+        ["TARGET_RUNTIME_ATTESTED", "STATE_COMMITTED", "STATE_COMMITTED"],
+        ["STATE_COMMITTED", "ADAPTER_PERSISTED", "PERSISTED"],
+        ["TARGET_STARTED", "TARGET_FAILED", "RESTORING_ORIGINAL"],
+        ["RESTORING_ORIGINAL", "ORIGINAL_RESTORED_AND_ATTESTED", "ORIGINAL_RESTORED"],
+        ["ORIGINAL_RESTORED", "ADAPTER_PERSISTED", "ROLLBACK_FAILED"],
+        ["RESTORING_ORIGINAL", "RESTORE_FAILED", "RECOVERY_REQUIRED"]
+      ]
+    }
+  },
+  "invariants": [
+    "validation-precedes-source-or-process-action",
+    "engine-alone-writes-state-store",
+    "adapter-never-commits-release-state",
+    "process-handle-originates-from-adapter-observe-or-start",
+    "candidate-not-current-before-runtime-attestation",
+    "failed-candidate-never-current-previous-or-persisted-authority",
+    "persist-only-after-runtime-and-health-attestation",
+    "unknown-process-inventory-fails-closed",
+    "migration-approval-gated-stops-before-activation"
+  ]
+}

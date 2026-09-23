@@ -1,0 +1,29 @@
+{
+  "apiVersion": "quanyu.ai/release-contract/v1alpha1",
+  "kind": "ReleaseContract",
+  "metadata": { "application": "example-app" },
+  "toolchain": {
+    "node": { "source": "package.json#engines.node" },
+    "packageManager": { "source": "package.json#packageManager", "runner": "corepack" },
+    "install": { "operation": "package-manager-frozen-install" }
+  },
+  "lifecycle": {
+    "prepare": { "action": { "packageScript": "db:generate" }, "outputs": ["packages/db/generated"] },
+    "build": { "packageScript": "build" },
+    "verify": [{ "packageScript": "test:release" }]
+  },
+  "artifact": {
+    "appRoot": "apps/web",
+    "required": ["apps/web/.next-demo/BUILD_ID"],
+    "trackedMutationAllowlist": ["apps/web/next-env.d.ts"]
+  },
+  "runtime": {
+    "cwd": "apps/web",
+    "executable": "node_modules/next/dist/bin/next",
+    "args": ["start"],
+    "envNames": ["NODE_ENV", "HOST", "PORT", "DATABASE_URL"],
+    "binding": { "hostEnv": "HOST", "portEnv": "PORT" }
+  },
+  "health": { "path": "/api/health", "acceptedStatusClasses": [2] },
+  "migration": { "mode": "none" }
+}

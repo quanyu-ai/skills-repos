@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanyu.ai/schemas/transition-trace/v1alpha1",
+  "title": "Release State Machine Trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["machine", "transitions"],
+  "properties": {
+    "machine": { "enum": ["build", "legacy-adoption", "activation", "rollback"] },
+    "transitions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "event", "to"],
+        "properties": {
+          "from": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+          "event": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+          "to": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" }
+        }
+      }
+    }
+  }
+}
