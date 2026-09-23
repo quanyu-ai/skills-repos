@@ -1,6 +1,6 @@
 # Process Adapter Contract
 
-Status: `v1alpha1` specification. This document defines boundaries only; ENV-1b-a contains no production adapter.
+Status: `v1alpha1`. ENV-1b-c implements the PM2 adapter while preserving this Engine/Adapter boundary.
 
 ## Authority boundary
 
@@ -14,7 +14,7 @@ export type ProcessHandle = Readonly<PersistedProcessHandle> & {
 };
 
 export interface ProcessAdapter {
-  inspect(service: ServiceIdentity): Promise<ProcessInventory>;
+  inventory(service: ServiceIdentity): Promise<ProcessInventory>;
   validatePolicy(policy: ProcessPolicy): Promise<void>;
   observeLegacy(spec: LegacyObservationSpec): Promise<ProcessHandle>;
   assertReplaceable(current: ProcessHandle, candidate: RuntimeSpec): Promise<void>;
@@ -39,7 +39,9 @@ A handle is opaque to the engine. It can only be returned by `observeLegacy`, `s
 - executable, arguments, and cwd;
 - exact release SHA;
 - invocation fingerprint;
-- adapter observation/start receipt.
+- adapter observation/start receipt as correlation evidence only.
+
+The receipt is not an authentication mechanism and a persisted receipt is never sufficient to recreate an in-memory handle. After adapter restart, rehydration must use a full live inventory and match the exact PM2 record, PID/start identity, `/proc` runtime evidence, release SHA, and invocation fingerprint. The adapter then mints a new observation and receipt. State Store tamper resistance, if required, belongs to a separate integrity/signing design.
 
 Name and namespace are selectors. Neither is authority on its own.
 
@@ -54,6 +56,6 @@ The State Store wraps an attested handle in a restorable runtime-authority recor
 - The adapter persists supervisor state only after the engine requests it with an attested handle.
 - Restore failure returns evidence and enters engine-owned `RECOVERY_REQUIRED`; the adapter does not pick another target.
 
-## PM2 v1 constraints for ENV-1b-c
+## PM2 v1 implementation constraints
 
-The future PM2 adapter uses the programmatic API with an explicit process object. A recognized `*.config.cjs` file is allowed only as a compatibility fixture. Cluster reload is not a v1 capability. Tests use an isolated `PM2_HOME`.
+The PM2 adapter uses the programmatic API with an explicit process object. A recognized `*.config.cjs` file is allowed only as a compatibility fixture. Cluster reload is not a v1 capability. Tests use an isolated `PM2_HOME`, disposable processes, fake secrets, Linux `/proc` evidence, and non-business ports.

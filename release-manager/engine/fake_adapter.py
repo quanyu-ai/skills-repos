@@ -69,6 +69,9 @@ class FakeProcessAdapter:
         if handle.record["provenance"]["adapterReceipt"] not in self.runtime.known_receipts:
             raise ProcessError("unknown ProcessHandle provenance")
 
+    def validate_policy(self, policy: dict[str, Any]) -> None:
+        return None
+
     def inventory(self, environment_id: str, service_id: str, namespace: str) -> list[AdapterHandle]:
         if self.runtime.ambiguous_inventory:
             raise ProcessError("ambiguous process inventory")

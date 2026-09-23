@@ -114,6 +114,7 @@ class ReleaseEngine:
         )
         if undeclared_secrets:
             raise ContractError(f"policy requires runtime env names absent from contract: {undeclared_secrets}")
+        self.adapter.validate_policy(request.policy)
         return compose_health_targets(request.contract, request.policy)
 
     def _next_attempt_sequence(self, state: dict[str, Any] | None) -> int:
@@ -231,6 +232,7 @@ class ReleaseEngine:
             "environmentId": request.policy["metadata"]["environmentId"],
             "serviceId": request.policy["metadata"]["serviceId"],
             "namespace": request.policy["process"]["namespace"],
+            "stableName": request.policy["process"]["stableName"],
             "releaseSha": candidate.sha,
             "releasePath": str(candidate.path),
             "runtime": {
@@ -248,6 +250,15 @@ class ReleaseEngine:
             "binding": {
                 runtime["binding"]["hostEnv"]: request.policy["network"]["internalHost"],
                 runtime["binding"]["portEnv"]: str(request.policy["network"]["internalPort"]),
+            },
+            "listener": {
+                "host": request.policy["network"]["internalHost"],
+                "port": request.policy["network"]["internalPort"],
+            },
+            "health": {
+                "acceptedStatusClasses": list(request.contract["health"]["acceptedStatusClasses"]),
+                "attempts": request.policy["health"]["attempts"],
+                "intervalMs": request.policy["health"]["intervalMs"],
             },
         }
 
@@ -360,6 +371,11 @@ class ReleaseEngine:
                 "environmentId": request.policy["metadata"]["environmentId"],
                 "serviceId": request.policy["metadata"]["serviceId"],
                 "namespace": request.policy["process"]["namespace"],
+                "stableName": request.policy["process"]["stableName"],
+                "listener": {
+                    "host": request.policy["network"]["internalHost"],
+                    "port": request.policy["network"]["internalPort"],
+                },
                 "observedAt": self.now(),
             })
             legacy_handle = self.adapter.observe_legacy(spec)

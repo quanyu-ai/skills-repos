@@ -1,0 +1,16 @@
+{
+  "name": "@quanyu/release-manager-pm2-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PM2 programmatic bridge for the release-manager v1alpha1 ProcessAdapter",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test:isolated": "node --test --test-concurrency=1 test-isolated.cjs"
+  },
+  "dependencies": {
+    "pm2": "7.0.4"
+  },
+  "overrides": {
+    "js-yaml": "4.3.2"
+  }
+}

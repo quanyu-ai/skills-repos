@@ -44,7 +44,7 @@ export interface ProcessInventory {
 }
 
 export interface ProcessAdapter {
-  inspect(service: unknown): Promise<ProcessInventory>;
+  inventory(service: unknown): Promise<ProcessInventory>;
   validatePolicy(policy: unknown): Promise<void>;
   observeLegacy(spec: unknown): Promise<ProcessHandle>;
   assertReplaceable(current: ProcessHandle, candidate: unknown): Promise<void>;

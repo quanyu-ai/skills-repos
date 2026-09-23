@@ -11,6 +11,8 @@ ENV-1b-a defines the experimental `v1alpha1` contracts. ENV-1b-b adds the contra
 - `tests/test_schemas.py`: valid, fail-closed, state-transition, and traceability tests.
 - `engine/`: core source/build/activation/adoption/rollback/recovery orchestration, atomic State Store, injected ports, and deterministic fakes.
 - `tests/test_engine.py`: restart/recovery, crash-boundary, migration-gate, lifecycle, attestation, and restore tests.
+- `pm2-adapter/`: pinned PM2 programmatic bridge, explicit-process isolated harness, and adapter operational boundary.
+- `tests/test_pm2_adapter.py`: Linux `/proc`, external-secret, exact mutation/absence, health, persistence, restart and restore integration tests.
 
 ## Validation
 
@@ -36,7 +38,9 @@ An approval-gated migration handoff uses a typed `MigrationApprovalReceipt`, not
 
 Interrupted recovery inventories the adapter scope before deciding authority. A uniquely identified uncommitted candidate is removed, then the exact persisted current or legacy handle is re-attested or restored. Ambiguous or unexpected inventory fails closed.
 
-The included Fake Adapter models process identity, runtime attestation, secret-name availability, ambiguity, replacement, persistence, and deterministic failures without invoking PM2 or mutating operating-system processes. Production PM2 behavior remains ENV-1b-c scope.
+The included Fake Adapter models process identity, runtime attestation, secret-name availability, ambiguity, replacement, persistence, and deterministic failures without invoking PM2 or mutating operating-system processes.
+
+ENV-1b-c adds a PM2 ProcessAdapter behind the same interface. It uses PM2's programmatic API with explicit process objects, derives handles from PM2 plus Linux `/proc` evidence, resolves external secrets by required names, performs scoped fail-closed inventory checks, proves exact absence, attests internal/public health, reconstructs validated restore descriptors, and persists PM2 state only after attestation. Its tests use only temporary `PM2_HOME` directories, disposable processes and dynamic non-business ports; no application environment is configured or contacted.
 
 ## Frozen deploy-app boundary
 
