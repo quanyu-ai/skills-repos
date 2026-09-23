@@ -128,6 +128,22 @@ bash scripts/deploy.sh <env> <app> [--version <ref>] [--approved-by <user>] [--s
 | `--skip-build` | 跳过构建步骤(用于快速重部署) |
 | `--dry-run` | 只打印操作,不实际执行 |
 
+### demo-safe.sh（精确 SHA Demo release）
+
+对需要外部 secret、独立 build/runtime 环境及 running-SHA 证明的 Demo 应用：
+
+```bash
+bash scripts/doctor.sh --demo-safe <app> <full-sha>
+bash scripts/demo-safe.sh preflight <app> --version <full-sha>
+bash scripts/demo-safe.sh dry-run <app> --version <full-sha>
+# 独立 Review 通过后才执行：
+bash scripts/demo-safe.sh deploy <app> --version <full-sha>
+```
+
+该路径不会 checkout 共享工作树，也不会把 secret value 写入 release、PM2
+ecosystem 或日志。配置使用 gitignored 的 `config/demo-safe.json`，模板中只包含
+路径、端口、变量名与 SHA。
+
 ### verify.sh(健康检查)
 
 ```bash
@@ -671,4 +687,3 @@ bash scripts/doctor.sh --check-apps
 | `doctor.sh --check-apps` | v1.1 | app × env 路径矩阵扫描 |
 
 ---
-

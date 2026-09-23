@@ -134,6 +134,18 @@ deploy-app skill 的两份核心配置 schema 说明。**字段名严格按本�
 - JSON 格式校验：`jq empty <file>`（doctor.sh 自动执行）
 - Phase 2 将增加字段级 schema 校验（required / type / enum）
 
+## ENV-1a：demo-safe.json
+
+`demo-safe.json` 是精确 SHA Demo release 的本机配置，必须 gitignore。它只保存：
+
+- Git repository URL、隔离 release root 和 app subdirectory；
+- PM2 name、public/internal ports、health path 与 Nginx config path；
+- external secret file path 和 required secret **names**；
+- 当前已验证 rollback release path/SHA；
+- 明确允许清理的 build-generated tracked files。
+
+它不得包含任何 secret value。完整结构见 `demo-safe.json.template`。
+
 ---
 
 ## Phase 3：版本化部署目录结构

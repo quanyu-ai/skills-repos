@@ -16,6 +16,17 @@ fail() {
     exit 1
 }
 
+# ENV-1a deterministic Demo path. This mode is fail-closed and app-specific;
+# it does not inherit the permissive warnings of the legacy general doctor.
+if [ "${1:-}" = "--demo-safe" ]; then
+    APP_KEY="${2:-}"
+    TARGET_SHA="${3:-}"
+    CONFIG_FILE="${4:-$CONFIG_DIR/demo-safe.json}"
+    [ -n "$APP_KEY" ] && [ -n "$TARGET_SHA" ] \
+        || fail "usage: doctor.sh --demo-safe <app> <full-sha> [config]"
+    exec "$SKILL_DIR/scripts/demo-safe.sh" doctor "$APP_KEY" --version "$TARGET_SHA" --config "$CONFIG_FILE"
+fi
+
 # 前置：jq 必装（否则后面的 JSON 校验跑不动）
 command -v jq >/dev/null 2>&1 || fail "jq not installed - run: sudo apt-get install -y jq"
 
