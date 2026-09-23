@@ -24,6 +24,8 @@ class PM2ProcessAdapter:
     """Linux PM2 adapter using only the programmatic API through a JSON bridge."""
 
     version = "0.1.0"
+    pinned_pm2_version = "7.0.4"
+    minimum_node_major = 20
 
     def __init__(
         self,
@@ -32,6 +34,7 @@ class PM2ProcessAdapter:
         node_modules: Path,
         instance_id: str,
         stable_name: str,
+        secret_owner_uid: int,
         trusted_path: tuple[str, ...] = ("/usr/local/bin", "/usr/bin", "/bin"),
         health_attempts: int = 20,
         health_interval_seconds: float = 0.1,
@@ -41,10 +44,13 @@ class PM2ProcessAdapter:
             raise ProcessError("invalid PM2 adapter instance ID")
         if not stable_name or not trusted_path or any(not Path(item).is_absolute() or ":" in item for item in trusted_path):
             raise ProcessError("invalid PM2 adapter configuration")
+        if not isinstance(secret_owner_uid, int) or secret_owner_uid < 0:
+            raise ProcessError("invalid trusted secret owner UID")
         self.pm2_home = pm2_home.resolve()
         self.node_modules = node_modules.resolve()
         self.instance_id = instance_id
         self.stable_name = stable_name
+        self.secret_owner_uid = secret_owner_uid
         self.trusted_path = tuple(dict.fromkeys(trusted_path))
         self.health_attempts = health_attempts
         self.health_interval_seconds = health_interval_seconds
@@ -53,6 +59,22 @@ class PM2ProcessAdapter:
         self.issuer = f"pm2-programmatic:{instance_id}"
         self._sidecars: dict[str, dict[str, Any]] = {}
         self._attested: set[str] = set()
+        self.version_evidence = self._attest_runtime_versions()
+
+    def _attest_runtime_versions(self) -> dict[str, str]:
+        evidence = self._bridge({"action": "runtime-version"})
+        pm2_version = evidence.get("pm2PackageVersion")
+        node_runtime = evidence.get("nodeRuntime")
+        match = re.fullmatch(r"v(\d+)\.\d+\.\d+", str(node_runtime))
+        if pm2_version != self.pinned_pm2_version:
+            raise ProcessError("loaded PM2 package version does not match the pinned adapter version")
+        if not match or int(match.group(1)) < self.minimum_node_major:
+            raise ProcessError("loaded Node runtime is outside the supported adapter range")
+        return {
+            "adapterVersion": self.version,
+            "pm2PackageVersion": pm2_version,
+            "nodeRuntime": node_runtime,
+        }
 
     @staticmethod
     def _now() -> str:
@@ -266,19 +288,56 @@ class PM2ProcessAdapter:
         )
 
     def resolve_persisted(self, record: dict[str, Any]) -> AdapterHandle:
-        handle = AdapterHandle(copy.deepcopy(record), self.issuer)
-        self.assert_handle(handle)
-        expected = self._exact_expected(handle)
-        matches = [item for item in self._all_inventory() if item["adapterId"] == expected["adapterId"]]
-        if len(matches) != 1:
+        # A persisted receipt is correlation evidence only. Restart recovery does
+        # not authenticate it or accept it as live authority. Every field below
+        # is reconciled against a fresh full PM2 inventory plus /proc evidence.
+        try:
+            adapter = record["adapter"]
+            identity = record["identity"]
+            runtime = record["runtime"]
+            persisted_fingerprint = record["invocationFingerprint"]
+            expected = {
+                "adapterId": identity["adapterId"],
+                "pid": identity["pid"],
+                "processStartId": identity["processStartId"],
+                "name": self.stable_name,
+                "namespace": identity["namespace"],
+                "environmentId": identity["environmentId"],
+                "serviceId": identity["serviceId"],
+                "releaseSha": record["releaseSha"],
+                "executable": runtime["executable"],
+                "cwd": runtime["cwd"],
+                "args": runtime["args"],
+            }
+        except (KeyError, TypeError) as error:
+            raise ProcessError("persisted ProcessHandle is structurally incomplete") from error
+        if adapter != {"kind": "pm2-programmatic", "version": self.version, "instanceId": self.instance_id}:
+            raise ProcessError("persisted ProcessHandle adapter identity mismatch")
+        if persisted_fingerprint != invocation_fingerprint(runtime["executable"], runtime["args"], runtime["cwd"]):
+            raise ProcessError("persisted ProcessHandle runtime fingerprint mismatch")
+        scoped = [
+            item for item in self._all_inventory()
+            if item["environmentId"] == identity["environmentId"]
+            and item["serviceId"] == identity["serviceId"]
+            and item["namespace"] == identity["namespace"]
+        ]
+        if len(scoped) != 1 or scoped[0]["adapterId"] != str(expected["adapterId"]):
             raise ProcessError("persisted ProcessHandle cannot be re-observed exactly")
-        observed = matches[0]
+        observed = scoped[0]
         self._assert_observation(observed, expected, require_live=True)
-        self._sidecars[record["provenance"]["adapterReceipt"]] = {
-            "stableName": observed["name"],
-            "listener": {"host": observed["ownedHost"], "port": observed["ownedPort"]},
-            "startSpec": self._restore_spec(record, observed),
-        }
+        handle = self._handle_from_observation(
+            observed,
+            environment_id=identity["environmentId"],
+            service_id=identity["serviceId"],
+            release_sha=record["releaseSha"],
+            origin="observed",
+            observed_at=self._now(),
+            sidecar={
+                "stableName": observed["name"],
+                "listener": {"host": observed["ownedHost"], "port": observed["ownedPort"]},
+                "startSpec": self._restore_spec(record, observed),
+            },
+        )
         return handle
 
     @staticmethod
@@ -363,6 +422,10 @@ class PM2ProcessAdapter:
         raise ProcessError("exact PM2 absence proof failed")
 
     def _runtime_environment(self, spec: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+        required = spec["requiredSecretNames"]
+        allowed = set(spec["allowedEnvNames"])
+        if not set(required).issubset(allowed):
+            raise ProcessError("required secret names exceed Release Contract runtime env names")
         source = Path(spec["secretSource"]["sourcePath"])
         try:
             metadata = source.lstat()
@@ -370,16 +433,12 @@ class PM2ProcessAdapter:
             raise ProcessError("external secret source is unavailable") from error
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
             raise ProcessError("external secret source must be a regular file")
-        if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) not in (0o400, 0o600):
+        if metadata.st_uid != self.secret_owner_uid or stat.S_IMODE(metadata.st_mode) not in (0o400, 0o600):
             raise ProcessError("external secret source ownership or permissions are unsafe")
         try:
             document = json.loads(source.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ProcessError("external secret source is invalid") from error
-        required = spec["requiredSecretNames"]
-        allowed = set(spec["allowedEnvNames"])
-        if not set(required).issubset(allowed):
-            raise ProcessError("required secret names exceed Release Contract runtime env names")
         if not isinstance(document, dict) or any(name not in document or not isinstance(document[name], str) or not document[name] for name in required):
             raise ProcessError("external secret source is missing required names")
         runtime_env = {name: document[name] for name in required}
@@ -389,9 +448,9 @@ class PM2ProcessAdapter:
         return runtime_env, [document[name] for name in required]
 
     def start_candidate(self, spec: dict[str, Any]) -> AdapterHandle:
+        runtime_env, sensitive = self._runtime_environment(spec)
         if any(self._overlaps(item, spec) for item in self._all_inventory()):
             raise ProcessError("PM2 inventory is not clear for exact candidate start")
-        runtime_env, sensitive = self._runtime_environment(spec)
         launch_token = str(uuid.uuid4())
         runtime_env.update({
             "RELEASE_MANAGER_ENVIRONMENT_ID": spec["environmentId"],

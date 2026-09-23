@@ -2,6 +2,7 @@
 
 const fs = require("node:fs");
 const pm2 = require("pm2");
+const pm2Package = require("pm2/package.json");
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -114,6 +115,9 @@ async function startExplicit(app) {
 
 async function main() {
   const request = await readStdin();
+  if (request.action === "runtime-version") {
+    return { nodeRuntime: process.version, pm2PackageVersion: pm2Package.version };
+  }
   await connect();
   try {
     if (request.action === "inventory") return { records: await inventory() };

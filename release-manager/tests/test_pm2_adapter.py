@@ -32,6 +32,8 @@ def free_port() -> int:
 
 @unittest.skipUnless(sys.platform.startswith("linux") and Path("/proc/self/stat").exists(), "requires Linux /proc")
 class PM2AdapterIntegrationTest(unittest.TestCase):
+    INSTANCE_ID = "123e4567-e89b-42d3-a456-426614174099"
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="env1b-c-pm2-")
         self.root = Path(self.temp.name)
@@ -42,13 +44,27 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         self.adapter = PM2ProcessAdapter(
             pm2_home=self.pm2_home,
             node_modules=self.node_modules,
-            instance_id="123e4567-e89b-42d3-a456-426614174099",
+            instance_id=self.INSTANCE_ID,
             stable_name="env1b-c-service",
+            secret_owner_uid=os.geteuid(),
             trusted_path=(str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"),
             health_attempts=30,
             health_interval_seconds=0.1,
         )
         self.created_handles = []
+
+    def restarted_adapter(self, spec: dict, *, secret_owner_uid: int | None = None) -> PM2ProcessAdapter:
+        return PM2ProcessAdapter(
+            pm2_home=self.pm2_home,
+            node_modules=self.node_modules,
+            instance_id=self.INSTANCE_ID,
+            stable_name="env1b-c-service",
+            secret_owner_uid=os.geteuid() if secret_owner_uid is None else secret_owner_uid,
+            trusted_path=(str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"),
+            health_attempts=30,
+            health_interval_seconds=0.1,
+            runtime_policy=self.runtime_policy(spec),
+        )
 
     def tearDown(self) -> None:
         try:
@@ -150,16 +166,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         spec, _, _ = self.spec(SHA_A)
         original = self.start(spec)
         self.adapter.attest(original, SHA_A, self.targets(spec))
-        restarted = PM2ProcessAdapter(
-            pm2_home=self.pm2_home,
-            node_modules=self.node_modules,
-            instance_id="123e4567-e89b-42d3-a456-426614174099",
-            stable_name="env1b-c-service",
-            trusted_path=(str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"),
-            health_attempts=30,
-            health_interval_seconds=0.1,
-            runtime_policy=self.runtime_policy(spec),
-        )
+        restarted = self.restarted_adapter(spec)
         reobserved = restarted.resolve_persisted(original.record)
         restarted.stop_exact(reobserved)
         restarted.delete_exact(reobserved)
@@ -170,6 +177,32 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         restarted.stop_exact(restored)
         restarted.delete_exact(restored)
         restarted.await_absent(restored)
+
+    def test_persisted_handle_tamper_requires_exact_live_reobservation(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        original = self.start(spec)
+        restarted = self.restarted_adapter(spec)
+
+        receipt_tampered = copy.deepcopy(original.record)
+        receipt_tampered["provenance"]["adapterReceipt"] = "sha256:" + "0" * 64
+        reminted = restarted.resolve_persisted(receipt_tampered)
+        self.assertNotEqual(receipt_tampered["provenance"]["adapterReceipt"], reminted.record["provenance"]["adapterReceipt"])
+        self.assertEqual(original.record["identity"], reminted.record["identity"])
+
+        mutations = (
+            ("adapter ID", lambda value: value["identity"].__setitem__("adapterId", "999999")),
+            ("PID", lambda value: value["identity"].__setitem__("pid", value["identity"]["pid"] + 1)),
+            ("start identity", lambda value: value["identity"].__setitem__("processStartId", "tampered:start")),
+            ("runtime", lambda value: value["runtime"].__setitem__("args", ["--tampered"])),
+            ("release SHA", lambda value: value.__setitem__("releaseSha", SHA_B)),
+        )
+        for label, mutate in mutations:
+            with self.subTest(field=label):
+                tampered = copy.deepcopy(original.record)
+                mutate(tampered)
+                with self.assertRaises(ProcessError):
+                    restarted.resolve_persisted(tampered)
+        self.remove(original)
 
     def test_ecosystem_wrong_name_and_unexpected_residual_block_replacement(self) -> None:
         current_spec, _, _ = self.spec(SHA_A)
@@ -234,6 +267,45 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             self.adapter.start_candidate(spec)
         self.assertNotIn(secret_value, str(raised.exception))
         self.assertEqual([], self.adapter._all_inventory())
+
+    def test_secret_source_symlink_non_regular_and_wrong_owner_fail_before_pm2_mutation(self) -> None:
+        spec, _, secrets = self.spec(SHA_A)
+        secret_value = json.loads(secrets.read_text())["TEST_SECRET"]
+        cases = []
+
+        symlink = self.root / "secret-link.json"
+        symlink.symlink_to(secrets)
+        symlink_spec = copy.deepcopy(spec)
+        symlink_spec["secretSource"]["sourcePath"] = str(symlink)
+        cases.append(("symlink", self.adapter, symlink_spec, "regular file"))
+
+        directory_spec = copy.deepcopy(spec)
+        directory_spec["secretSource"]["sourcePath"] = str(self.root)
+        cases.append(("non-regular", self.adapter, directory_spec, "regular file"))
+
+        wrong_owner_adapter = self.restarted_adapter(spec, secret_owner_uid=os.geteuid() + 1)
+        cases.append(("wrong-owner", wrong_owner_adapter, spec, "ownership or permissions"))
+
+        for label, adapter, candidate, message in cases:
+            with self.subTest(case=label):
+                with self.assertRaisesRegex(ProcessError, message) as raised:
+                    adapter.start_candidate(candidate)
+                self.assertNotIn(secret_value, str(raised.exception))
+                self.assertFalse((self.pm2_home / "pm2.pid").exists())
+
+    def test_adapter_self_attests_versions_and_rejects_pm2_package_drift(self) -> None:
+        self.assertEqual("0.1.0", self.adapter.version_evidence["adapterVersion"])
+        self.assertEqual("7.0.4", self.adapter.version_evidence["pm2PackageVersion"])
+        self.assertRegex(self.adapter.version_evidence["nodeRuntime"], r"^v\d+\.\d+\.\d+$")
+
+        original = PM2ProcessAdapter.pinned_pm2_version
+        PM2ProcessAdapter.pinned_pm2_version = "7.0.3"
+        try:
+            with self.assertRaisesRegex(ProcessError, "pinned adapter version"):
+                self.restarted_adapter(self.spec(SHA_A)[0])
+        finally:
+            PM2ProcessAdapter.pinned_pm2_version = original
+        self.assertFalse((self.pm2_home / "pm2.pid").exists())
 
 
 if __name__ == "__main__":

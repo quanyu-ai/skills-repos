@@ -39,7 +39,9 @@ A handle is opaque to the engine. It can only be returned by `observeLegacy`, `s
 - executable, arguments, and cwd;
 - exact release SHA;
 - invocation fingerprint;
-- adapter observation/start receipt.
+- adapter observation/start receipt as correlation evidence only.
+
+The receipt is not an authentication mechanism and a persisted receipt is never sufficient to recreate an in-memory handle. After adapter restart, rehydration must use a full live inventory and match the exact PM2 record, PID/start identity, `/proc` runtime evidence, release SHA, and invocation fingerprint. The adapter then mints a new observation and receipt. State Store tamper resistance, if required, belongs to a separate integrity/signing design.
 
 Name and namespace are selectors. Neither is authority on its own.
 
