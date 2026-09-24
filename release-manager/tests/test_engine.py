@@ -115,11 +115,22 @@ class EngineTest(unittest.TestCase):
     def legacy_spec(self) -> dict:
         descriptor = json.loads((ROOT / "fixtures/valid/legacy-restore-descriptor.json").read_text())
         release = self.source_root.resolve()
+        executable = str((release / "node_modules/next/dist/bin/next").resolve())
+        cwd = str((release / "apps/web").resolve())
+        listener = {"host": self.policy["network"]["internalHost"], "port": self.policy["network"]["internalPort"]}
         descriptor["metadata"] = {"environmentId": self.policy["metadata"]["environmentId"], "serviceId": self.policy["metadata"]["serviceId"]}
-        descriptor["authority"].update({"releaseSha": "f" * 40, "releasePath": str(release), "namespace": self.policy["process"]["namespace"], "stableName": self.policy["process"]["stableName"]})
-        descriptor["launcher"] = {"executable": str((release / "node_modules/next/dist/bin/next").resolve()), "args": ["start"], "cwd": str((release / "apps/web").resolve())}
-        descriptor["wrapper"]["executable"] = descriptor["launcher"]["executable"]
-        descriptor["listener"] = {"host": self.policy["network"]["internalHost"], "port": self.policy["network"]["internalPort"]}
+        descriptor["observedAuthority"].update({
+            "releaseSha": "f" * 40,
+            "releasePath": str(release),
+            "namespace": self.policy["process"]["namespace"],
+            "stableName": self.policy["process"]["stableName"],
+            "invocation": {"executable": executable, "args": ["start", "-H", listener["host"], "-p", str(listener["port"])], "cwd": cwd},
+            "listener": listener,
+        })
+        descriptor["restoreRecipe"]["source"] = {"releaseSha": "f" * 40, "releasePath": str(release)}
+        descriptor["restoreRecipe"]["payload"] = {"executable": executable, "args": ["start"], "cwd": cwd}
+        descriptor["restoreRecipe"]["bootstrap"]["cwd"] = cwd
+        descriptor["restoreRecipe"]["listener"] = listener
         return descriptor
 
     def adopt_a(self):

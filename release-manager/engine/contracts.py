@@ -71,6 +71,48 @@ def validate_legacy_restore_descriptor(descriptor: dict[str, Any]) -> None:
         _validator.validate_document(descriptor)
     except (_validator.ValidationError, KeyError) as error:
         raise ContractError(str(error)) from error
+    observed = descriptor["observedAuthority"]
+    recipe = descriptor["restoreRecipe"]
+    source = recipe["source"]
+    if source != {"releaseSha": observed["releaseSha"], "releasePath": observed["releasePath"]}:
+        raise ContractError("legacy restore source must match observed authority")
+
+    observed_invocation = observed["invocation"]
+    payload = recipe["payload"]
+    if payload["executable"] != observed_invocation["executable"] or payload["cwd"] != observed_invocation["cwd"]:
+        raise ContractError("legacy restore payload must match observed executable and cwd")
+    if recipe["bootstrap"]["args"]:
+        raise ContractError("legacy restore bootstrap does not allow arbitrary argv")
+
+    adaptation = recipe["listenerAdaptation"]
+    expected_pairs = {
+        adaptation["hostFlag"]: observed["listener"]["host"],
+        adaptation["portFlag"]: str(observed["listener"]["port"]),
+    }
+    remaining: list[str] = []
+    seen: set[str] = set()
+    args = observed_invocation["args"]
+    index = 0
+    while index < len(args):
+        value = args[index]
+        if value in expected_pairs:
+            if value in seen or index + 1 >= len(args) or args[index + 1] != expected_pairs[value]:
+                raise ContractError("legacy observed listener argv does not match typed adaptation")
+            seen.add(value)
+            index += 2
+            continue
+        remaining.append(value)
+        index += 1
+    if seen != set(expected_pairs) or payload["args"] != remaining:
+        raise ContractError("legacy restore payload argv exceeds typed listener adaptation")
+
+    runtime = recipe["runtime"]
+    secrets = recipe["secrets"]
+    if runtime["requiredSecretNames"] != secrets["requiredNames"] or runtime["runtimeSecretFile"] != secrets["sourcePath"]:
+        raise ContractError("legacy restore secret source binding mismatch")
+    non_secret_names = [item["name"] for item in runtime["nonSecretValues"]]
+    if len(non_secret_names) != len(set(non_secret_names)) or set(non_secret_names) & set(secrets["requiredNames"]):
+        raise ContractError("legacy restore runtime sources overlap")
 
 
 def compose_health_targets(contract: dict[str, Any], policy: dict[str, Any]) -> tuple[str, str]:

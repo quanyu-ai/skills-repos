@@ -176,21 +176,54 @@ def validate_policy_semantics(data: dict[str, Any]) -> None:
 
 
 def validate_legacy_restore_semantics(data: dict[str, Any]) -> None:
-    authority = data["authority"]
-    if not data["launcher"]["cwd"].startswith(authority["releasePath"].rstrip("/") + "/"):
-        raise ValidationError("$.launcher.cwd: must be contained by authority releasePath")
-    if data["listener"] == data["probe"]:
-        raise ValidationError("$.probe: must use an isolated listener")
-    if set(data["wrapper"]["requiredSecretNames"]) != set(data["secrets"]["requiredNames"]):
-        raise ValidationError("$.wrapper.requiredSecretNames: must equal secrets.requiredNames")
-    if data["wrapper"]["runtimeSecretFile"] != data["secrets"]["sourcePath"]:
-        raise ValidationError("$.wrapper.runtimeSecretFile: must equal secrets.sourcePath")
-    values = data["wrapper"]["nonSecretValues"]
+    authority = data["observedAuthority"]
+    recipe = data["restoreRecipe"]
+    release_prefix = authority["releasePath"].rstrip("/") + "/"
+    if recipe["source"] != {"releaseSha": authority["releaseSha"], "releasePath": authority["releasePath"]}:
+        raise ValidationError("$.restoreRecipe.source: must match observedAuthority")
+    for label, path in (
+        ("observedAuthority.invocation.cwd", authority["invocation"]["cwd"]),
+        ("restoreRecipe.bootstrap.cwd", recipe["bootstrap"]["cwd"]),
+        ("restoreRecipe.payload.cwd", recipe["payload"]["cwd"]),
+        ("restoreRecipe.payload.executable", recipe["payload"]["executable"]),
+    ):
+        if not path.startswith(release_prefix):
+            raise ValidationError(f"$.{label}: must be contained by observed releasePath")
+    if recipe["payload"]["executable"] != authority["invocation"]["executable"] or recipe["payload"]["cwd"] != authority["invocation"]["cwd"]:
+        raise ValidationError("$.restoreRecipe.payload: must match observed executable and cwd")
+    if recipe["bootstrap"]["args"]:
+        raise ValidationError("$.restoreRecipe.bootstrap.args: arbitrary argv is forbidden")
+    adaptation = recipe["listenerAdaptation"]
+    expected_pairs = {adaptation["hostFlag"]: authority["listener"]["host"], adaptation["portFlag"]: str(authority["listener"]["port"])}
+    remaining = []
+    seen = set()
+    index = 0
+    args = authority["invocation"]["args"]
+    while index < len(args):
+        token = args[index]
+        if token in expected_pairs:
+            if token in seen or index + 1 >= len(args) or args[index + 1] != expected_pairs[token]:
+                raise ValidationError("$.observedAuthority.invocation.args: typed listener mismatch")
+            seen.add(token); index += 2; continue
+        remaining.append(token); index += 1
+    if seen != set(expected_pairs) or recipe["payload"]["args"] != remaining:
+        raise ValidationError("$.restoreRecipe.payload.args: only typed listener adaptation is allowed")
+    if recipe["listener"] != authority["listener"]:
+        raise ValidationError("$.restoreRecipe.listener: must preserve the observed business listener")
+    if recipe["listener"] == recipe["probe"]:
+        raise ValidationError("$.restoreRecipe.probe: must use an isolated listener")
+    runtime = recipe["runtime"]
+    secrets = recipe["secrets"]
+    if runtime["requiredSecretNames"] != secrets["requiredNames"]:
+        raise ValidationError("$.restoreRecipe.runtime.requiredSecretNames: must equal secrets.requiredNames")
+    if runtime["runtimeSecretFile"] != secrets["sourcePath"]:
+        raise ValidationError("$.restoreRecipe.runtime.runtimeSecretFile: must equal secrets.sourcePath")
+    values = runtime["nonSecretValues"]
     names = [item["name"] for item in values]
     if len(names) != len(set(names)):
-        raise ValidationError("$.wrapper.nonSecretValues: duplicate names")
-    if set(names) & set(data["secrets"]["requiredNames"]):
-        raise ValidationError("$.wrapper.nonSecretValues: secret names are forbidden")
+        raise ValidationError("$.restoreRecipe.runtime.nonSecretValues: duplicate names")
+    if set(names) & set(secrets["requiredNames"]):
+        raise ValidationError("$.restoreRecipe.runtime.nonSecretValues: secret names are forbidden")
 
 
 def compose_health_targets(contract: dict[str, Any], policy: dict[str, Any]) -> tuple[str, str]:

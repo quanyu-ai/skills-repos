@@ -427,9 +427,10 @@ class ReleaseEngine:
             validate_legacy_restore_descriptor(legacy_spec)
             if legacy_spec["metadata"] != {"environmentId": request.policy["metadata"]["environmentId"], "serviceId": request.policy["metadata"]["serviceId"]}:
                 raise ContractError("legacy descriptor environment/service mismatch")
-            if legacy_spec["authority"]["namespace"] != request.policy["process"]["namespace"] or legacy_spec["authority"]["stableName"] != request.policy["process"]["stableName"]:
+            observed_authority = legacy_spec["observedAuthority"]
+            if observed_authority["namespace"] != request.policy["process"]["namespace"] or observed_authority["stableName"] != request.policy["process"]["stableName"]:
                 raise ContractError("legacy descriptor process identity mismatch")
-            if legacy_spec["listener"] != {"host": request.policy["network"]["internalHost"], "port": request.policy["network"]["internalPort"]}:
+            if observed_authority["listener"] != {"host": request.policy["network"]["internalHost"], "port": request.policy["network"]["internalPort"]}:
                 raise ContractError("legacy descriptor listener mismatch")
             self.adapter.preflight_legacy_restore(legacy_spec)
             legacy_handle = self.adapter.observe_legacy(legacy_spec)
@@ -440,7 +441,7 @@ class ReleaseEngine:
             machine.send("RESTORE_PROBE_OK", "ADOPTION_READY")
             expected = 0 if state is None else state["generation"]
             adoption_generation = expected + 1
-            legacy_authority = self._authority(legacy_handle, legacy_spec["authority"]["releasePath"], adoption_generation)
+            legacy_authority = self._authority(legacy_handle, observed_authority["releasePath"], adoption_generation)
             adoption = self._base_record(
                 request, adoption_generation, "adoption-ready", self._attempt(candidate, "candidate-ready", "pending", "LEGACY_ATTESTED"), legacy=legacy_authority
             )

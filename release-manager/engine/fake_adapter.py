@@ -95,12 +95,26 @@ class FakeProcessAdapter:
 
     @staticmethod
     def _legacy_spec(descriptor: dict[str, Any]) -> dict[str, Any]:
+        authority = descriptor["observedAuthority"]
         return {
             "environmentId": descriptor["metadata"]["environmentId"],
             "serviceId": descriptor["metadata"]["serviceId"],
-            "namespace": descriptor["authority"]["namespace"],
-            "releaseSha": descriptor["authority"]["releaseSha"],
-            "runtime": copy.deepcopy(descriptor["launcher"]),
+            "namespace": authority["namespace"],
+            "releaseSha": authority["releaseSha"],
+            "runtime": copy.deepcopy(authority["invocation"]),
+            "observedAt": "2026-09-23T15:00:00Z",
+        }
+
+    @staticmethod
+    def _legacy_restore_spec(descriptor: dict[str, Any]) -> dict[str, Any]:
+        authority = descriptor["observedAuthority"]
+        recipe = descriptor["restoreRecipe"]
+        return {
+            "environmentId": descriptor["metadata"]["environmentId"],
+            "serviceId": descriptor["metadata"]["serviceId"],
+            "namespace": authority["namespace"],
+            "releaseSha": authority["releaseSha"],
+            "runtime": copy.deepcopy(recipe["bootstrap"]),
             "observedAt": "2026-09-23T15:00:00Z",
         }
 
@@ -182,7 +196,7 @@ class FakeProcessAdapter:
             raise ProcessError("injected restore failure")
         self.runtime.events.append("restore")
         descriptor = self.runtime.legacy_descriptors.get(handle.record["provenance"]["adapterReceipt"])
-        spec = self._legacy_spec(descriptor) if descriptor else {
+        spec = self._legacy_restore_spec(descriptor) if descriptor else {
             "environmentId": handle.record["identity"]["environmentId"],
             "serviceId": handle.record["identity"]["serviceId"],
             "namespace": handle.record["identity"]["namespace"],
