@@ -41,13 +41,17 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         self.node_modules = Path(os.environ.get("PM2_NODE_MODULES", ROOT / "pm2-adapter/node_modules"))
         if not (self.node_modules / "pm2").is_dir():
             self.skipTest("pinned PM2 dependency is not installed")
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node runtime is unavailable")
+        self.trusted_path = (str(Path(node).resolve().parent), "/usr/local/bin", "/usr/bin", "/bin")
         self.adapter = PM2ProcessAdapter(
             pm2_home=self.pm2_home,
             node_modules=self.node_modules,
             instance_id=self.INSTANCE_ID,
             stable_name="env1b-c-service",
             secret_owner_uid=os.geteuid(),
-            trusted_path=(str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"),
+            trusted_path=self.trusted_path,
             health_attempts=30,
             health_interval_seconds=0.1,
         )
@@ -60,7 +64,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             instance_id=self.INSTANCE_ID,
             stable_name="env1b-c-service",
             secret_owner_uid=os.geteuid() if secret_owner_uid is None else secret_owner_uid,
-            trusted_path=(str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"),
+            trusted_path=self.trusted_path,
             health_attempts=30,
             health_interval_seconds=0.1,
             runtime_policy=self.runtime_policy(spec),
@@ -125,6 +129,22 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             "health": copy.deepcopy(spec["health"]),
         }
 
+    @staticmethod
+    def reconciliation_expected(spec: dict) -> dict:
+        return {
+            "environmentId": spec["environmentId"],
+            "serviceId": spec["serviceId"],
+            "namespace": spec["namespace"],
+            "stableName": spec["stableName"],
+            "releaseSha": spec["releaseSha"],
+            "releasePath": spec["releasePath"],
+            "runtime": copy.deepcopy(spec["runtime"]),
+            "configurationDigests": copy.deepcopy(spec["configurationDigests"]),
+            "listener": copy.deepcopy(spec["listener"]),
+            "health": copy.deepcopy(spec["health"]),
+            "observedAt": "2026-09-24T01:00:00Z",
+        }
+
     def legacy_descriptor(self, *, failing_bootstrap: bool = False) -> tuple[dict, Path]:
         release = self.root / "legacy-release" / SHA_A
         cwd = release / "apps/web"
@@ -181,6 +201,53 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         self.adapter.delete_exact(handle)
         self.adapter.await_absent(handle)
 
+    def cross_boot_process(self, spec: dict):
+        old = self.start(spec)
+        old_record = copy.deepcopy(old.record)
+        self.remove(old)
+        live = self.start(spec)
+        old_record["identity"]["processStartId"] = "33333333-3333-4333-8333-333333333333:12345"
+        restarted = self.restarted_adapter(spec)
+        return old_record, live, restarted
+
+    def start_residual(
+        self,
+        spec: dict,
+        *,
+        environment_id: str,
+        service_id: str,
+        namespace: str,
+        name: str,
+        listener: dict,
+    ) -> dict:
+        root = self.root / f"residual-{name}"
+        root.mkdir()
+        script = root / "idle.cjs"
+        shutil.copy2(ROOT / "tests/fixtures/disposable-idle-service.cjs", script)
+        digests = spec["configurationDigests"]
+        return self.adapter._bridge({
+            "action": "test-start",
+            "app": {
+                "name": name,
+                "namespace": namespace,
+                "script": str(script),
+                "args": [],
+                "cwd": str(root),
+                "env": {
+                    "RELEASE_MANAGER_ENVIRONMENT_ID": environment_id,
+                    "RELEASE_MANAGER_SERVICE_ID": service_id,
+                    "RELEASE_MANAGER_RELEASE_SHA": spec["releaseSha"],
+                    "RELEASE_MANAGER_LAUNCH_TOKEN": f"residual-{name}",
+                    "RELEASE_MANAGER_OWNED_HOST": listener["host"],
+                    "RELEASE_MANAGER_OWNED_PORT": str(listener["port"]),
+                    "RELEASE_MANAGER_BUILD_CONFIG_DIGEST": digests["build"],
+                    "RELEASE_MANAGER_RUNTIME_CONFIG_DIGEST": digests["runtime"],
+                    "RELEASE_MANAGER_RELEASE_CONTRACT_DIGEST": digests["releaseContract"],
+                    "RELEASE_MANAGER_ENVIRONMENT_POLICY_DIGEST": digests["environmentPolicy"],
+                },
+            },
+        })["record"]
+
     def test_exact_handle_external_secrets_health_and_persist_order(self) -> None:
         spec, report, _ = self.spec(SHA_A)
         handle = self.start(spec)
@@ -197,6 +264,120 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         report_data = json.loads(report.read_text())
         self.assertEqual({"hasNodeChannelFd": False, "hasNodeUniqueId": False, "hasAmbientPoison": False, "nodeEnv": "production", "nextDistDir": ".next-demo"}, report_data)
         self.remove(handle)
+
+    def test_host_restart_reconciliation_uses_fresh_linux_inventory_and_keeps_exact_resolve_strict(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        old_record, live, restarted = self.cross_boot_process(spec)
+        with self.assertRaisesRegex(
+            ProcessError, "cannot be re-observed exactly|PM2 live process identity mismatch"
+        ):
+            restarted.resolve_persisted(old_record)
+        observation = restarted.observe_managed_after_host_restart(
+            old_record, self.reconciliation_expected(spec)
+        )
+        self.assertTrue(observation.reconciliation_required)
+        self.assertNotEqual(observation.old_boot_id, observation.current_boot_id)
+        host_boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        fresh_boot_id = observation.handle.record["identity"]["processStartId"].rsplit(":", 1)[0]
+        self.assertEqual(host_boot_id, restarted._current_boot_id())
+        self.assertEqual(host_boot_id, observation.current_boot_id)
+        self.assertEqual(host_boot_id, fresh_boot_id)
+        self.assertEqual(live.record["identity"], observation.handle.record["identity"])
+        internal = self.targets(spec)[0]
+        public = internal.replace("127.0.0.1", "localhost")
+        evidence = restarted.attest(observation.handle, SHA_A, (internal, public))
+        self.assertEqual(SHA_A, evidence["releaseSha"])
+        self.assertEqual(2, len(evidence["health"]))
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+        self.remove(live)
+
+    def test_reconciliation_rejects_live_process_boot_component_not_matching_host(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        old_record, live, restarted = self.cross_boot_process(spec)
+        host_boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        self.assertEqual(host_boot_id, restarted._current_boot_id())
+        actual_inventory = restarted._all_inventory
+
+        def mismatched_inventory():
+            records = actual_inventory()
+            for record in records:
+                if record["adapterId"] == live.record["identity"]["adapterId"]:
+                    record["evidence"]["processStartId"] = "44444444-4444-4444-8444-444444444444:54321"
+            return records
+
+        restarted._all_inventory = mismatched_inventory
+        with self.assertRaisesRegex(ProcessError, "does not match current host boot"):
+            restarted.observe_managed_after_host_restart(
+                old_record, self.reconciliation_expected(spec)
+            )
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+        self.remove(live)
+
+    def test_reconciliation_rejects_multiple_scoped_processes(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        old_record, live, restarted = self.cross_boot_process(spec)
+        self.start_residual(
+            spec,
+            environment_id=spec["environmentId"],
+            service_id=spec["serviceId"],
+            namespace=spec["namespace"],
+            name="scoped-duplicate",
+            listener={"host": "127.0.0.1", "port": free_port()},
+        )
+        with self.assertRaisesRegex(ProcessError, "exactly one scoped live process"):
+            restarted.observe_managed_after_host_restart(
+                old_record, self.reconciliation_expected(spec)
+            )
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+
+    def test_reconciliation_rejects_listener_drift_and_unscoped_overlap(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        old_record, live, restarted = self.cross_boot_process(spec)
+        listener_drift = self.reconciliation_expected(spec)
+        listener_drift["listener"]["port"] = free_port()
+        with self.assertRaisesRegex(ProcessError, "listener/topology mismatch"):
+            restarted.observe_managed_after_host_restart(old_record, listener_drift)
+
+        self.start_residual(
+            spec,
+            environment_id="other-demo",
+            service_id="other-web",
+            namespace="other-namespace",
+            name="listener-overlap",
+            listener=spec["listener"],
+        )
+        with self.assertRaisesRegex(ProcessError, "overlapping PM2 inventory"):
+            restarted.observe_managed_after_host_restart(
+                old_record, self.reconciliation_expected(spec)
+            )
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+
+    def test_reconciliation_fresh_handle_health_failure_does_not_persist(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        old_record, live, restarted = self.cross_boot_process(spec)
+        observation = restarted.observe_managed_after_host_restart(
+            old_record, self.reconciliation_expected(spec)
+        )
+        healthy = self.targets(spec)[0]
+        unavailable = f"http://127.0.0.1:{free_port()}/health"
+        with self.assertRaisesRegex(ProcessError, "health attestation failed"):
+            restarted.attest(observation.handle, SHA_A, (healthy, unavailable))
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+        self.remove(live)
+
+    def test_same_boot_process_change_cannot_use_reconciliation(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        old = self.start(spec)
+        old_record = copy.deepcopy(old.record)
+        self.remove(old)
+        live = self.start(spec)
+        restarted = self.restarted_adapter(spec)
+        with self.assertRaisesRegex(ProcessError, "same-boot"):
+            restarted.observe_managed_after_host_restart(
+                old_record, self.reconciliation_expected(spec)
+            )
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+        self.remove(live)
 
     def test_stop_is_not_delete_and_absence_proves_pid_and_port(self) -> None:
         spec, _, _ = self.spec(SHA_A)

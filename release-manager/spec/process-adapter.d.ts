@@ -55,6 +55,8 @@ export interface ProcessAdapter {
   validatePolicy(policy: unknown): Promise<void>;
   preflightLegacyRestore(descriptor: unknown): Promise<unknown>;
   observeLegacy(descriptor: unknown): Promise<ProcessHandle>;
+  resolvePersisted(record: PersistedProcessHandle): Promise<ProcessHandle>;
+  observeManagedAfterHostRestart(current: PersistedProcessHandle, expected: unknown): Promise<unknown>;
   assertReplaceable(current: ProcessHandle, candidate: unknown): Promise<void>;
   stopExact(handle: ProcessHandle): Promise<void>;
   deleteExact(handle: ProcessHandle): Promise<void>;

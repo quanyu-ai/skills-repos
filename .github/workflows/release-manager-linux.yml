@@ -1,0 +1,43 @@
+name: Release Manager Linux Integration
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/workflows/release-manager-linux.yml"
+      - "release-manager/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-manager-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PM2_NODE_MODULES: ${{ github.workspace }}/release-manager/pm2-adapter/node_modules
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: release-manager/pm2-adapter/package-lock.json
+      - name: Install pinned PM2 adapter dependencies
+        working-directory: release-manager/pm2-adapter
+        run: npm ci
+      - name: Validate schemas and deterministic engine
+        run: |
+          python3 release-manager/tests/test_schemas.py
+          python3 release-manager/tests/test_engine.py
+          python3 release-manager/scripts/validate.py all
+      - name: Run Linux PM2 production-adapter integration
+        run: python3 release-manager/tests/test_pm2_adapter.py
+      - name: Run PM2 bridge regression
+        working-directory: release-manager/pm2-adapter
+        run: npm run test:isolated

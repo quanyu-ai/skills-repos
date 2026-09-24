@@ -18,6 +18,8 @@ export interface ProcessAdapter {
   validatePolicy(policy: ProcessPolicy): Promise<void>;
   preflightLegacyRestore(descriptor: LegacyRestoreDescriptor): Promise<ProbeEvidence>;
   observeLegacy(descriptor: LegacyRestoreDescriptor): Promise<ProcessHandle>;
+  resolvePersisted(record: PersistedProcessHandle): Promise<ProcessHandle>;
+  observeManagedAfterHostRestart(current: PersistedProcessHandle, expected: ManagedAuthority): Promise<HostRestartObservation>;
   assertReplaceable(current: ProcessHandle, candidate: RuntimeSpec): Promise<void>;
   stopExact(handle: ProcessHandle): Promise<void>;
   deleteExact(handle: ProcessHandle): Promise<void>;
@@ -45,6 +47,17 @@ A handle is opaque to the engine. It can only be returned by `observeLegacy`, `s
 The receipt is not an authentication mechanism and a persisted receipt is never sufficient to recreate an in-memory handle. After adapter restart, rehydration must use a full live inventory and match the exact PM2 record, PID/start identity, `/proc` runtime evidence, release SHA, and invocation fingerprint. The adapter then mints a new observation and receipt. State Store tamper resistance, if required, belongs to a separate integrity/signing design.
 
 Name and namespace are selectors. Neither is authority on its own.
+
+Host-restart reconciliation is a separate engine operation and never relaxes
+normal persisted-handle resolution. The adapter must use a fresh full inventory
+and Linux boot identity to distinguish an unchanged exact handle, a permitted
+cross-boot volatile identity change, and a forbidden same-boot identity change.
+All durable service identity, release, canonical runtime, four configuration
+digests, listener ownership and release containment fields must match exactly;
+the scope must contain exactly one healthy process with no overlap. The engine
+then atomically commits an N+1 State Store generation with a typed receipt while
+preserving the current release, previous authority and deployment attempt.
+Reconciliation performs no process mutation and never invokes PM2 persist.
 
 The State Store wraps an attested handle in a restorable runtime-authority record with its introducing generation. `previous` is canonical rollback authority only through that record. A filesystem symlink cannot substitute for it. Before the first managed commit, the adapter-observed legacy handle is the only restore authority and canonical `previous` is absent.
 

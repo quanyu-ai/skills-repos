@@ -38,6 +38,14 @@ An approval-gated migration handoff uses a typed `MigrationApprovalReceipt`, not
 
 Interrupted recovery inventories the adapter scope before deciding authority. A uniquely identified uncommitted candidate is removed, then the exact persisted current or legacy handle is re-attested or restored. Ambiguous or unexpected inventory fails closed.
 
+Managed host-restart reconciliation is explicit and audit-only. It validates a
+Linux boot-ID boundary, exact durable release/runtime/configuration/listener
+authority, exactly one non-overlapping live process and both health targets.
+Only volatile ProcessHandle identity is refreshed in an atomic N+1 State Store
+generation; `previous` and deployment attempt evidence are preserved. Same-boot
+identity changes fail closed, a repeated call is a no-op, and PM2 state is not
+persisted because reconciliation performs no process mutation.
+
 The included Fake Adapter models process identity, runtime attestation, secret-name availability, ambiguity, replacement, persistence, and deterministic failures without invoking PM2 or mutating operating-system processes.
 
 ENV-1b-c adds a PM2 ProcessAdapter behind the same interface. It uses PM2's programmatic API with explicit process objects, derives handles from PM2 plus Linux `/proc` evidence, resolves external secrets by required names, performs scoped fail-closed inventory checks, proves exact absence, attests internal/public health, reconstructs validated restore descriptors, and persists PM2 state only after attestation. Its tests use only temporary `PM2_HOME` directories, disposable processes and dynamic non-business ports; no application environment is configured or contacted.

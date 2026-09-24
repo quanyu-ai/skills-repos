@@ -44,6 +44,7 @@ class SchemaHarnessTest(unittest.TestCase):
             "process-handle-incomplete-provenance.json",
             "state-record-failed-candidate-previous.json",
             "state-record-previous-identity-mismatch.json",
+            "state-record-reconciliation-receipt-tamper.json",
             "transition-illegal.json",
         }
         found = {path.name for path in (ROOT / "fixtures" / "invalid").glob("*.json")}
@@ -228,7 +229,11 @@ class SchemaHarnessTest(unittest.TestCase):
             "unknown-process-inventory-fails-closed",
         }
         self.assertTrue(required.issubset(set(spec["invariants"])))
-        self.assertEqual({"build", "legacy-adoption", "activation", "rollback"}, set(spec["machines"]))
+        self.assertEqual(
+            {"build", "legacy-adoption", "activation", "rollback", "host-restart-reconciliation"},
+            set(spec["machines"]),
+        )
+        self.assertFalse(spec["machines"]["host-restart-reconciliation"]["processMutationAllowed"])
         for name in ("legacy-adoption", "activation", "rollback"):
             persisted_sources = {
                 source
