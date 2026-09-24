@@ -1,8 +1,13 @@
 "use strict";
 
 const fs = require("node:fs");
+const crypto = require("node:crypto");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const pm2 = require("pm2");
 const pm2Package = require("pm2/package.json");
+
+const FORBIDDEN_DAEMON_ENV = ["NODE_CHANNEL_FD", "NODE_UNIQUE_ID"];
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -24,6 +29,80 @@ function call(method, ...args) {
 
 function connect() {
   return new Promise((resolve, reject) => pm2.connect((error) => error ? reject(error) : resolve()));
+}
+
+function disconnect() {
+  try { pm2.disconnect(); } catch (_) {}
+}
+
+function fileDigest(file) {
+  if (!fs.existsSync(file)) return null;
+  return `sha256:${crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex")}`;
+}
+
+function daemonPid() {
+  const file = path.join(process.env.PM2_HOME, "pm2.pid");
+  if (!fs.existsSync(file)) throw new Error("connected PM2 daemon pid file is unavailable");
+  const pid = Number(fs.readFileSync(file, "utf8").trim());
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !fs.existsSync(`/proc/${pid}/stat`)) {
+    throw new Error("connected PM2 daemon PID is not live");
+  }
+  return pid;
+}
+
+function daemonAttestation() {
+  const pid = daemonPid();
+  const evidence = processEvidence(pid);
+  const command = fs.readFileSync(`/proc/${pid}/cmdline`).toString("utf8").split("\0").filter(Boolean).join(" ");
+  const versionMatch = command.match(/PM2 v([^: ]+): God Daemon/);
+  if (!versionMatch) throw new Error("connected process is not an identifiable PM2 daemon");
+  const executable = fs.realpathSync(`/proc/${pid}/exe`);
+  const version = spawnSync(executable, ["--version"], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH || "" },
+    timeout: 5000,
+  });
+  if (version.status !== 0) throw new Error("connected PM2 daemon Node runtime is not determinable");
+  const ambientNames = fs.readFileSync(`/proc/${pid}/environ`).toString("utf8")
+    .split("\0").filter(Boolean).map((item) => item.split("=", 1)[0]).sort();
+  return {
+    daemonPm2Version: versionMatch[1],
+    daemonPid: pid,
+    daemonProcessStartId: evidence.processStartId,
+    daemonNodeExecutable: executable,
+    daemonNodeRuntime: version.stdout.trim(),
+    ambientEnvironmentNames: ambientNames,
+    forbiddenAmbientNames: FORBIDDEN_DAEMON_ENV.filter((name) => ambientNames.includes(name)),
+  };
+}
+
+async function waitDaemonAbsent(pid) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (!fs.existsSync(`/proc/${pid}/stat`)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("previous PM2 daemon did not become absent");
+}
+
+async function bootstrapDaemon(restart) {
+  const dump = path.join(process.env.PM2_HOME, "dump.pm2");
+  const dumpBefore = fileDigest(dump);
+  const pidFile = path.join(process.env.PM2_HOME, "pm2.pid");
+  if (restart && fs.existsSync(pidFile)) {
+    const priorPid = daemonPid();
+    await connect();
+    await call("killDaemon");
+    disconnect();
+    await waitDaemonAbsent(priorPid);
+  } else if (!restart && fs.existsSync(pidFile)) {
+    throw new Error("PM2 daemon already exists; explicit restart is required");
+  }
+  await connect();
+  const attestation = daemonAttestation();
+  disconnect();
+  const dumpAfter = fileDigest(dump);
+  if (dumpAfter !== dumpBefore) throw new Error("PM2 daemon bootstrap changed the persisted dump");
+  return { ...attestation, dumpDigest: dumpAfter, dumpPreserved: true };
 }
 
 function processEvidence(pid) {
@@ -78,6 +157,8 @@ function safeRecord(processDescription) {
     releaseContractDigest: env.RELEASE_MANAGER_RELEASE_CONTRACT_DIGEST || null,
     environmentPolicyDigest: env.RELEASE_MANAGER_ENVIRONMENT_POLICY_DIGEST || null,
     pmUptime: env.pm_uptime || null,
+    exitCode: Number.isInteger(env.exit_code) ? env.exit_code : null,
+    exitSignal: typeof env.exit_signal === "string" ? env.exit_signal : null,
     evidence,
   };
 }
@@ -120,8 +201,8 @@ async function startExplicit(app) {
     instances: 1,
     autorestart: false,
     watch: false,
-    out_file: "/dev/null",
-    error_file: "/dev/null",
+    out_file: app.outFile || "/dev/null",
+    error_file: app.errorFile || "/dev/null",
     merge_logs: true,
   });
   const matches = (await inventory()).filter((record) => record.launchToken === app.env.RELEASE_MANAGER_LAUNCH_TOKEN);
@@ -132,7 +213,17 @@ async function startExplicit(app) {
 async function main() {
   const request = await readStdin();
   if (request.action === "runtime-version") {
-    return { nodeRuntime: process.version, pm2PackageVersion: pm2Package.version };
+    return {
+      nodeRuntime: process.version,
+      nodeExecutable: fs.realpathSync(process.execPath),
+      pm2PackageVersion: pm2Package.version,
+    };
+  }
+  if (request.action === "daemon-attestation") {
+    return { daemon: daemonAttestation() };
+  }
+  if (request.action === "bootstrap-daemon") {
+    return { daemon: await bootstrapDaemon(request.restart === true) };
   }
   await connect();
   try {
@@ -165,7 +256,7 @@ async function main() {
     }
     throw new Error("unsupported bridge action");
   } finally {
-    pm2.disconnect();
+    disconnect();
   }
 }
 

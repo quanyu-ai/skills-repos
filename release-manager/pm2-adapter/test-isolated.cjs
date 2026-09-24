@@ -120,6 +120,23 @@ function cleanup(ctx) {
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
+test("pinned daemon bootstrap attests clean PM2 7.0.4 without claiming process authority", () => {
+  const ctx = context();
+  try {
+    fs.mkdirSync(ctx.pm2Home, { recursive: true });
+    const dump = path.join(ctx.pm2Home, "dump.pm2");
+    fs.writeFileSync(dump, "[]\n");
+    const before = fs.readFileSync(dump);
+    const response = invoke(ctx, { action: "bootstrap-daemon", restart: false });
+    assert.equal(response.daemon.daemonPm2Version, "7.0.4");
+    assert.match(response.daemon.daemonProcessStartId, /^[a-f0-9-]{36}:[1-9][0-9]*$/);
+    assert.deepEqual(response.daemon.forbiddenAmbientNames, []);
+    assert.equal(response.daemon.dumpPreserved, true);
+    assert.deepEqual(fs.readFileSync(dump), before);
+    assert.deepEqual(invoke(ctx, { action: "inventory" }).records, []);
+  } finally { cleanup(ctx); }
+});
+
 test("explicit process object yields exact proc-backed record without secret output", async () => {
   const ctx = context();
   try {

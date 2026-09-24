@@ -50,6 +50,16 @@ export interface ProcessInventory {
   readonly records: readonly PersistedProcessHandle[];
 }
 
+export interface Pm2DaemonAttestation {
+  readonly daemonPm2Version: string;
+  readonly daemonPid: number;
+  readonly daemonProcessStartId: string;
+  readonly daemonNodeExecutable: string;
+  readonly daemonNodeRuntime: string;
+  readonly ambientEnvironmentNameDigest: `sha256:${string}`;
+  readonly forbiddenAmbientNames: readonly string[];
+}
+
 export interface ProcessAdapter {
   inventory(service: unknown): Promise<ProcessInventory>;
   validatePolicy(policy: unknown): Promise<void>;
@@ -67,6 +77,12 @@ export interface ProcessAdapter {
   attest(handle: ProcessHandle, expected: unknown): Promise<unknown>;
   restore(handle: ProcessHandle): Promise<ProcessHandle>;
   persist(attested: ProcessHandle): Promise<unknown>;
+}
+
+/** Explicit operator surface; bootstrap/restart never mints application authority. */
+export interface GovernedPm2ProcessAdapter extends ProcessAdapter {
+  attestConnectedDaemon(): Promise<Pm2DaemonAttestation>;
+  bootstrapPinnedDaemon(options: { readonly restart: boolean }): Promise<Pm2DaemonAttestation>;
 }
 
 /** State mutation is deliberately absent from ProcessAdapter. */
