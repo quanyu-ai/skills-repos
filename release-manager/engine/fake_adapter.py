@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,6 +17,7 @@ BOOT_A = "11111111-1111-4111-8111-111111111111"
 @dataclass
 class FakeProcessRuntime:
     records: dict[str, dict[str, Any]] = field(default_factory=dict)
+    raw_records: dict[str, dict[str, Any]] = field(default_factory=dict)
     known_receipts: set[str] = field(default_factory=set)
     events: list[str] = field(default_factory=list)
     next_id: int = 1
@@ -267,7 +270,77 @@ class FakeProcessAdapter:
             raise ProcessError("exact process remains present")
         self.runtime.events.append("absent")
 
-    def start_candidate(self, spec: dict[str, Any]) -> AdapterHandle:
+    @staticmethod
+    def _raw_digest(record: dict[str, Any]) -> str:
+        payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def _raw_overlaps(record: dict[str, Any], spec: dict[str, Any]) -> bool:
+        return (
+            (
+                record.get("environmentId") == spec["environmentId"]
+                and record.get("serviceId") == spec["serviceId"]
+                and record.get("namespace") == spec["namespace"]
+            )
+            or (
+                record.get("name") == spec["stableName"]
+                and record.get("namespace") == spec["namespace"]
+            )
+            or record.get("executable") == spec["runtime"]["executable"]
+            or record.get("cwd") == spec["runtime"]["cwd"]
+            or (
+                record.get("ownedHost") == spec["listener"]["host"]
+                and record.get("ownedPort") == int(spec["listener"]["port"])
+            )
+        )
+
+    @staticmethod
+    def _raw_exact(record: dict[str, Any], spec: dict[str, Any]) -> bool:
+        expected = {
+            "name": spec["stableName"],
+            "namespace": spec["namespace"],
+            "environmentId": spec["environmentId"],
+            "serviceId": spec["serviceId"],
+            "releaseSha": spec["releaseSha"],
+            "executable": spec["runtime"]["executable"],
+            "cwd": spec["runtime"]["cwd"],
+            "args": spec["runtime"]["args"],
+            "ownedHost": spec["listener"]["host"],
+            "ownedPort": int(spec["listener"]["port"]),
+            "buildConfigDigest": spec["configurationDigests"]["build"],
+            "runtimeConfigDigest": spec["configurationDigests"]["runtime"],
+            "releaseContractDigest": spec["configurationDigests"]["releaseContract"],
+            "environmentPolicyDigest": spec["configurationDigests"]["environmentPolicy"],
+            "pid": 0,
+            "evidence": None,
+        }
+        try:
+            token = uuid.UUID(str(record.get("launchToken")))
+        except (ValueError, AttributeError):
+            return False
+        return token.version == 4 and all(record.get(key) == value for key, value in expected.items())
+
+    def remove_interrupted_candidate(self, spec: dict[str, Any]) -> dict[str, Any]:
+        if self.runtime.ambiguous_inventory:
+            raise ProcessError("interrupted activation raw process inventory is ambiguous")
+        overlaps = [
+            record for record in self.runtime.raw_records.values()
+            if self._raw_overlaps(record, spec)
+        ]
+        exact = [record for record in overlaps if self._raw_exact(record, spec)]
+        if len(exact) != 1 or len(overlaps) != 1:
+            raise ProcessError("interrupted activation raw process inventory is ambiguous")
+        record = exact[0]
+        self.runtime.raw_records.pop(record["adapterId"])
+        self.runtime.events.extend(("delete-raw-owned", "raw-absent"))
+        return {
+            "adapterId": record["adapterId"],
+            "orphanRecordDigest": self._raw_digest(record),
+            "launchTokenDigest": self._raw_digest({"launchToken": record["launchToken"]}),
+        }
+
+    def validate_runtime_spec(self, spec: dict[str, Any]) -> None:
         missing = sorted(set(spec["requiredSecretNames"]) - self.runtime.available_secret_names)
         if missing:
             raise ProcessError(f"required runtime secret names unavailable: {missing}")
@@ -279,6 +352,9 @@ class FakeProcessAdapter:
             raise ProcessError("runtime environment sources overlap")
         if set(spec["allowedEnvNames"]) != set().union(*sources):
             raise ProcessError("runtime environment sources are incomplete")
+
+    def start_candidate(self, spec: dict[str, Any]) -> AdapterHandle:
+        self.validate_runtime_spec(spec)
         self.runtime.events.append("start-candidate")
         self.runtime.started_specs.append(copy.deepcopy(spec))
         return self._new_handle(spec, "started")

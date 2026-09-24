@@ -53,7 +53,11 @@ function safeRecord(processDescription) {
   const env = processDescription.pm2_env || {};
   const pid = Number(processDescription.pid || 0);
   let evidence = null;
-  if (pid > 0 && env.status === "online") evidence = processEvidence(pid);
+  if (pid > 0 && env.status === "online") {
+    try { evidence = processEvidence(pid); } catch (error) {
+      if (!error || !["ENOENT", "ESRCH"].includes(error.code)) throw error;
+    }
+  }
   return {
     adapterId: String(processDescription.pm_id),
     pid,
@@ -97,6 +101,13 @@ function assertExact(record, expected, requireLive) {
   }
 }
 
+function assertRawOwned(record, expected) {
+  assertExact(record, expected, false);
+  if (!expected.launchToken || record.launchToken !== expected.launchToken) throw new Error("PM2 launch token mismatch");
+  if (record.ownedHost !== expected.ownedHost || record.ownedPort !== Number(expected.ownedPort)) throw new Error("PM2 listener ownership mismatch");
+  if (record.pid !== 0 || record.evidence !== null) throw new Error("raw PM2 orphan unexpectedly has live process evidence");
+}
+
 async function startExplicit(app) {
   await call("start", {
     name: app.name,
@@ -134,6 +145,14 @@ async function main() {
       const record = records.find((item) => item.adapterId === String(request.expected.adapterId));
       assertExact(record, request.expected, request.action === "stop");
       await call(request.action, Number(request.expected.adapterId));
+      return { ok: true };
+    }
+    if (request.action === "delete-raw-owned") {
+      const records = await inventory();
+      const matches = records.filter((item) => item.adapterId === String(request.expected.adapterId));
+      if (matches.length !== 1) throw new Error("exact raw PM2 owned record not found");
+      assertRawOwned(matches[0], request.expected);
+      await call("delete", Number(request.expected.adapterId));
       return { ok: true };
     }
     if (request.action === "save") {

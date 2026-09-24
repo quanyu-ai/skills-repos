@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,7 @@ from engine import (  # noqa: E402
     ReleaseRequest,
 )
 from engine.errors import ArtifactError, ContractError, ProcessError, SourceAttestationError, StateError  # noqa: E402
+from engine.contracts import validate_state_record  # noqa: E402
 
 
 SHA_A = "a" * 40
@@ -170,6 +172,48 @@ class EngineTest(unittest.TestCase):
             self.request(SHA_A), expected_generation=state["generation"]
         )
         return state, live, result, engine, adapter, store
+
+    def interrupt_candidate_ready(self, state: dict, target_sha: str):
+        engine, _, _, adapter, store = self.components(target_sha)
+        request = self.request(target_sha)
+        candidate = engine.build_candidate(request, state)
+        pending = engine._base_record(
+            request,
+            state["generation"] + 1,
+            "candidate-ready",
+            engine._attempt(candidate, "candidate-ready", "pending", "CANDIDATE_READY"),
+            current=state["current"],
+            previous=state.get("previous"),
+        )
+        store.commit(state["generation"], pending)
+        current = adapter.resolve_persisted(state["current"]["handle"])
+        adapter.stop_exact(current)
+        adapter.delete_exact(current)
+        adapter.await_absent(current)
+        spec = engine._runtime_spec(request, candidate)
+        raw = {
+            "adapterId": "900",
+            "pid": 0,
+            "name": spec["stableName"],
+            "namespace": spec["namespace"],
+            "status": "online",
+            "executable": spec["runtime"]["executable"],
+            "args": copy.deepcopy(spec["runtime"]["args"]),
+            "cwd": spec["runtime"]["cwd"],
+            "environmentId": spec["environmentId"],
+            "serviceId": spec["serviceId"],
+            "releaseSha": spec["releaseSha"],
+            "launchToken": str(uuid.uuid4()),
+            "ownedHost": spec["listener"]["host"],
+            "ownedPort": spec["listener"]["port"],
+            "buildConfigDigest": spec["configurationDigests"]["build"],
+            "runtimeConfigDigest": spec["configurationDigests"]["runtime"],
+            "releaseContractDigest": spec["configurationDigests"]["releaseContract"],
+            "environmentPolicyDigest": spec["configurationDigests"]["environmentPolicy"],
+            "evidence": None,
+        }
+        self.runtime.raw_records[raw["adapterId"]] = raw
+        return engine, request, adapter, store, pending, spec, raw
 
     def test_schema_validation_precedes_source_acquisition(self) -> None:
         engine, source, *_ = self.components(SHA_A)
@@ -723,6 +767,87 @@ class EngineTest(unittest.TestCase):
         online = [item["record"]["releaseSha"] for item in adapter.runtime.records.values() if item["status"] == "online"]
         self.assertEqual([SHA_A], online)
         self.assertIn("inventory", adapter.runtime.events)
+
+    def test_candidate_ready_pidless_orphan_recovery_restores_prior_authority(self) -> None:
+        self.adopt_a()
+        engine_b, *_ = self.components(SHA_B)
+        managed = engine_b.activate(self.request(SHA_B))
+        previous = copy.deepcopy(managed["previous"])
+        engine, request, adapter, store, pending, _, raw = self.interrupt_candidate_ready(managed, SHA_C)
+        failed_attempt = copy.deepcopy(pending["attempt"])
+
+        recovered = engine.recover(request)
+
+        self.assertEqual(pending["generation"] + 1, recovered["generation"])
+        self.assertEqual("failed", recovered["status"])
+        self.assertEqual(SHA_B, recovered["current"]["releaseSha"])
+        self.assertEqual(previous, recovered["previous"])
+        self.assertEqual(failed_attempt["attemptId"], recovered["attempt"]["attemptId"])
+        self.assertEqual(failed_attempt["sequence"], recovered["attempt"]["sequence"])
+        self.assertEqual(failed_attempt["targetSha"], recovered["attempt"]["targetSha"])
+        self.assertEqual(failed_attempt["events"], recovered["attempt"]["events"][:-1])
+        self.assertEqual("failed", recovered["attempt"]["outcome"])
+        self.assertNotIn(raw["adapterId"], self.runtime.raw_records)
+        receipt = recovered["recoveries"][-1]
+        self.assertEqual(engine._digest(failed_attempt), receipt["failedAttemptDigest"])
+        self.assertEqual(engine._digest(recovered["current"]["handle"]), receipt["restoredHandleDigest"])
+        payload = copy.deepcopy(receipt)
+        digest = payload.pop("receiptDigest")
+        self.assertEqual(engine._digest(payload), digest)
+        tampered = copy.deepcopy(recovered)
+        tampered["recoveries"][-1]["orphanRecordDigest"] = "sha256:" + "0" * 64
+        with self.assertRaises(ContractError):
+            validate_state_record(tampered)
+        self.assertLess(adapter.runtime.events.index("attest"), adapter.runtime.events.index("persist"))
+        self.assertEqual(recovered, store.load())
+
+    def test_candidate_ready_recovery_rejects_ambiguous_or_mismatched_orphan(self) -> None:
+        mutations = (
+            ("launchToken", "not-a-token"),
+            ("releaseSha", SHA_A),
+            ("cwd", str(self.root)),
+            ("runtimeConfigDigest", "sha256:" + "0" * 64),
+            ("ownedPort", 65530),
+        )
+        managed, *_ = self.adopt_a()
+        engine, request, _, store, pending, _, raw = self.interrupt_candidate_ready(managed, SHA_B)
+        for field, wrong in mutations:
+            with self.subTest(case=field):
+                original = raw[field]
+                raw[field] = wrong
+                with self.assertRaisesRegex(ProcessError, "ambiguous"):
+                    engine.recover(request)
+                self.assertEqual(pending, store.load())
+                self.assertIn(raw["adapterId"], self.runtime.raw_records)
+                raw[field] = original
+        duplicate = copy.deepcopy(raw)
+        duplicate["adapterId"] = "901"
+        duplicate["launchToken"] = str(uuid.uuid4())
+        self.runtime.raw_records[duplicate["adapterId"]] = duplicate
+        with self.assertRaisesRegex(ProcessError, "ambiguous"):
+            engine.recover(request)
+        self.assertEqual(pending, store.load())
+        self.assertEqual({"900", "901"}, set(self.runtime.raw_records))
+
+    def test_candidate_ready_recovery_validates_secret_policy_before_orphan_delete(self) -> None:
+        managed, *_ = self.adopt_a()
+        engine, request, _, store, pending, _, raw = self.interrupt_candidate_ready(managed, SHA_B)
+        self.runtime.available_secret_names.remove("DATABASE_URL")
+        with self.assertRaisesRegex(ProcessError, "runtime secret names unavailable"):
+            engine.recover(request)
+        self.assertEqual(pending, store.load())
+        self.assertIn(raw["adapterId"], self.runtime.raw_records)
+        self.assertNotIn("delete-raw-owned", self.runtime.events)
+
+    def test_candidate_ready_recovery_health_failure_does_not_claim_authority(self) -> None:
+        managed, *_ = self.adopt_a()
+        engine, request, _, store, pending, _, _ = self.interrupt_candidate_ready(managed, SHA_B)
+        self.runtime.fail_attestation_for_sha = SHA_A
+        with self.assertRaisesRegex(ProcessError, "health"):
+            engine.recover(request)
+        self.assertEqual(pending, store.load())
+        self.assertEqual({}, self.runtime.raw_records)
+        self.assertEqual([], [item for item in self.runtime.records.values() if item["status"] == "online"])
 
     def test_atomic_store_failure_before_replace_preserves_prior_generation(self) -> None:
         state, *_ = self.adopt_a()

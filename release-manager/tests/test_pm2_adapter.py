@@ -11,12 +11,20 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from engine import PM2ProcessAdapter  # noqa: E402
+from engine import (  # noqa: E402
+    AtomicStateStore,
+    FakeLifecycleRunner,
+    FakeSourceProvider,
+    PM2ProcessAdapter,
+    ReleaseEngine,
+    ReleaseRequest,
+)
 from engine.errors import ProcessError  # noqa: E402
 
 
@@ -490,6 +498,187 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         self.assertEqual(SHA_A, evidence["releaseSha"])
         online = self.adapter.inventory(current_spec["environmentId"], current_spec["serviceId"], current_spec["namespace"])
         self.assertEqual([SHA_A], [item.record["releaseSha"] for item in online])
+        self.remove(restored)
+
+    def test_candidate_start_waits_for_transient_missing_proc_evidence(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        original_bridge = self.adapter._bridge
+        original_inventory = self.adapter._all_inventory
+        started = False
+        delayed = False
+
+        def bridge(request, sensitive_values=None):
+            nonlocal started
+            response = original_bridge(request, sensitive_values)
+            if request.get("action") == "start":
+                started = True
+            return response
+
+        def inventory():
+            nonlocal delayed
+            records = original_inventory()
+            if started and not delayed:
+                delayed = True
+                for record in records:
+                    if record.get("releaseSha") == SHA_A:
+                        record["pid"] = 0
+                        record["evidence"] = None
+            return records
+
+        self.adapter._bridge = bridge
+        self.adapter._all_inventory = inventory
+        handle = self.adapter.start_candidate(spec)
+        self.assertTrue(delayed)
+        self.adapter.attest(handle, SHA_A, self.targets(spec))
+        self.remove(handle)
+
+    def test_pidless_launch_token_owned_candidate_is_exactly_cleaned(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        original_bridge = self.adapter._bridge
+        stopped = False
+
+        def bridge(request, sensitive_values=None):
+            nonlocal stopped
+            response = original_bridge(request, sensitive_values)
+            if request.get("action") == "start" and not stopped:
+                record = response["record"]
+                expected = {
+                    **record,
+                    "processStartId": record["evidence"]["processStartId"],
+                }
+                original_bridge({"action": "stop", "expected": expected})
+                stopped = True
+            return response
+
+        self.adapter._bridge = bridge
+        with self.assertRaisesRegex(ProcessError, "lacks live /proc evidence"):
+            self.adapter.start_candidate(spec)
+        self.assertTrue(stopped)
+        self.assertEqual([], self.adapter._all_inventory())
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+
+    def test_interrupted_candidate_ready_recovery_restores_prior_managed_authority(self) -> None:
+        prior_spec, _, secrets = self.spec(SHA_A)
+        contract = json.loads((ROOT / "fixtures/valid/release-contract.json").read_text())
+        policy = json.loads((ROOT / "fixtures/valid/environment-policy.json").read_text())
+        contract["runtime"].update({
+            "cwd": ".",
+            "executable": "disposable-http-service.cjs",
+            "args": [],
+            "envNames": copy.deepcopy(prior_spec["allowedEnvNames"]),
+            "nonSecretEnvNames": ["NODE_ENV", "NEXT_DIST_DIR"],
+            "binding": {"hostEnv": "HOST", "portEnv": "PORT"},
+        })
+        contract["health"]["path"] = "/health"
+        policy["metadata"].update({
+            "environmentId": prior_spec["environmentId"],
+            "serviceId": prior_spec["serviceId"],
+        })
+        policy["process"].update({
+            "namespace": prior_spec["namespace"],
+            "stableName": prior_spec["stableName"],
+        })
+        policy["network"].update({
+            "internalHost": prior_spec["listener"]["host"],
+            "internalPort": prior_spec["listener"]["port"],
+            "publicBaseUrl": f"http://127.0.0.1:{prior_spec['listener']['port']}",
+        })
+        policy["runtime"]["values"] = copy.deepcopy(prior_spec["nonSecretValues"])
+        policy["secrets"].update({
+            "sourcePath": str(secrets),
+            "requiredNames": copy.deepcopy(prior_spec["requiredSecretNames"]),
+        })
+        policy["health"] = {"attempts": 30, "intervalMs": 100}
+        store = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock")
+        workspace = self.root / "workspace"
+        engine = ReleaseEngine(
+            FakeSourceProvider(self.root, SHA_B),
+            FakeLifecycleRunner(),
+            self.adapter,
+            store,
+            workspace,
+            trusted_path=self.trusted_path,
+            now=lambda: "2026-09-25T00:00:00Z",
+            new_id=lambda: str(uuid.uuid4()),
+        )
+        request = ReleaseRequest("fake://unused", SHA_B, contract, policy, {"HOME": str(self.root)})
+        configuration_digests = {
+            "releaseContract": engine._digest(contract),
+            "environmentPolicy": engine._digest(policy),
+            "build": engine._digest(policy["build"]),
+            "runtime": engine._digest({
+                "runtime": policy["runtime"],
+                "network": policy["network"],
+                "secrets": policy["secrets"],
+            }),
+        }
+        prior_spec["configurationDigests"] = copy.deepcopy(configuration_digests)
+        prior = self.adapter.start_candidate(prior_spec)
+        health = self.adapter.attest(prior, SHA_A, self.targets(prior_spec))
+        current = engine._authority(prior, prior_spec["releasePath"], 1, health)
+        managed_attempt = {
+            "attemptId": str(uuid.uuid4()), "sequence": 1, "targetSha": SHA_A,
+            "releaseContractDigest": configuration_digests["releaseContract"],
+            "environmentPolicyDigest": configuration_digests["environmentPolicy"],
+            "phase": "complete", "outcome": "succeeded",
+            "events": [{"sequence": 1, "at": "2026-09-25T00:00:00Z", "type": "RUNTIME_ATTESTED"}],
+        }
+        managed = engine._base_record(request, 1, "managed", managed_attempt, current=current)
+        store.commit(0, managed)
+
+        attempt_id = str(uuid.uuid4())
+        candidate_root = workspace / "attempts" / f"2-{attempt_id}" / SHA_B
+        candidate_root.mkdir(parents=True)
+        shutil.copy2(ROOT / "tests/fixtures/disposable-http-service.cjs", candidate_root / "disposable-http-service.cjs")
+        pending = copy.deepcopy(managed)
+        pending.update({"generation": 2, "updatedAt": "2026-09-25T00:00:00Z", "status": "candidate-ready"})
+        pending["attempt"] = {
+            "attemptId": attempt_id, "sequence": 2, "targetSha": SHA_B,
+            "releaseContractDigest": configuration_digests["releaseContract"],
+            "environmentPolicyDigest": configuration_digests["environmentPolicy"],
+            "phase": "candidate-ready", "outcome": "pending",
+            "events": [{"sequence": 1, "at": "2026-09-25T00:00:00Z", "type": "CANDIDATE_READY"}],
+        }
+        store.commit(1, pending)
+        self.remove(prior)
+        candidate_spec = engine._pending_candidate_spec(request, pending)
+        runtime_env, sensitive = self.adapter._runtime_environment(candidate_spec)
+        token = str(uuid.uuid4())
+        runtime_env.update({
+            "RELEASE_MANAGER_ENVIRONMENT_ID": candidate_spec["environmentId"],
+            "RELEASE_MANAGER_SERVICE_ID": candidate_spec["serviceId"],
+            "RELEASE_MANAGER_RELEASE_SHA": candidate_spec["releaseSha"],
+            "RELEASE_MANAGER_LAUNCH_TOKEN": token,
+            "RELEASE_MANAGER_OWNED_HOST": candidate_spec["listener"]["host"],
+            "RELEASE_MANAGER_OWNED_PORT": str(candidate_spec["listener"]["port"]),
+            "RELEASE_MANAGER_BUILD_CONFIG_DIGEST": configuration_digests["build"],
+            "RELEASE_MANAGER_RUNTIME_CONFIG_DIGEST": configuration_digests["runtime"],
+            "RELEASE_MANAGER_RELEASE_CONTRACT_DIGEST": configuration_digests["releaseContract"],
+            "RELEASE_MANAGER_ENVIRONMENT_POLICY_DIGEST": configuration_digests["environmentPolicy"],
+        })
+        raw = self.adapter._bridge({"action": "test-start", "app": {
+            "name": candidate_spec["stableName"], "namespace": candidate_spec["namespace"],
+            "script": candidate_spec["runtime"]["executable"], "args": [],
+            "cwd": candidate_spec["runtime"]["cwd"], "env": runtime_env,
+        }}, sensitive)["record"]
+        self.adapter._bridge({"action": "stop", "expected": {
+            **raw, "processStartId": raw["evidence"]["processStartId"],
+        }})
+
+        recovered = engine.recover(request)
+
+        self.assertEqual(3, recovered["generation"])
+        self.assertEqual("failed", recovered["status"])
+        self.assertEqual(SHA_A, recovered["current"]["releaseSha"])
+        self.assertEqual("failed", recovered["attempt"]["outcome"])
+        self.assertEqual(pending["attempt"]["events"], recovered["attempt"]["events"][:-1])
+        inventory = self.adapter._all_inventory()
+        self.assertEqual(1, len(inventory))
+        self.assertEqual(SHA_A, inventory[0]["releaseSha"])
+        self.assertGreater(inventory[0]["pid"], 0)
+        self.assertTrue((self.pm2_home / "dump.pm2").exists())
+        restored = self.adapter.resolve_persisted(recovered["current"]["handle"])
+        self.adapter.attest(restored, SHA_A, self.targets(prior_spec))
         self.remove(restored)
 
     def test_unsafe_secret_permissions_fail_before_pm2_start(self) -> None:

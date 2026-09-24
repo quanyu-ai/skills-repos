@@ -778,6 +778,95 @@ class PM2ProcessAdapter:
         if set(runtime_env) != allowed: raise ProcessError("runtime environment sources are incomplete or undeclared")
         return runtime_env, sensitive
 
+    def validate_runtime_spec(self, spec: dict[str, Any]) -> None:
+        self._assert_release_containment(spec["releasePath"], spec["runtime"])
+        self._runtime_environment(spec)
+
+    @staticmethod
+    def _raw_record_digest(record: dict[str, Any]) -> str:
+        payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+    def _assert_raw_owned_candidate(
+        self,
+        observed: dict[str, Any],
+        spec: dict[str, Any],
+        *,
+        launch_token: str | None,
+        require_pidless: bool,
+    ) -> None:
+        token = observed.get("launchToken")
+        try:
+            parsed = uuid.UUID(str(token))
+        except (ValueError, AttributeError) as error:
+            raise ProcessError("raw PM2 candidate launch token is invalid") from error
+        if parsed.version != 4 or (launch_token is not None and token != launch_token):
+            raise ProcessError("raw PM2 candidate launch token mismatch")
+        expected = {
+            "name": spec["stableName"],
+            "namespace": spec["namespace"],
+            "environmentId": spec["environmentId"],
+            "serviceId": spec["serviceId"],
+            "releaseSha": spec["releaseSha"],
+            "executable": spec["runtime"]["executable"],
+            "cwd": spec["runtime"]["cwd"],
+            "args": spec["runtime"]["args"],
+            "ownedHost": str(spec["listener"]["host"]),
+            "ownedPort": int(spec["listener"]["port"]),
+            "buildConfigDigest": spec["configurationDigests"]["build"],
+            "runtimeConfigDigest": spec["configurationDigests"]["runtime"],
+            "releaseContractDigest": spec["configurationDigests"]["releaseContract"],
+            "environmentPolicyDigest": spec["configurationDigests"]["environmentPolicy"],
+        }
+        if any(observed.get(field) != value for field, value in expected.items()):
+            raise ProcessError("raw PM2 candidate does not match pending activation context")
+        self._assert_release_containment(spec["releasePath"], spec["runtime"])
+        if require_pidless and (observed.get("pid") != 0 or observed.get("evidence") is not None):
+            raise ProcessError("raw PM2 orphan unexpectedly has live process evidence")
+
+    def _delete_raw_owned_candidate(
+        self,
+        observed: dict[str, Any],
+        spec: dict[str, Any],
+        *,
+        launch_token: str | None,
+    ) -> dict[str, Any]:
+        self._assert_raw_owned_candidate(
+            observed, spec, launch_token=launch_token, require_pidless=True
+        )
+        expected = copy.deepcopy(observed)
+        self._bridge({"action": "delete-raw-owned", "expected": expected})
+        for _ in range(100):
+            inventory = self._all_inventory()
+            if (
+                all(item["adapterId"] != observed["adapterId"] for item in inventory)
+                and not any(self._overlaps(item, spec) for item in inventory)
+                and self._port_is_free(spec["listener"]["host"], int(spec["listener"]["port"]))
+            ):
+                return {
+                    "adapterId": observed["adapterId"],
+                    "orphanRecordDigest": self._raw_record_digest(observed),
+                    "launchTokenDigest": self._raw_record_digest({"launchToken": observed["launchToken"]}),
+                }
+            time.sleep(0.05)
+        raise ProcessError("raw PM2 orphan absence proof failed")
+
+    def remove_interrupted_candidate(self, spec: dict[str, Any]) -> dict[str, Any]:
+        inventory = self._all_inventory()
+        overlaps = [item for item in inventory if self._overlaps(item, spec)]
+        exact = []
+        for item in overlaps:
+            try:
+                self._assert_raw_owned_candidate(
+                    item, spec, launch_token=None, require_pidless=True
+                )
+            except ProcessError:
+                continue
+            exact.append(item)
+        if len(exact) != 1 or len(overlaps) != 1:
+            raise ProcessError("interrupted activation raw PM2 inventory is ambiguous")
+        return self._delete_raw_owned_candidate(exact[0], spec, launch_token=None)
+
     def start_candidate(self, spec: dict[str, Any]) -> AdapterHandle:
         runtime_env, sensitive = self._runtime_environment(spec)
         if any(self._overlaps(item, spec) for item in self._all_inventory()):
@@ -816,15 +905,46 @@ class PM2ProcessAdapter:
             "health": copy.deepcopy(spec.get("health")),
             "configurationDigests": copy.deepcopy(spec["configurationDigests"]),
         }
-        handle = self._handle_from_observation(
-            observed,
-            environment_id=spec["environmentId"],
-            service_id=spec["serviceId"],
-            release_sha=spec["releaseSha"],
-            origin="started",
-            observed_at=spec["observedAt"],
-            sidecar=sidecar,
-        )
+        original_failure = ProcessError("PM2 observation lacks live /proc evidence")
+        handle = None
+        for _ in range(50):
+            matches = [
+                item for item in self._all_inventory()
+                if item.get("launchToken") == launch_token
+            ]
+            if len(matches) > 1:
+                raise ProcessError("candidate launch token matched multiple PM2 records")
+            if len(matches) == 1:
+                observed = matches[0]
+                self._assert_raw_owned_candidate(
+                    observed, spec, launch_token=launch_token, require_pidless=False
+                )
+                try:
+                    handle = self._handle_from_observation(
+                        observed,
+                        environment_id=spec["environmentId"],
+                        service_id=spec["serviceId"],
+                        release_sha=spec["releaseSha"],
+                        origin="started",
+                        observed_at=spec["observedAt"],
+                        sidecar=sidecar,
+                    )
+                    break
+                except ProcessError as error:
+                    original_failure = error
+            time.sleep(0.05)
+        if handle is None:
+            matches = [
+                item for item in self._all_inventory()
+                if item.get("launchToken") == launch_token
+            ]
+            if len(matches) == 1:
+                self._delete_raw_owned_candidate(
+                    matches[0], spec, launch_token=launch_token
+                )
+            elif len(matches) > 1:
+                raise ProcessError("candidate launch token matched multiple PM2 records")
+            raise original_failure
         owned = [
             item for item in self._all_inventory()
             if item["environmentId"] == spec["environmentId"]

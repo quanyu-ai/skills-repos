@@ -326,6 +326,181 @@ class ReleaseEngine:
             },
         }
 
+    def _managed_restore_spec(
+        self, request: ReleaseRequest, state: dict[str, Any]
+    ) -> dict[str, Any]:
+        authority = state["current"]
+        handle = authority["handle"]
+        context = self._canonical_context(request)
+        if (
+            state.get("releaseContractDigest") != context["releaseContract"]
+            or state.get("environmentPolicyDigest") != context["environmentPolicy"]
+            or state["attempt"].get("releaseContractDigest") != context["releaseContract"]
+            or state["attempt"].get("environmentPolicyDigest") != context["environmentPolicy"]
+        ):
+            raise ContractError("interrupted activation contract/policy digest context mismatch")
+        configuration_digests = {
+            "releaseContract": context["releaseContract"],
+            "environmentPolicy": context["environmentPolicy"],
+            "build": self._digest(request.policy["build"]),
+            "runtime": self._digest({
+                "runtime": request.policy["runtime"],
+                "network": request.policy["network"],
+                "secrets": request.policy["secrets"],
+            }),
+        }
+        if handle.get("configurationDigests") != configuration_digests:
+            raise ContractError("persisted prior authority configuration digest mismatch")
+        if (
+            authority.get("releaseSha") != handle.get("releaseSha")
+            or authority.get("generation", 0) >= state["generation"]
+        ):
+            raise ContractError("persisted prior authority is invalid for interrupted activation")
+        identity = handle.get("identity") or {}
+        if (
+            identity.get("environmentId") != request.policy["metadata"]["environmentId"]
+            or identity.get("serviceId") != request.policy["metadata"]["serviceId"]
+            or identity.get("namespace") != request.policy["process"]["namespace"]
+        ):
+            raise ContractError("persisted prior authority identity mismatch")
+        release_path = Path(authority["releasePath"])
+        runtime_contract = request.contract["runtime"]
+        runtime = {
+            "executable": str(self._resolve_release_path(release_path, runtime_contract["executable"], "executable")),
+            "args": list(runtime_contract["args"]),
+            "cwd": str(self._resolve_release_path(release_path, runtime_contract["cwd"], "cwd")),
+        }
+        if handle.get("runtime") != runtime or handle.get("invocationFingerprint") != invocation_fingerprint(
+            runtime["executable"], runtime["args"], runtime["cwd"]
+        ):
+            raise ContractError("persisted prior authority runtime mismatch")
+        return {
+            "environmentId": request.policy["metadata"]["environmentId"],
+            "serviceId": request.policy["metadata"]["serviceId"],
+            "namespace": request.policy["process"]["namespace"],
+            "stableName": request.policy["process"]["stableName"],
+            "releaseSha": authority["releaseSha"],
+            "releasePath": authority["releasePath"],
+            "runtime": runtime,
+            "observedAt": self.now(),
+            "allowedEnvNames": list(runtime_contract["envNames"]),
+            "requiredSecretNames": list(request.policy["secrets"]["requiredNames"]),
+            "nonSecretValues": copy.deepcopy(request.policy["runtime"]["values"]),
+            "configurationDigests": configuration_digests,
+            "secretSource": {
+                "provider": request.policy["secrets"]["provider"],
+                "sourcePath": request.policy["secrets"]["sourcePath"],
+            },
+            "binding": {
+                runtime_contract["binding"]["hostEnv"]: request.policy["network"]["internalHost"],
+                runtime_contract["binding"]["portEnv"]: str(request.policy["network"]["internalPort"]),
+            },
+            "listener": {
+                "host": request.policy["network"]["internalHost"],
+                "port": request.policy["network"]["internalPort"],
+            },
+            "health": {
+                "acceptedStatusClasses": list(request.contract["health"]["acceptedStatusClasses"]),
+                "attempts": request.policy["health"]["attempts"],
+                "intervalMs": request.policy["health"]["intervalMs"],
+            },
+        }
+
+    def _pending_candidate_spec(
+        self, request: ReleaseRequest, state: dict[str, Any]
+    ) -> dict[str, Any]:
+        attempt = state["attempt"]
+        candidate_root = (
+            self.workspace_root
+            / "attempts"
+            / f"{attempt['sequence']}-{attempt['attemptId']}"
+            / attempt["targetSha"]
+        )
+        context = self._canonical_context(request)
+        candidate = Candidate(
+            candidate_root,
+            attempt["targetSha"],
+            attempt["attemptId"],
+            attempt["sequence"],
+            (),
+            compose_health_targets(request.contract, request.policy),
+            attempt["releaseContractDigest"],
+            attempt["environmentPolicyDigest"],
+            self._digest(request.policy["build"]),
+            self._digest({
+                "runtime": request.policy["runtime"],
+                "network": request.policy["network"],
+                "secrets": request.policy["secrets"],
+            }),
+        )
+        if (
+            candidate.release_contract_digest != context["releaseContract"]
+            or candidate.environment_policy_digest != context["environmentPolicy"]
+        ):
+            raise ContractError("pending candidate digest context mismatch")
+        return self._runtime_spec(request, candidate)
+
+    def _recover_interrupted_activation(
+        self, request: ReleaseRequest, state: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not (
+            state.get("status") == "candidate-ready"
+            and state.get("attempt", {}).get("phase") == "candidate-ready"
+            and state["attempt"].get("outcome") == "pending"
+            and "current" in state
+        ):
+            raise StateError("state is not an interrupted candidate-ready activation")
+        prior_spec = self._managed_restore_spec(request, state)
+        candidate_spec = self._pending_candidate_spec(request, state)
+        self.adapter.validate_runtime_spec(prior_spec)
+        orphan_receipt = self.adapter.remove_interrupted_candidate(candidate_spec)
+        restored = self.adapter.start_candidate(prior_spec)
+        targets = compose_health_targets(request.contract, request.policy)
+        try:
+            health = self.adapter.attest(restored, state["current"]["releaseSha"], targets)
+            self.adapter.persist(restored)
+        except Exception:
+            self.adapter.stop_exact(restored)
+            self.adapter.delete_exact(restored)
+            self.adapter.await_absent(restored)
+            raise
+        generation = state["generation"] + 1
+        current = self._authority(
+            restored, state["current"]["releasePath"], generation, health
+        )
+        receipt = {
+            "apiVersion": "quanyu.ai/interrupted-activation-recovery-receipt/v1alpha1",
+            "kind": "InterruptedActivationRecoveryReceipt",
+            "reason": "candidate-start-orphan",
+            "priorGeneration": state["generation"],
+            "newGeneration": generation,
+            "failedAttemptDigest": self._digest(state["attempt"]),
+            "targetSha": state["attempt"]["targetSha"],
+            "restoredSha": state["current"]["releaseSha"],
+            "orphanRecordDigest": orphan_receipt["orphanRecordDigest"],
+            "launchTokenDigest": orphan_receipt["launchTokenDigest"],
+            "restoredHandleDigest": self._digest(restored.record),
+            "configurationDigests": copy.deepcopy(restored.record["configurationDigests"]),
+            "healthEvidenceDigest": self._digest(health),
+            "recoveredAt": self.now(),
+        }
+        receipt["receiptDigest"] = self._digest(receipt)
+        failed = copy.deepcopy(state)
+        failed["generation"] = generation
+        failed["updatedAt"] = self.now()
+        failed["status"] = "failed"
+        failed["current"] = current
+        failed["attempt"]["phase"] = "failed"
+        failed["attempt"]["outcome"] = "failed"
+        failed["attempt"]["events"].append({
+            "sequence": len(failed["attempt"]["events"]) + 1,
+            "at": self.now(),
+            "type": "INTERRUPTED_ACTIVATION_RECOVERED",
+            "evidenceDigest": receipt["receiptDigest"],
+        })
+        failed.setdefault("recoveries", []).append(receipt)
+        return self.store.commit(state["generation"], failed)
+
     def _authority(
         self,
         handle: AdapterHandle,
@@ -785,6 +960,13 @@ class ReleaseEngine:
             state = self.store.load()
             if not state:
                 raise StateError("no persisted state to recover")
+            if (
+                state.get("status") == "candidate-ready"
+                and state.get("attempt", {}).get("phase") == "candidate-ready"
+                and state["attempt"].get("outcome") == "pending"
+                and "current" in state
+            ):
+                return self._recover_interrupted_activation(request, state)
             if state["status"] == "managed":
                 current_context = self._canonical_context(request)
                 if (
