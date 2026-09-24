@@ -674,6 +674,7 @@ class PM2ProcessAdapter:
                 "stableName": expected["stableName"],
                 "listener": copy.deepcopy(expected_listener),
                 "startSpec": self._restore_spec(record, observed),
+                "health": copy.deepcopy(expected["health"]),
                 "configurationDigests": copy.deepcopy(expected_digests),
             },
         )

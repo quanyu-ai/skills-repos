@@ -409,6 +409,11 @@ class ReleaseEngine:
                 "host": request.policy["network"]["internalHost"],
                 "port": request.policy["network"]["internalPort"],
             },
+            "health": {
+                "acceptedStatusClasses": list(request.contract["health"]["acceptedStatusClasses"]),
+                "attempts": request.policy["health"]["attempts"],
+                "intervalMs": request.policy["health"]["intervalMs"],
+            },
             "observedAt": self.now(),
         }
 
