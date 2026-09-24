@@ -56,7 +56,6 @@ class EngineTest(unittest.TestCase):
         }))
         self.contract = json.loads((ROOT / "fixtures/valid/release-contract.json").read_text())
         self.policy = json.loads((ROOT / "fixtures/valid/environment-policy.json").read_text())
-        self.contract["runtime"]["envNames"].append("JWT_ACCESS_SECRET")
         self.runtime = FakeProcessRuntime()
         self.runtime.available_secret_names = set(self.policy["secrets"]["requiredNames"])
         self.ids = IdSequence()
@@ -73,7 +72,7 @@ class EngineTest(unittest.TestCase):
             build_environment={
                 "HOME": "/tmp/release-home",
                 "PATH": "/tmp/attacker-first:/usr/bin:/bin",
-                "NEXT_DIST_DIR": ".next-demo",
+                "NEXT_DIST_DIR": "caller-must-not-win",
                 "NODE_CHANNEL_FD": "forbidden",
                 "NODE_UNIQUE_ID": "forbidden",
                 "DATABASE_URL": "must-not-enter-build",
@@ -101,8 +100,8 @@ class EngineTest(unittest.TestCase):
     def approval(self, request: ReleaseRequest, state: dict, **overrides) -> MigrationApprovalReceipt:
         values = {
             "target_sha": request.target_sha,
-            "contract_digest": ReleaseEngine._digest(request.contract),
-            "policy_digest": ReleaseEngine._digest(request.policy),
+            "release_contract_digest": ReleaseEngine._digest(request.contract),
+            "environment_policy_digest": ReleaseEngine._digest(request.policy),
             "environment_id": request.policy["metadata"]["environmentId"],
             "service_id": request.policy["metadata"]["serviceId"],
             "attempt_id": state["attempt"]["attemptId"],
@@ -114,15 +113,14 @@ class EngineTest(unittest.TestCase):
         return MigrationApprovalReceipt(**values)
 
     def legacy_spec(self) -> dict:
-        return {
-            "releaseSha": "f" * 40,
-            "releasePath": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff",
-            "runtime": {
-                "executable": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff/apps/web/node_modules/next/dist/bin/next",
-                "args": ["start"],
-                "cwd": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff/apps/web",
-            },
-        }
+        descriptor = json.loads((ROOT / "fixtures/valid/legacy-restore-descriptor.json").read_text())
+        release = self.source_root.resolve()
+        descriptor["metadata"] = {"environmentId": self.policy["metadata"]["environmentId"], "serviceId": self.policy["metadata"]["serviceId"]}
+        descriptor["authority"].update({"releaseSha": "f" * 40, "releasePath": str(release), "namespace": self.policy["process"]["namespace"], "stableName": self.policy["process"]["stableName"]})
+        descriptor["launcher"] = {"executable": str((release / "node_modules/next/dist/bin/next").resolve()), "args": ["start"], "cwd": str((release / "apps/web").resolve())}
+        descriptor["wrapper"]["executable"] = descriptor["launcher"]["executable"]
+        descriptor["listener"] = {"host": self.policy["network"]["internalHost"], "port": self.policy["network"]["internalPort"]}
+        return descriptor
 
     def adopt_a(self):
         engine, source, runner, adapter, store = self.components(SHA_A)
@@ -159,7 +157,7 @@ class EngineTest(unittest.TestCase):
         request = self.request(SHA_A)
         request = ReleaseRequest(request.source, request.target_sha, request.contract, policy, request.build_environment)
         engine, source, *_ = self.components(SHA_A)
-        with self.assertRaisesRegex(ContractError, "absent from contract"):
+        with self.assertRaisesRegex(ContractError, "classification must be complete"):
             engine.build_candidate(request)
         self.assertEqual(0, source.acquisitions)
 
@@ -187,7 +185,80 @@ class EngineTest(unittest.TestCase):
             self.assertNotIn("NODE_CHANNEL_FD", env)
             self.assertNotIn("NODE_UNIQUE_ID", env)
             self.assertNotIn("DATABASE_URL", env)
+            self.assertEqual(".next-demo", env["NEXT_DIST_DIR"])
             self.assertEqual("/opt/release-manager/bin:/usr/bin:/bin", env["PATH"])
+
+    def test_runtime_configuration_is_complete_and_attested(self) -> None:
+        state, *_ = self.adopt_a()
+        handle = state["current"]["handle"]
+        self.assertEqual(state["releaseContractDigest"], handle["configurationDigests"]["releaseContract"])
+        self.assertEqual(state["environmentPolicyDigest"], handle["configurationDigests"]["environmentPolicy"])
+        self.assertEqual(state["releaseContractDigest"], state["attempt"]["releaseContractDigest"])
+        self.assertEqual(state["environmentPolicyDigest"], state["attempt"]["environmentPolicyDigest"])
+        self.assertRegex(handle["configurationDigests"]["build"], r"^sha256:[a-f0-9]{64}$")
+        self.assertRegex(handle["configurationDigests"]["runtime"], r"^sha256:[a-f0-9]{64}$")
+        started = self.runtime.started_specs[-1]
+        values = {item["name"]: item["value"] for item in started["nonSecretValues"]}
+        self.assertEqual(".next-demo", values["NEXT_DIST_DIR"])
+
+    def _assert_activation_drift_rejected(self, mutate) -> None:
+        state, *_ = self.adopt_a()
+        engine, _, _, adapter, store = self.components(SHA_B)
+        request = self.request(SHA_B)
+        original_build = engine.build_candidate
+
+        def build_then_drift(active_request, active_state=None):
+            candidate = original_build(active_request, active_state)
+            mutate(active_request)
+            return candidate
+
+        engine.build_candidate = build_then_drift
+        events_before = list(adapter.runtime.events)
+        with self.assertRaises(ContractError):
+            engine.activate(request)
+        self.assertEqual(events_before, adapter.runtime.events)
+        self.assertEqual(state, store.load())
+
+    def test_contract_only_runtime_args_drift_rejected_before_process_mutation(self) -> None:
+        self._assert_activation_drift_rejected(lambda request: request.contract["runtime"]["args"].append("--drift"))
+
+    def test_contract_only_env_classification_drift_rejected_before_process_mutation(self) -> None:
+        self._assert_activation_drift_rejected(lambda request: request.contract["runtime"]["nonSecretEnvNames"].remove("NODE_ENV"))
+
+    def test_contract_only_binding_drift_rejected_before_process_mutation(self) -> None:
+        def mutate(request):
+            request.contract["runtime"]["binding"]["hostEnv"] = "SERVER_HOST"
+            request.contract["runtime"]["envNames"].remove("HOST")
+            request.contract["runtime"]["envNames"].append("SERVER_HOST")
+        self._assert_activation_drift_rejected(mutate)
+
+    def test_contract_only_artifact_runtime_drift_rejected_before_process_mutation(self) -> None:
+        self._assert_activation_drift_rejected(lambda request: request.contract["artifact"]["required"].append("package.json"))
+
+    def test_contract_only_runtime_executable_drift_rejected_before_process_mutation(self) -> None:
+        self._assert_activation_drift_rejected(lambda request: request.contract["runtime"].__setitem__("executable", "package.json"))
+
+    def test_policy_only_drift_rejected_before_process_mutation(self) -> None:
+        self._assert_activation_drift_rejected(lambda request: request.policy["health"].__setitem__("attempts", request.policy["health"]["attempts"] + 1))
+
+    def test_missing_runtime_non_secret_value_fails_before_source(self) -> None:
+        request = self.request(SHA_A)
+        request.policy["runtime"]["values"] = [item for item in request.policy["runtime"]["values"] if item["name"] != "NEXT_DIST_DIR"]
+        engine, source, *_ = self.components(SHA_A)
+        with self.assertRaisesRegex(ContractError, "incomplete or undeclared"):
+            engine.build_candidate(request)
+        self.assertEqual(0, source.acquisitions)
+
+    def test_secret_non_secret_and_phase_mismatch_fail_closed(self) -> None:
+        engine, source, *_ = self.components(SHA_A)
+        request = self.request(SHA_A)
+        request.contract["runtime"]["nonSecretEnvNames"].append("JWT_ACCESS_SECRET")
+        with self.assertRaises(ContractError): engine.build_candidate(request)
+        self.assertEqual(0, source.acquisitions)
+        request = self.request(SHA_A)
+        for item in request.policy["runtime"]["values"]:
+            if item["name"] == "NEXT_DIST_DIR": item["value"] = ".next-other"
+        with self.assertRaisesRegex(ContractError, "build/runtime binding mismatch"): engine.build_candidate(request)
 
     def test_missing_prepare_output_fails_before_process_mutation(self) -> None:
         engine, _, runner, adapter, *_ = self.components(SHA_A)
@@ -276,8 +347,8 @@ class EngineTest(unittest.TestCase):
         events = list(adapter.runtime.events)
         mismatches = (
             ("target_sha", SHA_B),
-            ("contract_digest", "sha256:" + "0" * 64),
-            ("policy_digest", "sha256:" + "1" * 64),
+            ("release_contract_digest", "sha256:" + "0" * 64),
+            ("environment_policy_digest", "sha256:" + "1" * 64),
             ("environment_id", "other-demo"),
             ("service_id", "other-web"),
             ("attempt_id", "00000000-0000-4000-8000-999999999999"),
@@ -378,6 +449,17 @@ class EngineTest(unittest.TestCase):
         self.assertIn("attest", adapter.runtime.events)
         self.assertEqual(state, store.load())
 
+    def test_reobserved_runtime_digest_context_mismatch_is_rejected(self) -> None:
+        state, *_ = self.adopt_a()
+        adapter_id = state["current"]["handle"]["identity"]["adapterId"]
+        self.runtime.records[adapter_id]["record"]["configurationDigests"]["releaseContract"] = "sha256:" + "0" * 64
+        engine, _, _, adapter, store = self.components(SHA_B)
+        events_before = list(adapter.runtime.events)
+        with self.assertRaisesRegex(ProcessError, "configuration digest context mismatch"):
+            engine.recover(self.request(SHA_B))
+        self.assertEqual(events_before, adapter.runtime.events)
+        self.assertEqual(state, store.load())
+
     def test_interrupted_activation_recovers_from_persisted_current(self) -> None:
         state, *_ = self.adopt_a()
         store = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock")
@@ -387,7 +469,10 @@ class EngineTest(unittest.TestCase):
         interrupted["updatedAt"] = "2026-09-23T15:00:00Z"
         interrupted["attempt"] = {
             "attemptId": self.ids(), "sequence": state["attempt"]["sequence"] + 1,
-            "targetSha": SHA_B, "phase": "activating", "outcome": "pending",
+            "targetSha": SHA_B,
+            "releaseContractDigest": state["releaseContractDigest"],
+            "environmentPolicyDigest": state["environmentPolicyDigest"],
+            "phase": "activating", "outcome": "pending",
             "events": [{"sequence": 1, "at": "2026-09-23T15:00:00Z", "type": "ACTIVATION_STARTED"}],
         }
         store.commit(state["generation"], interrupted)
@@ -408,7 +493,10 @@ class EngineTest(unittest.TestCase):
         interrupted["updatedAt"] = "2026-09-23T15:00:00Z"
         interrupted["attempt"] = {
             "attemptId": candidate.attempt_id, "sequence": candidate.attempt_sequence,
-            "targetSha": SHA_B, "phase": "activating", "outcome": "pending",
+            "targetSha": SHA_B,
+            "releaseContractDigest": candidate.release_contract_digest,
+            "environmentPolicyDigest": candidate.environment_policy_digest,
+            "phase": "activating", "outcome": "pending",
             "events": [{"sequence": 1, "at": "2026-09-23T15:00:00Z", "type": "ACTIVATION_STARTED"}],
         }
         store.commit(state["generation"], interrupted)

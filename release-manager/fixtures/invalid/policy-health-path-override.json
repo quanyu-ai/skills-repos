@@ -1,11 +1,47 @@
 {
   "apiVersion": "quanyu.ai/environment-policy/v1alpha1",
   "kind": "EnvironmentPolicy",
-  "metadata": { "environmentId": "example-demo", "serviceId": "example-web", "application": "example-app" },
-  "storage": { "releaseRoot": "/var/lib/example/releases", "stateRoot": "/var/lib/example/state", "lockFile": "/var/lib/example/lock" },
-  "process": { "adapter": "pm2", "namespace": "release-manager-demo", "stableName": "demo-example", "replacement": "stop-absent-start-attest" },
-  "network": { "internalHost": "127.0.0.1", "internalPort": 3104, "publicBaseUrl": "https://demo.example.invalid" },
-  "secrets": { "provider": "external-json-file", "sourcePath": "/var/lib/example/secrets.json", "requiredNames": ["DATABASE_URL"] },
-  "health": { "path": "/policy-must-not-override", "attempts": 10, "intervalMs": 1000 },
-  "retention": { "verifiedReleases": 3, "failedAttempts": 5 }
+  "metadata": {
+    "environmentId": "example-demo",
+    "serviceId": "example-web",
+    "application": "example-app"
+  },
+  "storage": {
+    "releaseRoot": "/var/lib/example/releases",
+    "stateRoot": "/var/lib/example/state",
+    "lockFile": "/var/lib/example/lock"
+  },
+  "process": {
+    "adapter": "pm2",
+    "namespace": "release-manager-demo",
+    "stableName": "demo-example",
+    "replacement": "stop-absent-start-attest"
+  },
+  "network": {
+    "internalHost": "127.0.0.1",
+    "internalPort": 3104,
+    "publicBaseUrl": "https://demo.example.invalid"
+  },
+  "secrets": {
+    "provider": "external-json-file",
+    "sourcePath": "/var/lib/example/secrets.json",
+    "requiredNames": [
+      "DATABASE_URL"
+    ]
+  },
+  "health": {
+    "path": "/policy-must-not-override",
+    "attempts": 10,
+    "intervalMs": 1000
+  },
+  "retention": {
+    "verifiedReleases": 3,
+    "failedAttempts": 5
+  },
+  "build": {
+    "values": []
+  },
+  "runtime": {
+    "values": []
+  }
 }

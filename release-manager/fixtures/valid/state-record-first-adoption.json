@@ -6,8 +6,6 @@
   "generation": 1,
   "updatedAt": "2026-09-23T14:00:01Z",
   "status": "adoption-ready",
-  "contractDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-  "policyDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "attempt": {
     "attemptId": "123e4567-e89b-42d3-a456-426614174002",
     "sequence": 1,
@@ -21,7 +19,9 @@
         "type": "RUNTIME_ATTESTED",
         "evidenceDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
       }
-    ]
+    ],
+    "releaseContractDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "environmentPolicyDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   },
   "legacy": {
     "generation": 1,
@@ -68,5 +68,7 @@
       "publicHealth": "pass",
       "evidenceDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     }
-  }
+  },
+  "releaseContractDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "environmentPolicyDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 }

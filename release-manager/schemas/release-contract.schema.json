@@ -4,7 +4,7 @@
   "title": "Repository Release Contract",
   "type": "object",
   "additionalProperties": false,
-  "required": ["apiVersion", "kind", "metadata", "toolchain", "lifecycle", "artifact", "runtime", "health", "migration"],
+  "required": ["apiVersion", "kind", "metadata", "toolchain", "buildEnvironment", "lifecycle", "artifact", "runtime", "health", "migration"],
   "properties": {
     "apiVersion": { "const": "quanyu.ai/release-contract/v1alpha1" },
     "kind": { "const": "ReleaseContract" },
@@ -38,6 +38,18 @@
           "properties": {
             "operation": { "const": "package-manager-frozen-install" }
           }
+        }
+      }
+    },
+    "buildEnvironment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nonSecretEnvNames"],
+      "properties": {
+        "nonSecretEnvNames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/envName" }
         }
       }
     },
@@ -80,7 +92,7 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["cwd", "executable", "args", "envNames", "binding"],
+      "required": ["cwd", "executable", "args", "envNames", "nonSecretEnvNames", "binding"],
       "properties": {
         "cwd": {
           "description": "Repository/release-root-relative runtime working directory; canonical resolution must remain inside the immutable release root.",
@@ -96,6 +108,11 @@
           "items": { "$ref": "#/$defs/safeArg" }
         },
         "envNames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/envName" }
+        },
+        "nonSecretEnvNames": {
           "type": "array",
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/envName" }

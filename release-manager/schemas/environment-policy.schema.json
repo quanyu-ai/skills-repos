@@ -4,7 +4,7 @@
   "title": "External Environment Policy",
   "type": "object",
   "additionalProperties": false,
-  "required": ["apiVersion", "kind", "metadata", "storage", "process", "network", "secrets", "health", "retention"],
+  "required": ["apiVersion", "kind", "metadata", "storage", "process", "network", "build", "runtime", "secrets", "health", "retention"],
   "properties": {
     "apiVersion": { "const": "quanyu.ai/environment-policy/v1alpha1" },
     "kind": { "const": "EnvironmentPolicy" },
@@ -49,6 +49,8 @@
         "publicBaseUrl": { "type": "string", "pattern": "^https?://[^/@:]+(?::[0-9]{1,5})?$" }
       }
     },
+    "build": { "$ref": "#/$defs/nonSecretBindings" },
+    "runtime": { "$ref": "#/$defs/nonSecretBindings" },
     "secrets": {
       "type": "object",
       "additionalProperties": false,
@@ -89,6 +91,26 @@
     "absolutePath": {
       "type": "string",
       "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[A-Za-z0-9._@+/-]+$"
+    },
+    "nonSecretBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+              "value": { "type": "string", "maxLength": 1024, "pattern": "^(?!.*(?:\\$\\{|\\$\\(|`|[\\r\\n\\u0000])).*$" }
+            }
+          }
+        }
+      }
     }
   }
 }

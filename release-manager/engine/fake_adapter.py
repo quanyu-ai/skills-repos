@@ -20,6 +20,8 @@ class FakeProcessRuntime:
     fail_restore: bool = False
     ambiguous_inventory: bool = False
     available_secret_names: set[str] = field(default_factory=set)
+    started_specs: list[dict[str, Any]] = field(default_factory=list)
+    legacy_descriptors: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 class FakeProcessAdapter:
@@ -59,6 +61,8 @@ class FakeProcessAdapter:
                 "adapterReceipt": receipt,
             },
         }
+        if spec.get("configurationDigests"):
+            record["configurationDigests"] = copy.deepcopy(spec["configurationDigests"])
         self.runtime.known_receipts.add(receipt)
         self.runtime.records[adapter_id] = {"record": record, "status": "online"}
         return AdapterHandle(copy.deepcopy(record), self.issuer)
@@ -89,14 +93,34 @@ class FakeProcessAdapter:
                 handles.append(AdapterHandle(copy.deepcopy(record), self.issuer))
         return handles
 
-    def observe_legacy(self, spec: dict[str, Any]) -> AdapterHandle:
+    @staticmethod
+    def _legacy_spec(descriptor: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "environmentId": descriptor["metadata"]["environmentId"],
+            "serviceId": descriptor["metadata"]["serviceId"],
+            "namespace": descriptor["authority"]["namespace"],
+            "releaseSha": descriptor["authority"]["releaseSha"],
+            "runtime": copy.deepcopy(descriptor["launcher"]),
+            "observedAt": "2026-09-23T15:00:00Z",
+        }
+
+    def preflight_legacy_restore(self, descriptor: dict[str, Any]) -> dict[str, Any]:
+        self.runtime.events.append("preflight-legacy-restore")
+        return {"descriptorDigest": "sha256:" + "1" * 64, "probe": "pass"}
+
+    def observe_legacy(self, descriptor: dict[str, Any]) -> AdapterHandle:
         self.runtime.events.append("observe-legacy")
-        return self._new_handle(spec, "observed")
+        handle = self._new_handle(self._legacy_spec(descriptor), "observed")
+        self.runtime.legacy_descriptors[handle.record["provenance"]["adapterReceipt"]] = copy.deepcopy(descriptor)
+        return handle
 
     def resolve_persisted(self, record: dict[str, Any]) -> AdapterHandle:
         receipt = record["provenance"]["adapterReceipt"]
         if receipt not in self.runtime.known_receipts:
             raise ProcessError("persisted handle cannot be re-observed")
+        live = self.runtime.records.get(record["identity"]["adapterId"], {}).get("record")
+        if live is not None and live.get("configurationDigests") != record.get("configurationDigests"):
+            raise ProcessError("persisted runtime configuration digest context mismatch")
         self.runtime.events.append("resolve-persisted")
         return AdapterHandle(copy.deepcopy(record), self.issuer)
 
@@ -130,7 +154,14 @@ class FakeProcessAdapter:
             raise ProcessError(f"required runtime secret names unavailable: {missing}")
         if not set(spec["binding"]).issubset(spec["allowedEnvNames"]):
             raise ProcessError("runtime bindings are not allowed by the Release Contract")
+        non_secret = {item["name"]: item["value"] for item in spec["nonSecretValues"]}
+        sources = [set(non_secret), set(spec["binding"]), set(spec["requiredSecretNames"])]
+        if any(sources[i] & sources[j] for i in range(3) for j in range(i + 1, 3)):
+            raise ProcessError("runtime environment sources overlap")
+        if set(spec["allowedEnvNames"]) != set().union(*sources):
+            raise ProcessError("runtime environment sources are incomplete")
         self.runtime.events.append("start-candidate")
+        self.runtime.started_specs.append(copy.deepcopy(spec))
         return self._new_handle(spec, "started")
 
     def attest(self, handle: AdapterHandle, expected_sha: str, health_targets: tuple[str, str]) -> dict[str, Any]:
@@ -150,13 +181,15 @@ class FakeProcessAdapter:
         if self.runtime.fail_restore:
             raise ProcessError("injected restore failure")
         self.runtime.events.append("restore")
-        spec = {
+        descriptor = self.runtime.legacy_descriptors.get(handle.record["provenance"]["adapterReceipt"])
+        spec = self._legacy_spec(descriptor) if descriptor else {
             "environmentId": handle.record["identity"]["environmentId"],
             "serviceId": handle.record["identity"]["serviceId"],
             "namespace": handle.record["identity"]["namespace"],
             "releaseSha": handle.record["releaseSha"],
             "runtime": copy.deepcopy(handle.record["runtime"]),
             "observedAt": handle.record["provenance"]["observedAt"],
+            "configurationDigests": copy.deepcopy(handle.record.get("configurationDigests")),
         }
         return self._new_handle(spec, "started")
 

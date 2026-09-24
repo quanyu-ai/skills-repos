@@ -18,6 +18,7 @@ from typing import Any
 
 from .errors import ProcessError
 from .ports import AdapterHandle, invocation_fingerprint
+from .contracts import validate_legacy_restore_descriptor
 
 
 class PM2ProcessAdapter:
@@ -39,6 +40,7 @@ class PM2ProcessAdapter:
         health_attempts: int = 20,
         health_interval_seconds: float = 0.1,
         runtime_policy: dict[str, Any] | None = None,
+        legacy_restore_descriptor: dict[str, Any] | None = None,
     ) -> None:
         if not re.fullmatch(r"[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}", instance_id):
             raise ProcessError("invalid PM2 adapter instance ID")
@@ -55,6 +57,7 @@ class PM2ProcessAdapter:
         self.health_attempts = health_attempts
         self.health_interval_seconds = health_interval_seconds
         self.runtime_policy = copy.deepcopy(runtime_policy)
+        self.legacy_restore_descriptor = copy.deepcopy(legacy_restore_descriptor)
         self.bridge = Path(__file__).resolve().parents[1] / "pm2-adapter" / "bridge.cjs"
         self.issuer = f"pm2-programmatic:{instance_id}"
         self._sidecars: dict[str, dict[str, Any]] = {}
@@ -166,6 +169,10 @@ class PM2ProcessAdapter:
                 "observedAt": observed_at,
             },
         }
+        if sidecar.get("configurationDigests"):
+            record["configurationDigests"] = copy.deepcopy(sidecar["configurationDigests"])
+        if sidecar.get("legacyDescriptorDigest"):
+            record["legacyRestoreDescriptorDigest"] = sidecar["legacyDescriptorDigest"]
         record["provenance"]["adapterReceipt"] = self._receipt(record)
         receipt = record["provenance"]["adapterReceipt"]
         self._sidecars[receipt] = copy.deepcopy(sidecar)
@@ -211,6 +218,12 @@ class PM2ProcessAdapter:
                     sidecar={
                         "stableName": observed["name"],
                         "listener": {"host": observed["ownedHost"], "port": observed["ownedPort"]},
+                        "configurationDigests": {
+                            "releaseContract": observed["releaseContractDigest"],
+                            "environmentPolicy": observed["environmentPolicyDigest"],
+                            "build": observed["buildConfigDigest"],
+                            "runtime": observed["runtimeConfigDigest"],
+                        } if all(observed.get(name) for name in ("releaseContractDigest", "environmentPolicyDigest", "buildConfigDigest", "runtimeConfigDigest")) else None,
                     },
                 ))
         return handles
@@ -219,16 +232,21 @@ class PM2ProcessAdapter:
         self.assert_handle(handle)
         record = handle.record
         sidecar = self._sidecars.get(record["provenance"]["adapterReceipt"], {})
+        observed_ownership = sidecar.get("observedOwnership") or {}
         return {
             "adapterId": record["identity"]["adapterId"],
             "pid": record["identity"]["pid"],
             "processStartId": record["identity"]["processStartId"],
             "name": sidecar.get("stableName", self.stable_name),
             "namespace": record["identity"]["namespace"],
-            "environmentId": record["identity"]["environmentId"],
-            "serviceId": record["identity"]["serviceId"],
-            "releaseSha": record["releaseSha"],
+            "environmentId": observed_ownership.get("environmentId", record["identity"]["environmentId"]),
+            "serviceId": observed_ownership.get("serviceId", record["identity"]["serviceId"]),
+            "releaseSha": observed_ownership.get("releaseSha", record["releaseSha"]),
             **record["runtime"],
+            "buildConfigDigest": observed_ownership.get("buildConfigDigest", record.get("configurationDigests", {}).get("build")),
+            "runtimeConfigDigest": observed_ownership.get("runtimeConfigDigest", record.get("configurationDigests", {}).get("runtime")),
+            "releaseContractDigest": observed_ownership.get("releaseContractDigest", record.get("configurationDigests", {}).get("releaseContract")),
+            "environmentPolicyDigest": observed_ownership.get("environmentPolicyDigest", record.get("configurationDigests", {}).get("environmentPolicy")),
         }
 
     def _restore_spec(self, record: dict[str, Any], observed: dict[str, Any]) -> dict[str, Any] | None:
@@ -248,18 +266,143 @@ class PM2ProcessAdapter:
             "binding": copy.deepcopy(self.runtime_policy["binding"]),
             "listener": copy.deepcopy(self.runtime_policy["listener"]),
             "health": copy.deepcopy(self.runtime_policy["health"]),
+            "nonSecretValues": copy.deepcopy(self.runtime_policy["nonSecretValues"]),
+            "configurationDigests": copy.deepcopy(record.get("configurationDigests")),
         }
 
+    @staticmethod
+    def _descriptor_digest(descriptor: dict[str, Any]) -> str:
+        payload = json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode()
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+    def _validate_legacy_paths(self, descriptor: dict[str, Any]) -> None:
+        validate_legacy_restore_descriptor(descriptor)
+        release_raw = Path(descriptor["authority"]["releasePath"])
+        release_meta = release_raw.lstat()
+        if stat.S_ISLNK(release_meta.st_mode) or not stat.S_ISDIR(release_meta.st_mode): raise ProcessError("legacy release path must be a regular directory")
+        if release_meta.st_uid not in (0, self.secret_owner_uid) or stat.S_IMODE(release_meta.st_mode) & 0o022: raise ProcessError("legacy release path ownership or permissions are unsafe")
+        release = release_raw.resolve(strict=True)
+        checks = (
+            (Path(descriptor["launcher"]["executable"]), "file"),
+            (Path(descriptor["launcher"]["cwd"]), "dir"),
+            (Path(descriptor["wrapper"]["executable"]), "file"),
+        )
+        for raw, kind in checks:
+            metadata = raw.lstat()
+            if stat.S_ISLNK(metadata.st_mode):
+                raise ProcessError("legacy restore path cannot be a symlink")
+            resolved = raw.resolve(strict=True)
+            if metadata.st_uid not in (0, self.secret_owner_uid) or stat.S_IMODE(metadata.st_mode) & 0o022:
+                raise ProcessError("legacy restore path ownership or permissions are unsafe")
+            if kind == "file" and not resolved.is_file(): raise ProcessError("legacy restore executable is not a regular file")
+            if kind == "dir" and not resolved.is_dir(): raise ProcessError("legacy restore cwd is not a directory")
+        if not Path(descriptor["launcher"]["cwd"]).resolve().is_relative_to(release):
+            raise ProcessError("legacy restore cwd escapes release path")
+        if not Path(descriptor["wrapper"]["executable"]).resolve().is_relative_to(release):
+            raise ProcessError("legacy wrapped executable escapes release path")
+        self._load_secret_document(descriptor["secrets"])
+
+    def _load_secret_document(self, source_spec: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+        source = Path(source_spec["sourcePath"])
+        try: metadata = source.lstat()
+        except OSError as error: raise ProcessError("external secret source is unavailable") from error
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode): raise ProcessError("external secret source must be a regular file")
+        if metadata.st_uid != self.secret_owner_uid or stat.S_IMODE(metadata.st_mode) not in (0o400, 0o600): raise ProcessError("external secret source ownership or permissions are unsafe")
+        try: document = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error: raise ProcessError("external secret source is invalid") from error
+        required = source_spec["requiredNames"]
+        if not isinstance(document, dict) or any(name not in document or not isinstance(document[name], str) or not document[name] for name in required): raise ProcessError("external secret source is missing required names")
+        return {name: document[name] for name in required}, [document[name] for name in required]
+
+    def _legacy_environment(self, descriptor: dict[str, Any], port: int) -> dict[str, str]:
+        values = {item["name"]: item["value"] for item in descriptor["wrapper"]["nonSecretValues"]}
+        secret_names = descriptor["wrapper"]["requiredSecretNames"]
+        if descriptor["wrapper"]["requiredSecretNamesFormat"] == "json-array":
+            encoded_secret_names = json.dumps(secret_names, separators=(",", ":"))
+        else:
+            encoded_secret_names = ",".join(secret_names)
+        values.update({
+            "LEGACY_EXECUTABLE": descriptor["wrapper"]["executable"],
+            "LEGACY_ARGS_JSON": json.dumps(descriptor["wrapper"]["args"], separators=(",", ":")),
+            "LEGACY_HOST": descriptor["wrapper"]["host"],
+            "LEGACY_INTERNAL_PORT": str(port),
+            "REQUIRED_RUNTIME_SECRETS": encoded_secret_names,
+            "RUNTIME_SECRET_FILE": descriptor["wrapper"]["runtimeSecretFile"],
+        })
+        return values
+
+    def preflight_legacy_restore(self, descriptor: dict[str, Any]) -> dict[str, Any]:
+        self._validate_legacy_paths(descriptor)
+        if descriptor["probe"] == descriptor["listener"]: raise ProcessError("legacy restore probe must be isolated")
+        if not self._port_is_free(descriptor["probe"]["host"], int(descriptor["probe"]["port"])): raise ProcessError("legacy restore probe port is unavailable")
+        token = str(uuid.uuid4())
+        env = self._legacy_environment(descriptor, descriptor["probe"]["port"])
+        env.update({"RELEASE_MANAGER_ENVIRONMENT_ID": descriptor["metadata"]["environmentId"] + "-probe", "RELEASE_MANAGER_SERVICE_ID": descriptor["metadata"]["serviceId"], "RELEASE_MANAGER_RELEASE_SHA": descriptor["authority"]["releaseSha"], "RELEASE_MANAGER_LAUNCH_TOKEN": token, "RELEASE_MANAGER_OWNED_HOST": descriptor["probe"]["host"], "RELEASE_MANAGER_OWNED_PORT": str(descriptor["probe"]["port"])})
+        observed = None
+        handle = None
+        try:
+            observed = self._bridge({"action": "start", "app": {"name": descriptor["authority"]["stableName"] + "-restore-probe-" + token[:8], "namespace": descriptor["authority"]["namespace"], "script": descriptor["launcher"]["executable"], "args": descriptor["launcher"]["args"], "cwd": descriptor["launcher"]["cwd"], "env": env}})["record"]
+            handle = self._handle_from_observation(observed, environment_id=descriptor["metadata"]["environmentId"] + "-probe", service_id=descriptor["metadata"]["serviceId"], release_sha=descriptor["authority"]["releaseSha"], origin="started", observed_at=self._now(), sidecar={"stableName": observed["name"], "listener": descriptor["probe"], "health": descriptor["health"]})
+            url = f"http://{descriptor['probe']['host']}:{descriptor['probe']['port']}{descriptor['health']['path']}"
+            self.attest(handle, descriptor["authority"]["releaseSha"], (url, url))
+        finally:
+            if handle is not None:
+                self._remove_probe_exact(handle, token)
+            elif observed is not None:
+                expected = {**observed, "processStartId": observed["evidence"]["processStartId"]}
+                self._bridge({"action": "stop", "expected": expected}); self._bridge({"action": "delete", "expected": expected})
+        return {"descriptorDigest": self._descriptor_digest(descriptor), "probe": "pass"}
+
+    def _remove_probe_exact(self, handle: AdapterHandle, launch_token: str) -> None:
+        """Remove a disposable probe even when it exited before health attestation."""
+        expected = self._exact_expected(handle)
+        matches = [
+            item for item in self._all_inventory()
+            if item["adapterId"] == expected["adapterId"]
+            and item.get("launchToken") == launch_token
+        ]
+        if len(matches) != 1:
+            raise ProcessError("legacy restore probe cannot be identified exactly for cleanup")
+        observed = matches[0]
+        self._assert_observation(observed, expected, require_live=False)
+        if observed["status"] == "online":
+            live = self._handle_from_observation(
+                observed,
+                environment_id=handle.record["identity"]["environmentId"],
+                service_id=handle.record["identity"]["serviceId"],
+                release_sha=handle.record["releaseSha"],
+                origin="observed",
+                observed_at=self._now(),
+                sidecar=self._sidecars[handle.record["provenance"]["adapterReceipt"]],
+            )
+            self.stop_exact(live)
+            matches = [
+                item for item in self._all_inventory()
+                if item["adapterId"] == expected["adapterId"]
+                and item.get("launchToken") == launch_token
+            ]
+            if len(matches) != 1:
+                raise ProcessError("legacy restore probe disappeared before exact delete")
+            observed = matches[0]
+            self._assert_observation(observed, expected, require_live=False)
+        self._bridge({"action": "delete", "expected": observed})
+        self.await_absent(handle)
+
     def observe_legacy(self, spec: dict[str, Any]) -> AdapterHandle:
+        self._validate_legacy_paths(spec)
+        authority = spec["authority"]
         matches = []
         for observed in self._all_inventory():
             if (
                 observed["status"] == "online"
-                and observed["namespace"] == spec["namespace"]
-                and observed["name"] == spec.get("stableName", self.stable_name)
-                and observed["executable"] == str(Path(spec["runtime"]["executable"]).resolve())
-                and observed["cwd"] == str(Path(spec["runtime"]["cwd"]).resolve())
-                and observed["args"] == spec["runtime"]["args"]
+                and observed["adapterId"] == authority["adapterId"]
+                and observed["pid"] == authority["pid"]
+                and observed.get("evidence", {}).get("processStartId") == authority["processStartId"]
+                and observed["namespace"] == authority["namespace"]
+                and observed["name"] == authority["stableName"]
+                and observed["executable"] == str(Path(spec["launcher"]["executable"]).resolve())
+                and observed["cwd"] == str(Path(spec["launcher"]["cwd"]).resolve())
+                and observed["args"] == spec["launcher"]["args"]
             ):
                 matches.append(observed)
         if len(matches) != 1:
@@ -267,23 +410,17 @@ class PM2ProcessAdapter:
         observed = matches[0]
         return self._handle_from_observation(
             observed,
-            environment_id=spec["environmentId"],
-            service_id=spec["serviceId"],
-            release_sha=spec["releaseSha"],
+            environment_id=spec["metadata"]["environmentId"],
+            service_id=spec["metadata"]["serviceId"],
+            release_sha=authority["releaseSha"],
             origin="observed",
-            observed_at=spec["observedAt"],
+            observed_at=self._now(),
             sidecar={
                 "stableName": observed["name"],
-                "listener": copy.deepcopy(spec.get("listener")),
-                "startSpec": copy.deepcopy(spec.get("restoreSpec")) or self._restore_spec({
-                    "identity": {
-                        "environmentId": spec["environmentId"],
-                        "serviceId": spec["serviceId"],
-                        "namespace": spec["namespace"],
-                    },
-                    "releaseSha": spec["releaseSha"],
-                    "runtime": spec["runtime"],
-                }, observed),
+                "listener": copy.deepcopy(spec["listener"]),
+                "legacyDescriptor": copy.deepcopy(spec),
+                "legacyDescriptorDigest": self._descriptor_digest(spec),
+                "observedOwnership": {"environmentId": observed["environmentId"], "serviceId": observed["serviceId"], "releaseSha": observed["releaseSha"], "buildConfigDigest": observed.get("buildConfigDigest"), "runtimeConfigDigest": observed.get("runtimeConfigDigest"), "releaseContractDigest": observed.get("releaseContractDigest"), "environmentPolicyDigest": observed.get("environmentPolicyDigest")},
             },
         )
 
@@ -305,6 +442,10 @@ class PM2ProcessAdapter:
                 "environmentId": identity["environmentId"],
                 "serviceId": identity["serviceId"],
                 "releaseSha": record["releaseSha"],
+                "buildConfigDigest": record.get("configurationDigests", {}).get("build"),
+                "runtimeConfigDigest": record.get("configurationDigests", {}).get("runtime"),
+                "releaseContractDigest": record.get("configurationDigests", {}).get("releaseContract"),
+                "environmentPolicyDigest": record.get("configurationDigests", {}).get("environmentPolicy"),
                 "executable": runtime["executable"],
                 "cwd": runtime["cwd"],
                 "args": runtime["args"],
@@ -315,16 +456,25 @@ class PM2ProcessAdapter:
             raise ProcessError("persisted ProcessHandle adapter identity mismatch")
         if persisted_fingerprint != invocation_fingerprint(runtime["executable"], runtime["args"], runtime["cwd"]):
             raise ProcessError("persisted ProcessHandle runtime fingerprint mismatch")
-        scoped = [
+        is_legacy = record.get("provenance", {}).get("origin") == "observed" and "legacyRestoreDescriptorDigest" in record
+        if is_legacy:
+            descriptor = self.legacy_restore_descriptor
+            if descriptor is None or self._descriptor_digest(descriptor) != record["legacyRestoreDescriptorDigest"]:
+                raise ProcessError("persisted legacy handle requires its exact external restore descriptor")
+            self._validate_legacy_paths(descriptor)
+            expected["name"] = descriptor["authority"]["stableName"]
+            scoped = [item for item in self._all_inventory() if item["adapterId"] == str(expected["adapterId"])]
+        else:
+            scoped = [
             item for item in self._all_inventory()
             if item["environmentId"] == identity["environmentId"]
             and item["serviceId"] == identity["serviceId"]
             and item["namespace"] == identity["namespace"]
-        ]
+            ]
         if len(scoped) != 1 or scoped[0]["adapterId"] != str(expected["adapterId"]):
             raise ProcessError("persisted ProcessHandle cannot be re-observed exactly")
         observed = scoped[0]
-        self._assert_observation(observed, expected, require_live=True)
+        self._assert_observation(observed, expected, require_live=True, compare_ownership=not is_legacy)
         handle = self._handle_from_observation(
             observed,
             environment_id=identity["environmentId"],
@@ -335,14 +485,19 @@ class PM2ProcessAdapter:
             sidecar={
                 "stableName": observed["name"],
                 "listener": {"host": observed["ownedHost"], "port": observed["ownedPort"]},
-                "startSpec": self._restore_spec(record, observed),
+                "startSpec": None if is_legacy else self._restore_spec(record, observed),
+                "configurationDigests": copy.deepcopy(record.get("configurationDigests")),
+                "legacyDescriptor": copy.deepcopy(descriptor) if is_legacy else None,
+                "legacyDescriptorDigest": record.get("legacyRestoreDescriptorDigest"),
+                "observedOwnership": {"environmentId": observed["environmentId"], "serviceId": observed["serviceId"], "releaseSha": observed["releaseSha"], "buildConfigDigest": observed.get("buildConfigDigest"), "runtimeConfigDigest": observed.get("runtimeConfigDigest"), "releaseContractDigest": observed.get("releaseContractDigest"), "environmentPolicyDigest": observed.get("environmentPolicyDigest")} if is_legacy else None,
             },
         )
         return handle
 
     @staticmethod
-    def _assert_observation(observed: dict[str, Any], expected: dict[str, Any], require_live: bool) -> None:
-        fields = ("adapterId", "name", "namespace", "environmentId", "serviceId", "releaseSha", "executable", "cwd", "args")
+    def _assert_observation(observed: dict[str, Any], expected: dict[str, Any], require_live: bool, compare_ownership: bool = True) -> None:
+        fields = ["adapterId", "name", "namespace", "executable", "cwd", "args"]
+        if compare_ownership: fields.extend(("environmentId", "serviceId", "releaseSha", "buildConfigDigest", "runtimeConfigDigest", "releaseContractDigest", "environmentPolicyDigest"))
         if any(observed.get(field) != expected.get(field) for field in fields):
             raise ProcessError("PM2 observation does not match exact ProcessHandle")
         if require_live and (
@@ -426,26 +581,14 @@ class PM2ProcessAdapter:
         allowed = set(spec["allowedEnvNames"])
         if not set(required).issubset(allowed):
             raise ProcessError("required secret names exceed Release Contract runtime env names")
-        source = Path(spec["secretSource"]["sourcePath"])
-        try:
-            metadata = source.lstat()
-        except OSError as error:
-            raise ProcessError("external secret source is unavailable") from error
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-            raise ProcessError("external secret source must be a regular file")
-        if metadata.st_uid != self.secret_owner_uid or stat.S_IMODE(metadata.st_mode) not in (0o400, 0o600):
-            raise ProcessError("external secret source ownership or permissions are unsafe")
-        try:
-            document = json.loads(source.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ProcessError("external secret source is invalid") from error
-        if not isinstance(document, dict) or any(name not in document or not isinstance(document[name], str) or not document[name] for name in required):
-            raise ProcessError("external secret source is missing required names")
-        runtime_env = {name: document[name] for name in required}
+        runtime_env, sensitive = self._load_secret_document({"sourcePath": spec["secretSource"]["sourcePath"], "requiredNames": required})
+        non_secret = {item["name"]: item["value"] for item in spec["nonSecretValues"]}
+        sources = (set(runtime_env), set(non_secret), set(spec["binding"]))
+        if any(sources[i] & sources[j] for i in range(3) for j in range(i + 1, 3)): raise ProcessError("runtime environment sources overlap")
+        runtime_env.update(non_secret)
         runtime_env.update({key: str(value) for key, value in spec["binding"].items()})
-        if not set(runtime_env).issubset(allowed):
-            raise ProcessError("runtime environment exceeds Release Contract allowlist")
-        return runtime_env, [document[name] for name in required]
+        if set(runtime_env) != allowed: raise ProcessError("runtime environment sources are incomplete or undeclared")
+        return runtime_env, sensitive
 
     def start_candidate(self, spec: dict[str, Any]) -> AdapterHandle:
         runtime_env, sensitive = self._runtime_environment(spec)
@@ -459,6 +602,10 @@ class PM2ProcessAdapter:
             "RELEASE_MANAGER_LAUNCH_TOKEN": launch_token,
             "RELEASE_MANAGER_OWNED_HOST": str(spec["listener"]["host"]),
             "RELEASE_MANAGER_OWNED_PORT": str(spec["listener"]["port"]),
+            "RELEASE_MANAGER_BUILD_CONFIG_DIGEST": spec["configurationDigests"]["build"],
+            "RELEASE_MANAGER_RUNTIME_CONFIG_DIGEST": spec["configurationDigests"]["runtime"],
+            "RELEASE_MANAGER_RELEASE_CONTRACT_DIGEST": spec["configurationDigests"]["releaseContract"],
+            "RELEASE_MANAGER_ENVIRONMENT_POLICY_DIGEST": spec["configurationDigests"]["environmentPolicy"],
         })
         response = self._bridge({
             "action": "start",
@@ -479,6 +626,7 @@ class PM2ProcessAdapter:
             "listener": {"host": str(spec["listener"]["host"]), "port": int(spec["listener"]["port"])},
             "startSpec": copy.deepcopy(spec),
             "health": copy.deepcopy(spec.get("health")),
+            "configurationDigests": copy.deepcopy(spec["configurationDigests"]),
         }
         handle = self._handle_from_observation(
             observed,
@@ -508,7 +656,8 @@ class PM2ProcessAdapter:
         if len(matches) != 1:
             raise ProcessError("PM2 process cannot be attested exactly")
         observed = matches[0]
-        self._assert_observation(observed, expected, require_live=True)
+        sidecar = self._sidecars.get(handle.record["provenance"]["adapterReceipt"], {})
+        self._assert_observation(observed, expected, require_live=True, compare_ownership=not bool(sidecar.get("legacyDescriptor")))
         evidence = observed["evidence"]
         if handle.record["releaseSha"] != expected_sha:
             raise ProcessError("runtime release SHA mismatch")
@@ -543,6 +692,15 @@ class PM2ProcessAdapter:
     def restore(self, handle: AdapterHandle) -> AdapterHandle:
         self.assert_handle(handle)
         sidecar = self._sidecars.get(handle.record["provenance"]["adapterReceipt"])
+        if sidecar and sidecar.get("legacyDescriptor"):
+            descriptor = sidecar["legacyDescriptor"]
+            if sidecar.get("legacyDescriptorDigest") != self._descriptor_digest(descriptor): raise ProcessError("legacy restore descriptor digest mismatch")
+            self._validate_legacy_paths(descriptor)
+            env = self._legacy_environment(descriptor, descriptor["listener"]["port"])
+            token = str(uuid.uuid4())
+            env.update({"RELEASE_MANAGER_ENVIRONMENT_ID": descriptor["metadata"]["environmentId"], "RELEASE_MANAGER_SERVICE_ID": descriptor["metadata"]["serviceId"], "RELEASE_MANAGER_RELEASE_SHA": descriptor["authority"]["releaseSha"], "RELEASE_MANAGER_LAUNCH_TOKEN": token, "RELEASE_MANAGER_OWNED_HOST": descriptor["listener"]["host"], "RELEASE_MANAGER_OWNED_PORT": str(descriptor["listener"]["port"])})
+            observed = self._bridge({"action": "start", "app": {"name": descriptor["authority"]["stableName"], "namespace": descriptor["authority"]["namespace"], "script": descriptor["launcher"]["executable"], "args": descriptor["launcher"]["args"], "cwd": descriptor["launcher"]["cwd"], "env": env}})["record"]
+            return self._handle_from_observation(observed, environment_id=descriptor["metadata"]["environmentId"], service_id=descriptor["metadata"]["serviceId"], release_sha=descriptor["authority"]["releaseSha"], origin="started", observed_at=self._now(), sidecar={"stableName": descriptor["authority"]["stableName"], "listener": descriptor["listener"], "legacyDescriptor": copy.deepcopy(descriptor), "legacyDescriptorDigest": self._descriptor_digest(descriptor), "health": descriptor["health"]})
         if not sidecar or not sidecar.get("startSpec"):
             raise ProcessError("exact restore descriptor is unavailable")
         return self.start_candidate(copy.deepcopy(sidecar["startSpec"]))

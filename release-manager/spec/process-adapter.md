@@ -16,7 +16,8 @@ export type ProcessHandle = Readonly<PersistedProcessHandle> & {
 export interface ProcessAdapter {
   inventory(service: ServiceIdentity): Promise<ProcessInventory>;
   validatePolicy(policy: ProcessPolicy): Promise<void>;
-  observeLegacy(spec: LegacyObservationSpec): Promise<ProcessHandle>;
+  preflightLegacyRestore(descriptor: LegacyRestoreDescriptor): Promise<ProbeEvidence>;
+  observeLegacy(descriptor: LegacyRestoreDescriptor): Promise<ProcessHandle>;
   assertReplaceable(current: ProcessHandle, candidate: RuntimeSpec): Promise<void>;
   stopExact(handle: ProcessHandle): Promise<void>;
   deleteExact(handle: ProcessHandle): Promise<void>;
@@ -47,6 +48,8 @@ Name and namespace are selectors. Neither is authority on its own.
 
 The State Store wraps an attested handle in a restorable runtime-authority record with its introducing generation. `previous` is canonical rollback authority only through that record. A filesystem symlink cannot substitute for it. Before the first managed commit, the adapter-observed legacy handle is the only restore authority and canonical `previous` is absent.
 
+Candidate handles attest canonical digests of the complete Release Contract and Environment Policy, plus narrower typed build and runtime configuration digests. The complete document digests bind the repository semantics that interpret policy values, including runtime invocation, environment classification, listener bindings, and artifact/runtime fields. Bootstrap legacy handles carry only the digest of a separately loaded, permission-checked `LegacyRestoreDescriptor`; descriptor contents and secret values never enter the ProcessHandle or State Store. Re-observation after adapter restart requires the exact external descriptor and a fresh live PM2 plus `/proc` identity match. A managed persisted handle is rejected when its live or persisted contract/policy digest context differs from its State Store authority.
+
 ## Fail-closed requirements
 
 - Unknown fields in policy/contract/state fail schema validation.
@@ -55,6 +58,9 @@ The State Store wraps an attested handle in a restorable runtime-authority recor
 - Broad delete, force start, and name-only deletion are forbidden.
 - The adapter persists supervisor state only after the engine requests it with an attested handle.
 - Restore failure returns evidence and enters engine-owned `RECOVERY_REQUIRED`; the adapter does not pick another target.
+- Every candidate runtime environment name has exactly one typed source: non-secret policy value, host/port binding, or required external secret. Missing, duplicate, phase-mismatched, and undeclared sources fail before mutation.
+- The `SECRET_LIKE` name check is defense-in-depth only. Policy authors must classify every value by its actual provenance and sensitivity; an innocuous variable name never makes secret material safe for `build.values` or `runtime.values`.
+- First adoption requires an isolated executable probe of the exact external Legacy Restore Descriptor before the live legacy handle can be removed.
 
 ## PM2 v1 implementation constraints
 

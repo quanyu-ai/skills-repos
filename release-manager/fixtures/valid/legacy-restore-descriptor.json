@@ -1,0 +1,40 @@
+{
+  "apiVersion": "quanyu.ai/legacy-restore-descriptor/v1alpha1",
+  "kind": "LegacyRestoreDescriptor",
+  "metadata": { "environmentId": "example-demo", "serviceId": "example-web" },
+  "authority": {
+    "releaseSha": "ffffffffffffffffffffffffffffffffffffffff",
+    "releasePath": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff",
+    "namespace": "release-manager-demo",
+    "stableName": "demo-example-app",
+    "adapterId": "41",
+    "pid": 4241,
+    "processStartId": "boot-id:12345"
+  },
+  "launcher": {
+    "executable": "/var/lib/example/tools/legacy-bootstrap-start.cjs",
+    "args": [],
+    "cwd": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff/apps/web"
+  },
+  "wrapper": {
+    "executable": "/var/lib/example/legacy/ffffffffffffffffffffffffffffffffffffffff/apps/web/node_modules/next/dist/bin/next",
+    "args": ["start"],
+    "host": "127.0.0.1",
+    "internalPort": 3104,
+    "requiredSecretNames": ["DATABASE_URL", "JWT_ACCESS_SECRET"],
+    "requiredSecretNamesFormat": "json-array",
+    "runtimeSecretFile": "/var/lib/example/secrets/example-app/demo.json",
+    "nonSecretValues": [
+      { "name": "NODE_ENV", "value": "production" },
+      { "name": "NEXT_DIST_DIR", "value": ".next-demo" }
+    ]
+  },
+  "secrets": {
+    "provider": "external-json-file",
+    "sourcePath": "/var/lib/example/secrets/example-app/demo.json",
+    "requiredNames": ["DATABASE_URL", "JWT_ACCESS_SECRET"]
+  },
+  "listener": { "host": "127.0.0.1", "port": 3104 },
+  "probe": { "host": "127.0.0.1", "port": 3114 },
+  "health": { "path": "/api/health", "acceptedStatusClasses": [2], "attempts": 20, "intervalMs": 200 }
+}

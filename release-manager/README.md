@@ -34,13 +34,15 @@ Runtime `cwd` and `executable` are always repository/release-root-relative. `art
 
 The build request cannot provide executable lookup precedence. The engine receives a separately configured trusted path list and always replaces request `PATH` with that deterministic value. PM2 IPC variables and undeclared environment values are excluded.
 
-An approval-gated migration handoff uses a typed `MigrationApprovalReceipt`, not a boolean. It binds the approval to the target SHA, contract and policy digests, environment/service identity, waiting attempt, State Store generation, gate identity, and approval time. Only a digest and non-secret event evidence enter persisted release state; the engine still executes no database action.
+An approval-gated migration handoff uses a typed `MigrationApprovalReceipt`, not a boolean. It binds the approval to the target SHA, the same canonical full-document Release Contract and Environment Policy digests used by candidate/runtime attestation, environment/service identity, waiting attempt, State Store generation, gate identity, and approval time. Only a receipt digest and non-secret event evidence enter persisted release state; the engine still executes no database action.
 
 Interrupted recovery inventories the adapter scope before deciding authority. A uniquely identified uncommitted candidate is removed, then the exact persisted current or legacy handle is re-attested or restored. Ambiguous or unexpected inventory fails closed.
 
 The included Fake Adapter models process identity, runtime attestation, secret-name availability, ambiguity, replacement, persistence, and deterministic failures without invoking PM2 or mutating operating-system processes.
 
 ENV-1b-c adds a PM2 ProcessAdapter behind the same interface. It uses PM2's programmatic API with explicit process objects, derives handles from PM2 plus Linux `/proc` evidence, resolves external secrets by required names, performs scoped fail-closed inventory checks, proves exact absence, attests internal/public health, reconstructs validated restore descriptors, and persists PM2 state only after attestation. Its tests use only temporary `PM2_HOME` directories, disposable processes and dynamic non-business ports; no application environment is configured or contacted.
+
+ENV-1b-e2a adds phase-owned non-secret configuration and a bootstrap-only `LegacyRestoreDescriptor`. Repository contracts classify allowed build/runtime names; external policy supplies literal non-secret values; cross-document validation requires runtime sources to be complete and disjoint from secret and listener bindings. Canonical full-document Release Contract and Environment Policy digests, together with narrower build/runtime digests, are attested from candidate creation through runtime and persisted state. The `SECRET_LIKE` name check is defense-in-depth only: policy authors remain responsible for classifying values by provenance and sensitivity, and secret values must never enter the typed non-secret channels. First adoption loads its legacy descriptor from a restricted external file, validates exact authority and paths, and proves restoration on an isolated port before live mutation. Descriptor contents and secret values do not enter ProcessHandle or State Store evidence.
 
 ## Frozen deploy-app boundary
 

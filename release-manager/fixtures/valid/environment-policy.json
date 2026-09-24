@@ -1,7 +1,11 @@
 {
   "apiVersion": "quanyu.ai/environment-policy/v1alpha1",
   "kind": "EnvironmentPolicy",
-  "metadata": { "environmentId": "example-demo", "serviceId": "example-web", "application": "example-app" },
+  "metadata": {
+    "environmentId": "example-demo",
+    "serviceId": "example-web",
+    "application": "example-app"
+  },
   "storage": {
     "releaseRoot": "/var/lib/example/releases/example-app",
     "stateRoot": "/var/lib/example/release-state/example-app",
@@ -13,12 +17,45 @@
     "stableName": "demo-example-app",
     "replacement": "stop-absent-start-attest"
   },
-  "network": { "internalHost": "127.0.0.1", "internalPort": 3104, "publicBaseUrl": "https://demo.example.invalid" },
+  "network": {
+    "internalHost": "127.0.0.1",
+    "internalPort": 3104,
+    "publicBaseUrl": "https://demo.example.invalid"
+  },
   "secrets": {
     "provider": "external-json-file",
     "sourcePath": "/var/lib/example/secrets/example-app/demo.json",
-    "requiredNames": ["DATABASE_URL", "JWT_ACCESS_SECRET"]
+    "requiredNames": [
+      "DATABASE_URL",
+      "JWT_ACCESS_SECRET"
+    ]
   },
-  "health": { "attempts": 20, "intervalMs": 2000 },
-  "retention": { "verifiedReleases": 3, "failedAttempts": 5 }
+  "health": {
+    "attempts": 20,
+    "intervalMs": 2000
+  },
+  "retention": {
+    "verifiedReleases": 3,
+    "failedAttempts": 5
+  },
+  "build": {
+    "values": [
+      {
+        "name": "NEXT_DIST_DIR",
+        "value": ".next-demo"
+      }
+    ]
+  },
+  "runtime": {
+    "values": [
+      {
+        "name": "NODE_ENV",
+        "value": "production"
+      },
+      {
+        "name": "NEXT_DIST_DIR",
+        "value": ".next-demo"
+      }
+    ]
+  }
 }

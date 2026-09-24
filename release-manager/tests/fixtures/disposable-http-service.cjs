@@ -12,6 +12,8 @@ if (process.env.TEST_ENV_REPORT) {
     hasNodeChannelFd: Object.hasOwn(process.env, "NODE_CHANNEL_FD"),
     hasNodeUniqueId: Object.hasOwn(process.env, "NODE_UNIQUE_ID"),
     hasAmbientPoison: Object.hasOwn(process.env, "AMBIENT_POISON"),
+    nodeEnv: process.env.NODE_ENV,
+    nextDistDir: process.env.NEXT_DIST_DIR,
   }));
 }
 

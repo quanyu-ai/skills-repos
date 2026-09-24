@@ -6,8 +6,6 @@
   "generation": 2,
   "updatedAt": "2026-09-23T14:00:01Z",
   "status": "managed",
-  "contractDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-  "policyDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "current": {
     "generation": 2,
     "releaseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -16,12 +14,40 @@
     "handle": {
       "apiVersion": "quanyu.ai/process-handle/v1alpha1",
       "kind": "ProcessHandle",
-      "adapter": { "kind": "pm2", "version": "7.0.1", "instanceId": "123e4567-e89b-42d3-a456-426614174000" },
-      "identity": { "environmentId": "example-demo", "serviceId": "example-web", "namespace": "release-manager-demo", "adapterId": "42", "pid": 12345, "processStartId": "linux-proc-start-123456" },
-      "runtime": { "executable": "/var/lib/example/releases/example-app/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/apps/web/node_modules/next/dist/bin/next", "args": ["start"], "cwd": "/var/lib/example/releases/example-app/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/apps/web" },
+      "adapter": {
+        "kind": "pm2",
+        "version": "7.0.1",
+        "instanceId": "123e4567-e89b-42d3-a456-426614174000"
+      },
+      "identity": {
+        "environmentId": "example-demo",
+        "serviceId": "example-web",
+        "namespace": "release-manager-demo",
+        "adapterId": "42",
+        "pid": 12345,
+        "processStartId": "linux-proc-start-123456"
+      },
+      "runtime": {
+        "executable": "/var/lib/example/releases/example-app/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/apps/web/node_modules/next/dist/bin/next",
+        "args": [
+          "start"
+        ],
+        "cwd": "/var/lib/example/releases/example-app/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/apps/web"
+      },
       "releaseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "invocationFingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "provenance": { "origin": "started", "observationId": "123e4567-e89b-42d3-a456-426614174001", "observedAt": "2026-09-23T14:00:00Z", "adapterReceipt": "pm2-start-receipt-42" }
+      "provenance": {
+        "origin": "started",
+        "observationId": "123e4567-e89b-42d3-a456-426614174001",
+        "observedAt": "2026-09-23T14:00:00Z",
+        "adapterReceipt": "pm2-start-receipt-42"
+      },
+      "configurationDigests": {
+        "releaseContract": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "environmentPolicy": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "build": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "runtime": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      }
     },
     "attestation": {
       "attestedAt": "2026-09-23T14:00:01Z",
@@ -38,6 +64,17 @@
     "targetSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "phase": "complete",
     "outcome": "succeeded",
-    "events": [{ "sequence": 1, "at": "2026-09-23T14:00:01Z", "type": "RUNTIME_ATTESTED", "evidenceDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }]
-  }
+    "events": [
+      {
+        "sequence": 1,
+        "at": "2026-09-23T14:00:01Z",
+        "type": "RUNTIME_ATTESTED",
+        "evidenceDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ],
+    "releaseContractDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "environmentPolicyDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "releaseContractDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "environmentPolicyDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 }
