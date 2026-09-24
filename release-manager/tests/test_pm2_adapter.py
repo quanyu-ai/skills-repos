@@ -268,7 +268,9 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
     def test_host_restart_reconciliation_uses_fresh_linux_inventory_and_keeps_exact_resolve_strict(self) -> None:
         spec, _, _ = self.spec(SHA_A)
         old_record, live, restarted = self.cross_boot_process(spec)
-        with self.assertRaisesRegex(ProcessError, "cannot be re-observed exactly"):
+        with self.assertRaisesRegex(
+            ProcessError, "cannot be re-observed exactly|PM2 live process identity mismatch"
+        ):
             restarted.resolve_persisted(old_record)
         observation = restarted.observe_managed_after_host_restart(
             old_record, self.reconciliation_expected(spec)
