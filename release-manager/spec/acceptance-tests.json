@@ -4,7 +4,7 @@
     { "id": "ENV1B-001", "incident": "ambient-package-manager-drift", "assertion": "typed frozen-install resolves exact repository packageManager through Corepack and exposes no arbitrary install executable", "phase": "ENV-1b-b" },
     { "id": "ENV1B-002", "incident": "pm2-ipc-environment-caused-node-exit-134", "assertion": "build and probe environments exclude NODE_CHANNEL_FD and NODE_UNIQUE_ID", "phase": "ENV-1b-b" },
     { "id": "ENV1B-003", "incident": "shared-worktree-not-requested-sha", "assertion": "isolated checkout matches full requested SHA before and after build", "phase": "ENV-1b-b" },
-    { "id": "ENV1B-004", "incident": "missing-generated-prisma-client", "assertion": "declared prepare runs before build and missing output blocks activation", "phase": "ENV-1b-b" },
+    { "id": "ENV1B-004", "incident": "cached-lifecycle-log-without-required-output", "assertion": "a lifecycle cache hit or replayed success log is accepted only when every repository-declared output required by the Release Contract is physically materialized in the fresh candidate; any missing prepare or build artifact blocks activation", "phase": "ENV-1b-b" },
     { "id": "ENV1B-005", "incident": "application-specific-prepare-hard-coded-in-tool", "assertion": "engine invokes only contract actions and has no Prisma-specific branch", "phase": "ENV-1b-b" },
     { "id": "ENV1B-006", "incident": "tracked-next-env-mutation", "assertion": "unlisted mutation fails and listed mutation is restored before clean-tree attestation", "phase": "ENV-1b-b" },
     { "id": "ENV1B-007", "incident": "runtime-secret-injection-omitted", "assertion": "missing required secret name fails and no secret value enters contract or policy evidence", "phase": "ENV-1b-b" },
