@@ -581,7 +581,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         policy["network"].update({
             "internalHost": prior_spec["listener"]["host"],
             "internalPort": prior_spec["listener"]["port"],
-            "publicBaseUrl": f"http://127.0.0.1:{prior_spec['listener']['port']}",
+            "publicBaseUrl": f"http://localhost:{prior_spec['listener']['port']}",
         })
         policy["runtime"]["values"] = copy.deepcopy(prior_spec["nonSecretValues"])
         policy["secrets"].update({

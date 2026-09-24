@@ -779,7 +779,8 @@ class PM2ProcessAdapter:
         return runtime_env, sensitive
 
     def validate_runtime_spec(self, spec: dict[str, Any]) -> None:
-        self._assert_release_containment(spec["releasePath"], spec["runtime"])
+        if "releasePath" in spec:
+            self._assert_release_containment(spec["releasePath"], spec["runtime"])
         self._runtime_environment(spec)
 
     @staticmethod
@@ -820,7 +821,8 @@ class PM2ProcessAdapter:
         }
         if any(observed.get(field) != value for field, value in expected.items()):
             raise ProcessError("raw PM2 candidate does not match pending activation context")
-        self._assert_release_containment(spec["releasePath"], spec["runtime"])
+        if "releasePath" in spec:
+            self._assert_release_containment(spec["releasePath"], spec["runtime"])
         if require_pidless and (observed.get("pid") != 0 or observed.get("evidence") is not None):
             raise ProcessError("raw PM2 orphan unexpectedly has live process evidence")
 
@@ -852,6 +854,8 @@ class PM2ProcessAdapter:
         raise ProcessError("raw PM2 orphan absence proof failed")
 
     def remove_interrupted_candidate(self, spec: dict[str, Any]) -> dict[str, Any]:
+        if "releasePath" not in spec:
+            raise ProcessError("interrupted activation candidate root is unavailable")
         inventory = self._all_inventory()
         overlaps = [item for item in inventory if self._overlaps(item, spec)]
         exact = []
