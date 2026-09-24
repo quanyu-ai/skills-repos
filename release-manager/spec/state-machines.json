@@ -69,6 +69,18 @@
         ["ORIGINAL_RESTORED", "ADAPTER_PERSISTED", "ROLLBACK_FAILED"],
         ["RESTORING_ORIGINAL", "RESTORE_FAILED", "RECOVERY_REQUIRED"]
       ]
+    },
+    "host-restart-reconciliation": {
+      "initial": "MANAGED",
+      "terminal": ["RECONCILED", "RECONCILIATION_NOT_REQUIRED"],
+      "transitions": [
+        ["MANAGED", "DURABLE_AUTHORITY_ATTESTED", "DURABLE_AUTHORITY_ATTESTED"],
+        ["DURABLE_AUTHORITY_ATTESTED", "EXACT_IDENTITY_CURRENT", "RECONCILIATION_NOT_REQUIRED"],
+        ["DURABLE_AUTHORITY_ATTESTED", "HOST_REBOOT_PROVED", "HOST_REBOOT_PROVED"],
+        ["HOST_REBOOT_PROVED", "RUNTIME_HEALTH_ATTESTED", "RUNTIME_ATTESTED"],
+        ["RUNTIME_ATTESTED", "STATE_COMMITTED", "RECONCILED"]
+      ],
+      "processMutationAllowed": false
     }
   },
   "invariants": [
@@ -80,6 +92,7 @@
     "failed-candidate-never-current-previous-or-persisted-authority",
     "persist-only-after-runtime-and-health-attestation",
     "unknown-process-inventory-fails-closed",
-    "migration-approval-gated-stops-before-activation"
+    "migration-approval-gated-stops-before-activation",
+    "host-restart-reconciliation-never-mutates-process-or-persists-supervisor"
   ]
 }

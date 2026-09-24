@@ -138,6 +138,39 @@ class EngineTest(unittest.TestCase):
         state = engine.adopt(self.request(SHA_A), self.legacy_spec())
         return state, engine, source, runner, adapter, store
 
+    def simulate_host_restart(self, state: dict, boot_id: str = "22222222-2222-4222-8222-222222222222") -> dict:
+        old_id = state["current"]["handle"]["identity"]["adapterId"]
+        item = self.runtime.records.pop(old_id)
+        self.runtime.current_boot_id = boot_id
+        new_id = str(self.runtime.next_id)
+        self.runtime.next_id += 1
+        live = copy.deepcopy(item["record"])
+        live["identity"].update({
+            "adapterId": new_id,
+            "pid": 10000 + int(new_id),
+            "processStartId": f"{boot_id}:{1000 + int(new_id)}",
+        })
+        live["provenance"] = {
+            "origin": "started",
+            "observationId": self.ids(),
+            "observedAt": "2026-09-23T15:00:00Z",
+            "adapterReceipt": f"fake-resurrected-receipt-{new_id}",
+        }
+        self.runtime.known_receipts.add(live["provenance"]["adapterReceipt"])
+        replacement = copy.deepcopy(item)
+        replacement["record"] = live
+        self.runtime.records[new_id] = replacement
+        return replacement
+
+    def reconcile_a(self):
+        state, *_ = self.adopt_a()
+        live = self.simulate_host_restart(state)
+        engine, _, _, adapter, store = self.components(SHA_A)
+        result = engine.reconcile_managed_authority(
+            self.request(SHA_A), expected_generation=state["generation"]
+        )
+        return state, live, result, engine, adapter, store
+
     def test_schema_validation_precedes_source_acquisition(self) -> None:
         engine, source, *_ = self.components(SHA_A)
         request = self.request(SHA_A)
@@ -145,6 +178,170 @@ class EngineTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             engine.build_candidate(request)
         self.assertEqual(0, source.acquisitions)
+
+    def test_host_restart_reconciliation_commits_one_generation_and_typed_receipt(self) -> None:
+        state, _, result, engine, adapter, store = self.reconcile_a()
+        self.assertEqual("reconciled", result.status)
+        reconciled = result.state
+        self.assertEqual(state["generation"] + 1, reconciled["generation"])
+        self.assertEqual(state["current"]["releaseSha"], reconciled["current"]["releaseSha"])
+        self.assertEqual(state["current"]["releasePath"], reconciled["current"]["releasePath"])
+        self.assertEqual(state["attempt"], reconciled["attempt"])
+        reconciliation_events = adapter.runtime.events[
+            adapter.runtime.events.index("observe-managed-after-host-restart"):
+        ]
+        self.assertEqual(["observe-managed-after-host-restart", "attest"], reconciliation_events)
+        receipt = result.receipt
+        self.assertIsNotNone(receipt)
+        assert receipt is not None
+        self.assertEqual("host-restart", receipt["reason"])
+        self.assertEqual(state["generation"], receipt["priorGeneration"])
+        self.assertEqual(reconciled["generation"], receipt["newGeneration"])
+        self.assertEqual(engine._digest(state["current"]["handle"]), receipt["oldHandleDigest"])
+        self.assertEqual(engine._digest(reconciled["current"]["handle"]), receipt["newHandleDigest"])
+        payload = copy.deepcopy(receipt)
+        digest = payload.pop("receiptDigest")
+        self.assertEqual(engine._digest(payload), digest)
+        self.assertEqual(reconciled, store.load())
+
+    def test_host_restart_reconciliation_is_idempotent(self) -> None:
+        _, _, first, engine, adapter, store = self.reconcile_a()
+        event_count = len(adapter.runtime.events)
+        second = engine.reconcile_managed_authority(
+            self.request(SHA_A), expected_generation=first.state["generation"]
+        )
+        self.assertEqual("reconciliation-not-required", second.status)
+        self.assertIsNone(second.receipt)
+        self.assertEqual(first.state, second.state)
+        self.assertEqual(first.state, store.load())
+        self.assertNotIn("persist", adapter.runtime.events[event_count:])
+
+    def test_same_boot_identity_change_is_rejected(self) -> None:
+        state, *_ = self.adopt_a()
+        self.simulate_host_restart(state, self.runtime.current_boot_id)
+        engine, _, _, _, store = self.components(SHA_A)
+        with self.assertRaisesRegex(ProcessError, "same-boot"):
+            engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+        self.assertEqual(state, store.load())
+
+    def test_reconciliation_rejects_malformed_persisted_boot_evidence(self) -> None:
+        state, *_ = self.adopt_a()
+        state["current"]["handle"]["identity"]["processStartId"] = "pid-only-123"
+        store = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock")
+        store.state_file.write_text(json.dumps(state), encoding="utf-8")
+        self.simulate_host_restart(state)
+        engine, _, _, _, _ = self.components(SHA_A)
+        with self.assertRaisesRegex(ProcessError, "Linux boot evidence"):
+            engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+
+    def test_reconciliation_rejects_durable_authority_mismatches(self) -> None:
+        state, *_ = self.adopt_a()
+        item = self.simulate_host_restart(state)
+        engine, _, _, _, store = self.components(SHA_A)
+        mutations = (
+            ("release SHA", lambda: item["record"].__setitem__("releaseSha", SHA_B), lambda: item["record"].__setitem__("releaseSha", SHA_A)),
+            ("runtime executable", lambda: item["record"]["runtime"].__setitem__("executable", "/tmp/other"), lambda: item["record"]["runtime"].__setitem__("executable", state["current"]["handle"]["runtime"]["executable"])),
+            ("runtime args", lambda: item["record"]["runtime"].__setitem__("args", ["other"]), lambda: item["record"]["runtime"].__setitem__("args", state["current"]["handle"]["runtime"]["args"])),
+            ("runtime cwd", lambda: item["record"]["runtime"].__setitem__("cwd", "/tmp"), lambda: item["record"]["runtime"].__setitem__("cwd", state["current"]["handle"]["runtime"]["cwd"])),
+            ("stable identity", lambda: item.__setitem__("stableName", "other-service"), lambda: item.__setitem__("stableName", self.policy["process"]["stableName"])),
+            ("release path", lambda: item.__setitem__("releasePath", "/tmp/other"), lambda: item.__setitem__("releasePath", state["current"]["releasePath"])),
+            ("listener", lambda: item.__setitem__("listener", {"host": "127.0.0.1", "port": 65530}), lambda: item.__setitem__("listener", {"host": self.policy["network"]["internalHost"], "port": self.policy["network"]["internalPort"]})),
+        )
+        for label, mutate, restore in mutations:
+            with self.subTest(field=label):
+                mutate()
+                with self.assertRaises(ProcessError):
+                    engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+                restore()
+                self.assertEqual(state, store.load())
+
+    def test_reconciliation_rejects_each_configuration_digest_mismatch(self) -> None:
+        state, *_ = self.adopt_a()
+        item = self.simulate_host_restart(state)
+        engine, _, _, _, store = self.components(SHA_A)
+        for name in ("releaseContract", "environmentPolicy", "build", "runtime"):
+            with self.subTest(digest=name):
+                original = item["record"]["configurationDigests"][name]
+                item["record"]["configurationDigests"][name] = "sha256:" + "0" * 64
+                with self.assertRaises(ProcessError):
+                    engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+                item["record"]["configurationDigests"][name] = original
+                self.assertEqual(state, store.load())
+
+    def test_reconciliation_rejects_multiple_process_health_failure_and_stale_generation(self) -> None:
+        state, *_ = self.adopt_a()
+        item = self.simulate_host_restart(state)
+        engine, _, _, adapter, store = self.components(SHA_A)
+        duplicate = copy.deepcopy(item)
+        duplicate["record"]["identity"].update({"adapterId": "999", "pid": 10999, "processStartId": f"{self.runtime.current_boot_id}:9999"})
+        self.runtime.records["999"] = duplicate
+        with self.assertRaisesRegex(ProcessError, "exactly one"):
+            engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+        self.runtime.records.pop("999")
+        adapter.runtime.fail_attestation_for_sha = SHA_A
+        with self.assertRaisesRegex(ProcessError, "health"):
+            engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+        adapter.runtime.fail_attestation_for_sha = None
+        events = list(adapter.runtime.events)
+        with self.assertRaisesRegex(StateError, "stale reconciliation generation"):
+            engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"] - 1)
+        self.assertEqual(events, adapter.runtime.events)
+        self.assertEqual(state, store.load())
+
+    def test_reconciliation_rejects_unscoped_overlapping_listener_owner(self) -> None:
+        state, *_ = self.adopt_a()
+        item = self.simulate_host_restart(state)
+        engine, _, _, _, store = self.components(SHA_A)
+        residual = copy.deepcopy(item)
+        residual["record"]["identity"].update({
+            "environmentId": "other-demo",
+            "serviceId": "other-web",
+            "adapterId": "999",
+            "pid": 10999,
+            "processStartId": f"{self.runtime.current_boot_id}:9999",
+        })
+        self.runtime.records["999"] = residual
+        with self.assertRaisesRegex(ProcessError, "overlapping"):
+            engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+        self.assertEqual(state, store.load())
+
+    def test_reconciliation_preserves_previous_and_attempt(self) -> None:
+        self.adopt_a()
+        engine_b, *_ = self.components(SHA_B)
+        state = engine_b.activate(self.request(SHA_B))
+        previous = copy.deepcopy(state["previous"])
+        attempt = copy.deepcopy(state["attempt"])
+        self.simulate_host_restart(state)
+        engine, _, _, _, _ = self.components(SHA_B)
+        result = engine.reconcile_managed_authority(self.request(SHA_B), expected_generation=state["generation"])
+        self.assertEqual(previous, result.state["previous"])
+        self.assertEqual(attempt, result.state["attempt"])
+
+    def test_reconciliation_atomic_fault_preserves_old_valid_state(self) -> None:
+        state, *_ = self.adopt_a()
+        self.simulate_host_restart(state)
+        engine, _, _, _, _ = self.components(SHA_A)
+        def fault(point: str) -> None:
+            if point == "after-temp-fsync":
+                raise RuntimeError("injected reconciliation crash")
+        engine.store = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock", fault)
+        with self.assertRaisesRegex(RuntimeError, "injected reconciliation crash"):
+            engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+        self.assertEqual(state, AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock").load())
+
+    def test_reconciliation_atomic_fault_after_replace_leaves_complete_new_state(self) -> None:
+        state, *_ = self.adopt_a()
+        self.simulate_host_restart(state)
+        engine, _, _, _, _ = self.components(SHA_A)
+        def fault(point: str) -> None:
+            if point == "after-replace":
+                raise RuntimeError("injected post-replace crash")
+        engine.store = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock", fault)
+        with self.assertRaisesRegex(RuntimeError, "injected post-replace crash"):
+            engine.reconcile_managed_authority(self.request(SHA_A), expected_generation=state["generation"])
+        persisted = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock").load()
+        self.assertEqual(state["generation"] + 1, persisted["generation"])
+        self.assertEqual("host-restart", persisted["reconciliations"][-1]["reason"])
 
     def test_exact_sha_attestation_fails_before_install(self) -> None:
         engine, _, runner, *_ = self.components(SHA_A, reported_sha=SHA_B)

@@ -27,6 +27,10 @@ The executable transition table is [`state-machines.json`](./state-machines.json
 - A failed attempt target cannot become `current` or `previous`.
 - Filesystem symlinks are derived compatibility outputs, never canonical authority.
 - Only the engine writes the State Store. Adapters return evidence and receipts.
+- Host-restart reconciliation is the sole path that may replace volatile
+  ProcessHandle identity without a deployment. It requires a proven Linux boot
+  boundary, exact durable authority and health, commits one N+1 generation with
+  a typed receipt, preserves `previous` and `attempt`, and does not persist PM2.
 
 ## Database gate
 

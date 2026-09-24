@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .errors import ProcessError
-from .ports import AdapterHandle, invocation_fingerprint
+from .ports import AdapterHandle, ManagedReconciliationObservation, invocation_fingerprint
+
+
+BOOT_A = "11111111-1111-4111-8111-111111111111"
 
 
 @dataclass
@@ -22,6 +25,7 @@ class FakeProcessRuntime:
     available_secret_names: set[str] = field(default_factory=set)
     started_specs: list[dict[str, Any]] = field(default_factory=list)
     legacy_descriptors: dict[str, dict[str, Any]] = field(default_factory=dict)
+    current_boot_id: str = BOOT_A
 
 
 class FakeProcessAdapter:
@@ -49,7 +53,7 @@ class FakeProcessAdapter:
                 "namespace": spec["namespace"],
                 "adapterId": adapter_id,
                 "pid": 10000 + int(adapter_id),
-                "processStartId": f"fake-start-{adapter_id}",
+                "processStartId": f"{self.runtime.current_boot_id}:{1000 + int(adapter_id)}",
             },
             "runtime": runtime,
             "releaseSha": spec["releaseSha"],
@@ -64,7 +68,13 @@ class FakeProcessAdapter:
         if spec.get("configurationDigests"):
             record["configurationDigests"] = copy.deepcopy(spec["configurationDigests"])
         self.runtime.known_receipts.add(receipt)
-        self.runtime.records[adapter_id] = {"record": record, "status": "online"}
+        self.runtime.records[adapter_id] = {
+            "record": record,
+            "status": "online",
+            "stableName": spec.get("stableName"),
+            "releasePath": spec.get("releasePath"),
+            "listener": copy.deepcopy(spec.get("listener")),
+        }
         return AdapterHandle(copy.deepcopy(record), self.issuer)
 
     def assert_handle(self, handle: AdapterHandle) -> None:
@@ -137,6 +147,101 @@ class FakeProcessAdapter:
             raise ProcessError("persisted runtime configuration digest context mismatch")
         self.runtime.events.append("resolve-persisted")
         return AdapterHandle(copy.deepcopy(record), self.issuer)
+
+    @staticmethod
+    def _boot_id(process_start_id: str) -> str:
+        try:
+            boot_id, ticks = process_start_id.rsplit(":", 1)
+            uuid.UUID(boot_id)
+            if int(ticks) <= 0:
+                raise ValueError
+        except (AttributeError, ValueError) as error:
+            raise ProcessError("processStartId does not contain valid Linux boot evidence") from error
+        return boot_id
+
+    def observe_managed_after_host_restart(
+        self, record: dict[str, Any], expected: dict[str, Any]
+    ) -> ManagedReconciliationObservation:
+        try:
+            identity = record["identity"]
+            adapter = record["adapter"]
+            runtime = record["runtime"]
+        except (KeyError, TypeError) as error:
+            raise ProcessError("persisted ProcessHandle is structurally incomplete") from error
+        if adapter != {"kind": "fake", "version": self.version, "instanceId": self.instance_id}:
+            raise ProcessError("persisted ProcessHandle adapter identity mismatch")
+        if record.get("invocationFingerprint") != invocation_fingerprint(runtime["executable"], runtime["args"], runtime["cwd"]):
+            raise ProcessError("persisted ProcessHandle runtime fingerprint mismatch")
+        old_boot_id = self._boot_id(identity["processStartId"])
+        current_boot_id = self.runtime.current_boot_id
+        try:
+            uuid.UUID(current_boot_id)
+        except (AttributeError, ValueError) as error:
+            raise ProcessError("current Linux boot identity is unavailable") from error
+        scoped = [
+            item for item in self.runtime.records.values()
+            if item["record"]["identity"]["environmentId"] == expected["environmentId"]
+            and item["record"]["identity"]["serviceId"] == expected["serviceId"]
+            and item["record"]["identity"]["namespace"] == expected["namespace"]
+        ]
+        if self.runtime.ambiguous_inventory or len(scoped) != 1 or scoped[0]["status"] != "online":
+            raise ProcessError("managed reconciliation requires exactly one scoped live process")
+        item = scoped[0]
+        live = item["record"]
+        overlapping = [
+            other for other in self.runtime.records.values()
+            if other is not item and (
+                (
+                    other.get("stableName") == expected["stableName"]
+                    and other["record"]["identity"]["namespace"] == expected["namespace"]
+                )
+                or other["record"]["runtime"]["executable"] == expected["runtime"]["executable"]
+                or other["record"]["runtime"]["cwd"] == expected["runtime"]["cwd"]
+                or other.get("listener") == expected["listener"]
+            )
+        ]
+        if overlapping:
+            raise ProcessError("unexpected overlapping process inventory blocks reconciliation")
+        live_boot_id = self._boot_id(live["identity"]["processStartId"])
+        if live_boot_id != current_boot_id:
+            raise ProcessError("live process boot identity does not match current host boot")
+        durable_pairs = (
+            (identity["environmentId"], expected["environmentId"]),
+            (identity["serviceId"], expected["serviceId"]),
+            (identity["namespace"], expected["namespace"]),
+            (record["releaseSha"], expected["releaseSha"]),
+            (record["runtime"], expected["runtime"]),
+            (record.get("configurationDigests"), expected["configurationDigests"]),
+            (live["releaseSha"], expected["releaseSha"]),
+            (live["runtime"], expected["runtime"]),
+            (live.get("configurationDigests"), expected["configurationDigests"]),
+            (item.get("stableName"), expected["stableName"]),
+            (item.get("releasePath"), expected["releasePath"]),
+            (item.get("listener"), expected["listener"]),
+        )
+        if any(actual != wanted for actual, wanted in durable_pairs):
+            raise ProcessError("managed reconciliation durable authority mismatch")
+        same_identity = all(
+            live["identity"][name] == identity[name]
+            for name in ("adapterId", "pid", "processStartId")
+        )
+        if not same_identity and old_boot_id == current_boot_id:
+            raise ProcessError("same-boot process identity change cannot be reconciled")
+        if not same_identity and old_boot_id == live_boot_id:
+            raise ProcessError("host reboot boundary is not proven")
+        fresh = copy.deepcopy(live)
+        fresh["provenance"] = {
+            "origin": "observed",
+            "observationId": str(uuid.uuid4()),
+            "observedAt": expected["observedAt"],
+            "adapterReceipt": f"fake-reconciled-receipt-{live['identity']['adapterId']}-{uuid.uuid4()}",
+        }
+        self.runtime.known_receipts.add(fresh["provenance"]["adapterReceipt"])
+        self.runtime.events.append("observe-managed-after-host-restart")
+        return ManagedReconciliationObservation(
+            AdapterHandle(fresh, self.issuer), not same_identity, old_boot_id, current_boot_id,
+            copy.deepcopy(expected["listener"]),
+        )
 
     def assert_replaceable(self, current: AdapterHandle, candidate: dict[str, Any]) -> None:
         self.assert_handle(current)

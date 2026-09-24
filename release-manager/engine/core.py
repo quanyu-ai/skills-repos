@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from .contracts import canonical_document_digest, compose_health_targets, validate_contract_and_policy, validate_legacy_restore_descriptor
 from .errors import ArtifactError, ContractError, ProcessError, ReleaseError, StateError, ToolchainError
-from .ports import AdapterHandle, LifecycleRunner, ProcessAdapter, SourceProvider
+from .ports import AdapterHandle, LifecycleRunner, ProcessAdapter, SourceProvider, invocation_fingerprint
 from .state_machine import StateMachine
 from .state_store import AtomicStateStore
 
@@ -59,6 +59,13 @@ class Candidate:
     environment_policy_digest: str
     build_config_digest: str
     runtime_config_digest: str
+
+
+@dataclass(frozen=True)
+class ManagedReconciliationResult:
+    status: str
+    state: dict[str, Any]
+    receipt: dict[str, Any] | None
 
 
 class ReleaseEngine:
@@ -319,10 +326,19 @@ class ReleaseEngine:
             },
         }
 
-    def _authority(self, handle: AdapterHandle, release_path: str, generation: int) -> dict[str, Any]:
+    def _authority(
+        self,
+        handle: AdapterHandle,
+        release_path: str,
+        generation: int,
+        runtime_attestation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self.adapter.assert_handle(handle)
         sha = handle.record["releaseSha"]
-        evidence = self._digest({"handle": handle.record, "generation": generation})
+        evidence_payload: dict[str, Any] = {"handle": handle.record, "generation": generation}
+        if runtime_attestation is not None:
+            evidence_payload["runtimeAttestation"] = runtime_attestation
+        evidence = self._digest(evidence_payload)
         return {
             "generation": generation,
             "releaseSha": sha,
@@ -338,6 +354,139 @@ class ReleaseEngine:
                 "evidenceDigest": evidence,
             },
         }
+
+    def _managed_reconciliation_context(
+        self, request: ReleaseRequest, state: dict[str, Any]
+    ) -> dict[str, Any]:
+        current = state["current"]
+        if request.target_sha != current["releaseSha"]:
+            raise ContractError("reconciliation target SHA must equal current managed release")
+        context = self._canonical_context(request)
+        if (
+            state.get("releaseContractDigest") != context["releaseContract"]
+            or state.get("environmentPolicyDigest") != context["environmentPolicy"]
+        ):
+            raise ContractError("reconciliation request contract/policy digest context mismatch")
+        configuration_digests = {
+            "releaseContract": context["releaseContract"],
+            "environmentPolicy": context["environmentPolicy"],
+            "build": self._digest(request.policy["build"]),
+            "runtime": self._digest({
+                "runtime": request.policy["runtime"],
+                "network": request.policy["network"],
+                "secrets": request.policy["secrets"],
+            }),
+        }
+        handle = current["handle"]
+        if handle.get("configurationDigests") != configuration_digests:
+            raise ContractError("current managed configuration digest context mismatch")
+        release_path = Path(current["releasePath"])
+        contract_runtime = request.contract["runtime"]
+        runtime = {
+            "executable": str(self._resolve_release_path(release_path, contract_runtime["executable"], "executable")),
+            "args": list(contract_runtime["args"]),
+            "cwd": str(self._resolve_release_path(release_path, contract_runtime["cwd"], "cwd")),
+        }
+        if (
+            current.get("generation") != state["generation"]
+            or handle.get("releaseSha") != current["releaseSha"]
+            or handle.get("runtime") != runtime
+            or handle.get("invocationFingerprint") != invocation_fingerprint(
+                runtime["executable"], runtime["args"], runtime["cwd"]
+            )
+        ):
+            raise ContractError("current managed authority does not match release contract")
+        return {
+            "environmentId": request.policy["metadata"]["environmentId"],
+            "serviceId": request.policy["metadata"]["serviceId"],
+            "namespace": request.policy["process"]["namespace"],
+            "stableName": request.policy["process"]["stableName"],
+            "releaseSha": current["releaseSha"],
+            "releasePath": current["releasePath"],
+            "runtime": runtime,
+            "configurationDigests": configuration_digests,
+            "listener": {
+                "host": request.policy["network"]["internalHost"],
+                "port": request.policy["network"]["internalPort"],
+            },
+            "observedAt": self.now(),
+        }
+
+    def reconcile_managed_authority(
+        self, request: ReleaseRequest, *, expected_generation: int
+    ) -> ManagedReconciliationResult:
+        """Rebind volatile ProcessHandle identity across one proven host reboot."""
+        self._validate_request(request)
+        with self.store.locked():
+            state = self.store.load()
+            if not state or state.get("status") != "managed" or "current" not in state:
+                raise StateError("host-restart reconciliation requires managed current authority")
+            if state["generation"] != expected_generation:
+                raise StateError(
+                    f"stale reconciliation generation: expected {expected_generation}, found {state['generation']}"
+                )
+            expected = self._managed_reconciliation_context(request, state)
+            observation = self.adapter.observe_managed_after_host_restart(
+                state["current"]["handle"], expected
+            )
+            machine = StateMachine("host-restart-reconciliation")
+            self.adapter.assert_handle(observation.handle)
+            fresh = observation.handle.record
+            if (
+                fresh["identity"]["environmentId"] != expected["environmentId"]
+                or fresh["identity"]["serviceId"] != expected["serviceId"]
+                or fresh["identity"]["namespace"] != expected["namespace"]
+                or fresh["releaseSha"] != expected["releaseSha"]
+                or fresh["runtime"] != expected["runtime"]
+                or fresh.get("configurationDigests") != expected["configurationDigests"]
+                or observation.listener != expected["listener"]
+            ):
+                raise ProcessError("fresh ProcessHandle does not match durable managed authority")
+            machine.send("DURABLE_AUTHORITY_ATTESTED", "DURABLE_AUTHORITY_ATTESTED")
+            if observation.reconciliation_required:
+                if observation.old_boot_id == observation.current_boot_id:
+                    raise ProcessError("host reboot boundary is not proven")
+                machine.send("HOST_REBOOT_PROVED", "HOST_REBOOT_PROVED")
+            attestation = self.adapter.attest(
+                observation.handle,
+                expected["releaseSha"],
+                compose_health_targets(request.contract, request.policy),
+            )
+            if not observation.reconciliation_required:
+                machine.send("EXACT_IDENTITY_CURRENT", "RECONCILIATION_NOT_REQUIRED")
+                return ManagedReconciliationResult("reconciliation-not-required", copy.deepcopy(state), None)
+            machine.send("RUNTIME_HEALTH_ATTESTED", "RUNTIME_ATTESTED")
+
+            generation = state["generation"] + 1
+            current = self._authority(
+                observation.handle, state["current"]["releasePath"], generation, attestation
+            )
+            receipt_payload = {
+                "apiVersion": "quanyu.ai/host-restart-reconciliation-receipt/v1alpha1",
+                "kind": "HostRestartReconciliationReceipt",
+                "reason": "host-restart",
+                "priorGeneration": state["generation"],
+                "newGeneration": generation,
+                "releaseSha": state["current"]["releaseSha"],
+                "releasePath": state["current"]["releasePath"],
+                "oldHandleDigest": self._digest(state["current"]["handle"]),
+                "newHandleDigest": self._digest(fresh),
+                "oldBootId": observation.old_boot_id,
+                "currentBootId": observation.current_boot_id,
+                "configurationDigests": copy.deepcopy(expected["configurationDigests"]),
+                "healthResult": "pass",
+                "healthEvidenceDigest": self._digest(attestation),
+                "reconciledAt": self.now(),
+            }
+            receipt = {**receipt_payload, "receiptDigest": self._digest(receipt_payload)}
+            reconciled = copy.deepcopy(state)
+            reconciled["generation"] = generation
+            reconciled["updatedAt"] = self.now()
+            reconciled["current"] = current
+            reconciled.setdefault("reconciliations", []).append(receipt)
+            committed = self.store.commit(state["generation"], reconciled)
+            machine.send("STATE_COMMITTED", "RECONCILED")
+            return ManagedReconciliationResult("reconciled", committed, receipt)
 
     def _approval_digest(self, receipt: MigrationApprovalReceipt) -> str:
         return self._digest(receipt.__dict__)

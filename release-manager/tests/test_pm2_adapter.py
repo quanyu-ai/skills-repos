@@ -125,6 +125,21 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             "health": copy.deepcopy(spec["health"]),
         }
 
+    @staticmethod
+    def reconciliation_expected(spec: dict) -> dict:
+        return {
+            "environmentId": spec["environmentId"],
+            "serviceId": spec["serviceId"],
+            "namespace": spec["namespace"],
+            "stableName": spec["stableName"],
+            "releaseSha": spec["releaseSha"],
+            "releasePath": spec["releasePath"],
+            "runtime": copy.deepcopy(spec["runtime"]),
+            "configurationDigests": copy.deepcopy(spec["configurationDigests"]),
+            "listener": copy.deepcopy(spec["listener"]),
+            "observedAt": "2026-09-24T01:00:00Z",
+        }
+
     def legacy_descriptor(self, *, failing_bootstrap: bool = False) -> tuple[dict, Path]:
         release = self.root / "legacy-release" / SHA_A
         cwd = release / "apps/web"
@@ -197,6 +212,41 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         report_data = json.loads(report.read_text())
         self.assertEqual({"hasNodeChannelFd": False, "hasNodeUniqueId": False, "hasAmbientPoison": False, "nodeEnv": "production", "nextDistDir": ".next-demo"}, report_data)
         self.remove(handle)
+
+    def test_host_restart_reconciliation_uses_fresh_linux_inventory_and_keeps_exact_resolve_strict(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        old = self.start(spec)
+        old_record = copy.deepcopy(old.record)
+        self.remove(old)
+        live = self.start(spec)
+        old_record["identity"]["processStartId"] = "33333333-3333-4333-8333-333333333333:12345"
+
+        restarted = self.restarted_adapter(spec)
+        with self.assertRaisesRegex(ProcessError, "cannot be re-observed exactly"):
+            restarted.resolve_persisted(old_record)
+        observation = restarted.observe_managed_after_host_restart(
+            old_record, self.reconciliation_expected(spec)
+        )
+        self.assertTrue(observation.reconciliation_required)
+        self.assertNotEqual(observation.old_boot_id, observation.current_boot_id)
+        evidence = restarted.attest(observation.handle, SHA_A, self.targets(spec))
+        self.assertEqual(SHA_A, evidence["releaseSha"])
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+        self.remove(live)
+
+    def test_same_boot_process_change_cannot_use_reconciliation(self) -> None:
+        spec, _, _ = self.spec(SHA_A)
+        old = self.start(spec)
+        old_record = copy.deepcopy(old.record)
+        self.remove(old)
+        live = self.start(spec)
+        restarted = self.restarted_adapter(spec)
+        with self.assertRaisesRegex(ProcessError, "same-boot"):
+            restarted.observe_managed_after_host_restart(
+                old_record, self.reconciliation_expected(spec)
+            )
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
+        self.remove(live)
 
     def test_stop_is_not_delete_and_absence_proves_pid_and_port(self) -> None:
         spec, _, _ = self.spec(SHA_A)

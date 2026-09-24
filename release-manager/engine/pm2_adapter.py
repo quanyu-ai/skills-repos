@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ProcessError
-from .ports import AdapterHandle, invocation_fingerprint
+from .ports import AdapterHandle, ManagedReconciliationObservation, invocation_fingerprint
 from .contracts import validate_legacy_restore_descriptor
 
 
@@ -535,6 +535,151 @@ class PM2ProcessAdapter:
             },
         )
         return handle
+
+    @staticmethod
+    def _boot_id(process_start_id: str) -> str:
+        try:
+            boot_id, ticks = process_start_id.rsplit(":", 1)
+            uuid.UUID(boot_id)
+            if int(ticks) <= 0:
+                raise ValueError
+        except (AttributeError, ValueError) as error:
+            raise ProcessError("processStartId does not contain valid Linux boot evidence") from error
+        return boot_id
+
+    @staticmethod
+    def _current_boot_id() -> str:
+        try:
+            boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+            uuid.UUID(boot_id)
+        except (OSError, ValueError) as error:
+            raise ProcessError("current Linux boot identity is unavailable") from error
+        return boot_id
+
+    @staticmethod
+    def _assert_release_containment(release_path: str, runtime: dict[str, Any]) -> None:
+        try:
+            raw_release = Path(release_path)
+            metadata = raw_release.lstat()
+            release = raw_release.resolve(strict=True)
+            executable = Path(runtime["executable"]).resolve(strict=True)
+            cwd = Path(runtime["cwd"]).resolve(strict=True)
+        except (KeyError, OSError) as error:
+            raise ProcessError("managed release/runtime path is unavailable") from error
+        if stat.S_ISLNK(metadata.st_mode) or not release.is_dir():
+            raise ProcessError("managed release path must be a canonical directory")
+        if not executable.is_file() or not cwd.is_dir() or not executable.is_relative_to(release) or not cwd.is_relative_to(release):
+            raise ProcessError("managed runtime escapes release path")
+        if str(executable) != runtime["executable"] or str(cwd) != runtime["cwd"]:
+            raise ProcessError("managed runtime paths must be canonical")
+
+    def observe_managed_after_host_restart(
+        self, record: dict[str, Any], expected: dict[str, Any]
+    ) -> ManagedReconciliationObservation:
+        """Mint fresh evidence without weakening exact persisted-handle resolution."""
+        try:
+            adapter = record["adapter"]
+            identity = record["identity"]
+            runtime = record["runtime"]
+            persisted_digests = record["configurationDigests"]
+            expected_runtime = expected["runtime"]
+            expected_digests = expected["configurationDigests"]
+            expected_listener = expected["listener"]
+        except (KeyError, TypeError) as error:
+            raise ProcessError("managed reconciliation evidence is structurally incomplete") from error
+        if adapter != {"kind": "pm2-programmatic", "version": self.version, "instanceId": self.instance_id}:
+            raise ProcessError("persisted ProcessHandle adapter identity mismatch")
+        if record.get("invocationFingerprint") != invocation_fingerprint(runtime["executable"], runtime["args"], runtime["cwd"]):
+            raise ProcessError("persisted ProcessHandle runtime fingerprint mismatch")
+        durable_persisted = (
+            (identity["environmentId"], expected["environmentId"]),
+            (identity["serviceId"], expected["serviceId"]),
+            (identity["namespace"], expected["namespace"]),
+            (record["releaseSha"], expected["releaseSha"]),
+            (runtime, expected_runtime),
+            (persisted_digests, expected_digests),
+            (self.stable_name, expected["stableName"]),
+        )
+        if any(actual != wanted for actual, wanted in durable_persisted):
+            raise ProcessError("persisted managed authority does not match reconciliation context")
+        self._assert_release_containment(expected["releasePath"], runtime)
+
+        old_boot_id = self._boot_id(identity["processStartId"])
+        current_boot_id = self._current_boot_id()
+        inventory = self._all_inventory()
+        scoped = [
+            item for item in inventory
+            if item["environmentId"] == expected["environmentId"]
+            and item["serviceId"] == expected["serviceId"]
+            and item["namespace"] == expected["namespace"]
+        ]
+        if len(scoped) != 1 or scoped[0].get("status") != "online":
+            raise ProcessError("managed reconciliation requires exactly one scoped live process")
+        observed = scoped[0]
+        live_boot_id = self._boot_id(observed.get("evidence", {}).get("processStartId"))
+        if live_boot_id != current_boot_id:
+            raise ProcessError("live process boot identity does not match current host boot")
+        wanted = {
+            "name": expected["stableName"],
+            "namespace": expected["namespace"],
+            "environmentId": expected["environmentId"],
+            "serviceId": expected["serviceId"],
+            "releaseSha": expected["releaseSha"],
+            "executable": expected_runtime["executable"],
+            "cwd": expected_runtime["cwd"],
+            "args": expected_runtime["args"],
+            "buildConfigDigest": expected_digests["build"],
+            "runtimeConfigDigest": expected_digests["runtime"],
+            "releaseContractDigest": expected_digests["releaseContract"],
+            "environmentPolicyDigest": expected_digests["environmentPolicy"],
+        }
+        if any(observed.get(field) != value for field, value in wanted.items()):
+            raise ProcessError("live managed process does not match durable authority")
+        if (
+            observed.get("ownedHost") != expected_listener["host"]
+            or observed.get("ownedPort") != int(expected_listener["port"])
+        ):
+            raise ProcessError("live managed listener/topology mismatch")
+        self._assert_release_containment(expected["releasePath"], {
+            "executable": observed["executable"], "args": observed["args"], "cwd": observed["cwd"]
+        })
+        overlap_spec = {
+            "environmentId": expected["environmentId"],
+            "serviceId": expected["serviceId"],
+            "namespace": expected["namespace"],
+            "stableName": expected["stableName"],
+            "runtime": expected_runtime,
+            "listener": expected_listener,
+        }
+        if any(item["adapterId"] != observed["adapterId"] and self._overlaps(item, overlap_spec) for item in inventory):
+            raise ProcessError("unexpected overlapping PM2 inventory blocks reconciliation")
+
+        same_identity = (
+            observed["adapterId"] == str(identity["adapterId"])
+            and observed["pid"] == identity["pid"]
+            and observed["evidence"]["processStartId"] == identity["processStartId"]
+        )
+        if not same_identity and old_boot_id == current_boot_id:
+            raise ProcessError("same-boot process identity change cannot be reconciled")
+        if not same_identity and old_boot_id == live_boot_id:
+            raise ProcessError("host reboot boundary is not proven")
+        handle = self._handle_from_observation(
+            observed,
+            environment_id=expected["environmentId"],
+            service_id=expected["serviceId"],
+            release_sha=expected["releaseSha"],
+            origin="observed",
+            observed_at=expected["observedAt"],
+            sidecar={
+                "stableName": expected["stableName"],
+                "listener": copy.deepcopy(expected_listener),
+                "startSpec": self._restore_spec(record, observed),
+                "configurationDigests": copy.deepcopy(expected_digests),
+            },
+        )
+        return ManagedReconciliationObservation(
+            handle, not same_identity, old_boot_id, current_boot_id, copy.deepcopy(expected_listener)
+        )
 
     @staticmethod
     def _assert_observation(observed: dict[str, Any], expected: dict[str, Any], require_live: bool, compare_ownership: bool = True) -> None:

@@ -20,6 +20,10 @@
     "current": { "$ref": "#/$defs/verifiedRelease" },
     "previous": { "$ref": "#/$defs/verifiedRelease" },
     "legacy": { "$ref": "#/$defs/verifiedRelease" },
+    "reconciliations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hostRestartReconciliationReceipt" }
+    },
     "attempt": {
       "type": "object",
       "additionalProperties": false,
@@ -57,6 +61,7 @@
     "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
     "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "uuid": { "type": "string", "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$" },
+    "bootId": { "type": "string", "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" },
     "timestamp": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
     "attestation": {
       "type": "object",
@@ -69,6 +74,39 @@
         "internalHealth": { "const": "pass" },
         "publicHealth": { "const": "pass" },
         "evidenceDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "hostRestartReconciliationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "kind", "reason", "priorGeneration", "newGeneration", "releaseSha", "releasePath", "oldHandleDigest", "newHandleDigest", "oldBootId", "currentBootId", "configurationDigests", "healthResult", "healthEvidenceDigest", "reconciledAt", "receiptDigest"],
+      "properties": {
+        "apiVersion": { "const": "quanyu.ai/host-restart-reconciliation-receipt/v1alpha1" },
+        "kind": { "const": "HostRestartReconciliationReceipt" },
+        "reason": { "const": "host-restart" },
+        "priorGeneration": { "type": "integer", "minimum": 1 },
+        "newGeneration": { "type": "integer", "minimum": 2 },
+        "releaseSha": { "$ref": "#/$defs/sha" },
+        "releasePath": { "type": "string", "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[A-Za-z0-9._@+/-]+$" },
+        "oldHandleDigest": { "$ref": "#/$defs/digest" },
+        "newHandleDigest": { "$ref": "#/$defs/digest" },
+        "oldBootId": { "$ref": "#/$defs/bootId" },
+        "currentBootId": { "$ref": "#/$defs/bootId" },
+        "configurationDigests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["releaseContract", "environmentPolicy", "build", "runtime"],
+          "properties": {
+            "releaseContract": { "$ref": "#/$defs/digest" },
+            "environmentPolicy": { "$ref": "#/$defs/digest" },
+            "build": { "$ref": "#/$defs/digest" },
+            "runtime": { "$ref": "#/$defs/digest" }
+          }
+        },
+        "healthResult": { "const": "pass" },
+        "healthEvidenceDigest": { "$ref": "#/$defs/digest" },
+        "reconciledAt": { "$ref": "#/$defs/timestamp" },
+        "receiptDigest": { "$ref": "#/$defs/digest" }
       }
     },
     "verifiedRelease": {

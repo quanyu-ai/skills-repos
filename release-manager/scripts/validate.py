@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -285,6 +286,34 @@ def validate_state_semantics(data: dict[str, Any]) -> None:
         for slot in ("current", "previous"):
             if data.get(slot, {}).get("releaseSha") == attempt["targetSha"]:
                 raise ValidationError(f"$.{slot}: failed target cannot be release authority")
+    reconciliations = data.get("reconciliations", [])
+    generations = [item["newGeneration"] for item in reconciliations]
+    if generations != sorted(set(generations)):
+        raise ValidationError("$.reconciliations: generations must be strictly increasing")
+    for index, receipt in enumerate(reconciliations):
+        if receipt["newGeneration"] != receipt["priorGeneration"] + 1:
+            raise ValidationError(f"$.reconciliations[{index}]: generation must increase exactly once")
+        if receipt["newGeneration"] > data["generation"]:
+            raise ValidationError(f"$.reconciliations[{index}]: generation exceeds state generation")
+        if receipt["oldBootId"] == receipt["currentBootId"]:
+            raise ValidationError(f"$.reconciliations[{index}]: host boot identity must change")
+        payload = dict(receipt)
+        actual_digest = payload.pop("receiptDigest")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        expected_digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
+        if actual_digest != expected_digest:
+            raise ValidationError(f"$.reconciliations[{index}]: receipt digest mismatch")
+        current = data.get("current")
+        if current and receipt["newGeneration"] == current["generation"]:
+            handle_payload = json.dumps(current["handle"], sort_keys=True, separators=(",", ":")).encode()
+            handle_digest = "sha256:" + hashlib.sha256(handle_payload).hexdigest()
+            if (
+                receipt["releaseSha"] != current["releaseSha"]
+                or receipt["releasePath"] != current["releasePath"]
+                or receipt["newHandleDigest"] != handle_digest
+                or receipt["configurationDigests"] != current["handle"].get("configurationDigests")
+            ):
+                raise ValidationError(f"$.reconciliations[{index}]: current authority binding mismatch")
 
 
 def validate_transition_trace(data: dict[str, Any]) -> None:
