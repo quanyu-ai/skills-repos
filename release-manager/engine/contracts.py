@@ -105,6 +105,10 @@ def validate_legacy_restore_descriptor(descriptor: dict[str, Any]) -> None:
         index += 1
     if seen != set(expected_pairs) or payload["args"] != remaining:
         raise ContractError("legacy restore payload argv exceeds typed listener adaptation")
+    if recipe["listener"] != observed["listener"]:
+        raise ContractError("legacy restore listener must preserve observed business listener")
+    if recipe["probe"]["port"] == recipe["listener"]["port"]:
+        raise ContractError("legacy restore probe must use a non-business port")
 
     runtime = recipe["runtime"]
     secrets = recipe["secrets"]

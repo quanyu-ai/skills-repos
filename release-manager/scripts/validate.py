@@ -210,8 +210,8 @@ def validate_legacy_restore_semantics(data: dict[str, Any]) -> None:
         raise ValidationError("$.restoreRecipe.payload.args: only typed listener adaptation is allowed")
     if recipe["listener"] != authority["listener"]:
         raise ValidationError("$.restoreRecipe.listener: must preserve the observed business listener")
-    if recipe["listener"] == recipe["probe"]:
-        raise ValidationError("$.restoreRecipe.probe: must use an isolated listener")
+    if recipe["probe"]["port"] == recipe["listener"]["port"]:
+        raise ValidationError("$.restoreRecipe.probe: must use a non-business port")
     runtime = recipe["runtime"]
     secrets = recipe["secrets"]
     if runtime["requiredSecretNames"] != secrets["requiredNames"]:

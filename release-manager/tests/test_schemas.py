@@ -183,6 +183,9 @@ class SchemaHarnessTest(unittest.TestCase):
         restore_tamper = copy.deepcopy(descriptor)
         restore_tamper["restoreRecipe"]["probe"]["port"] += 1
         self.assertNotEqual(digest, canonical_document_digest(restore_tamper))
+        listener_tamper = copy.deepcopy(descriptor)
+        listener_tamper["restoreRecipe"]["listener"]["port"] += 1
+        self.assertNotEqual(digest, canonical_document_digest(listener_tamper))
 
         cases = []
         wrong_source = copy.deepcopy(descriptor)
@@ -197,6 +200,13 @@ class SchemaHarnessTest(unittest.TestCase):
         wrong_secret_source = copy.deepcopy(descriptor)
         wrong_secret_source["restoreRecipe"]["runtime"]["runtimeSecretFile"] = "/var/lib/example/secrets/other.json"
         cases.append((wrong_secret_source, "must equal secrets.sourcePath"))
+        cases.append((listener_tamper, "must preserve the observed business listener"))
+        reused_business_port = copy.deepcopy(descriptor)
+        reused_business_port["restoreRecipe"]["probe"] = {
+            "host": "::1",
+            "port": descriptor["restoreRecipe"]["listener"]["port"],
+        }
+        cases.append((reused_business_port, "must use a non-business port"))
         for invalid, message in cases:
             with self.subTest(message=message):
                 with self.assertRaisesRegex(Exception, message):

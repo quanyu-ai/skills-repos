@@ -143,6 +143,9 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         secrets.write_text(json.dumps({"TEST_SECRET": "legacy-secret-must-not-leak"}))
         secrets.chmod(0o600)
         listener = {"host": "127.0.0.1", "port": free_port()}
+        probe_port = free_port()
+        while probe_port == listener["port"]:
+            probe_port = free_port()
         descriptor = {
             "apiVersion": "quanyu.ai/legacy-restore-descriptor/v1alpha1",
             "kind": "LegacyRestoreDescriptor",
@@ -152,7 +155,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
                 "stableName": "legacy-service", "adapterId": "pending", "pid": 1,
                 "processStartId": "pending",
                 "invocation": {"executable": str(payload), "args": ["start", "-H", listener["host"], "-p", str(listener["port"])], "cwd": str(cwd)},
-                "listener": listener,
+                "listener": dict(listener),
             },
             "restoreRecipe": {
                 "source": {"releaseSha": SHA_A, "releasePath": str(release)},
@@ -161,8 +164,8 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
                 "listenerAdaptation": {"kind": "argv-host-port", "hostFlag": "-H", "portFlag": "-p"},
                 "runtime": {"requiredSecretNames": ["TEST_SECRET"], "requiredSecretNamesFormat": "comma-separated", "runtimeSecretFile": str(secrets), "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}]},
                 "secrets": {"provider": "external-json-file", "sourcePath": str(secrets), "requiredNames": ["TEST_SECRET"]},
-                "listener": listener,
-                "probe": {"host": "127.0.0.1", "port": free_port()},
+                "listener": dict(listener),
+                "probe": {"host": "127.0.0.1", "port": probe_port},
             },
             "health": {"path": "/api/health", "acceptedStatusClasses": [2], "attempts": 30, "intervalMs": 100},
         }
@@ -391,6 +394,20 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             self.adapter.preflight_legacy_restore(descriptor)
         self.assertEqual([], self.adapter._all_inventory())
 
+    def test_legacy_restore_probe_injects_selected_host_and_non_business_port(self) -> None:
+        descriptor, _ = self.legacy_descriptor()
+        descriptor["observedAuthority"]["listener"]["host"] = "::1"
+        descriptor["observedAuthority"]["invocation"]["args"][2] = "::1"
+        descriptor["restoreRecipe"]["listener"]["host"] = "::1"
+        self.assertEqual("127.0.0.1", descriptor["restoreRecipe"]["probe"]["host"])
+        self.assertNotEqual(
+            descriptor["restoreRecipe"]["listener"]["port"],
+            descriptor["restoreRecipe"]["probe"]["port"],
+        )
+        evidence = self.adapter.preflight_legacy_restore(descriptor)
+        self.assertEqual("pass", evidence["probe"])
+        self.assertEqual([], self.adapter._all_inventory())
+
     def test_legacy_descriptor_tamper_source_and_unsafe_inputs_fail_before_mutation(self) -> None:
         descriptor, secrets = self.legacy_descriptor()
         original_digest = self.adapter._descriptor_digest(descriptor)
@@ -404,6 +421,15 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         self.assertNotEqual(original_digest, self.adapter._descriptor_digest(source_tamper))
         with self.assertRaisesRegex(Exception, "must match observedAuthority"):
             self.adapter.preflight_legacy_restore(source_tamper)
+        listener_tamper = copy.deepcopy(descriptor)
+        business_port = descriptor["restoreRecipe"]["listener"]["port"]
+        listener_tamper["restoreRecipe"]["listener"] = {
+            **listener_tamper["restoreRecipe"]["listener"],
+            "port": business_port + 1 if business_port < 65535 else business_port - 1,
+        }
+        self.assertNotEqual(original_digest, self.adapter._descriptor_digest(listener_tamper))
+        with self.assertRaisesRegex(Exception, "must preserve the observed business listener"):
+            self.adapter.preflight_legacy_restore(listener_tamper)
         argv_tamper = copy.deepcopy(descriptor)
         argv_tamper["restoreRecipe"]["payload"]["args"].append("--unsafe")
         with self.assertRaisesRegex(Exception, "only typed listener adaptation"):

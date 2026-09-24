@@ -350,7 +350,7 @@ class PM2ProcessAdapter:
         if not isinstance(document, dict) or any(name not in document or not isinstance(document[name], str) or not document[name] for name in required): raise ProcessError("external secret source is missing required names")
         return {name: document[name] for name in required}, [document[name] for name in required]
 
-    def _legacy_environment(self, descriptor: dict[str, Any], port: int) -> dict[str, str]:
+    def _legacy_environment(self, descriptor: dict[str, Any], listener: dict[str, Any]) -> dict[str, str]:
         recipe = descriptor["restoreRecipe"]
         runtime = recipe["runtime"]
         payload = recipe["payload"]
@@ -363,8 +363,8 @@ class PM2ProcessAdapter:
         values.update({
             "LEGACY_EXECUTABLE": payload["executable"],
             "LEGACY_ARGS_JSON": json.dumps(payload["args"], separators=(",", ":")),
-            "LEGACY_HOST": recipe["listener"]["host"],
-            "LEGACY_INTERNAL_PORT": str(port),
+            "LEGACY_HOST": listener["host"],
+            "LEGACY_INTERNAL_PORT": str(listener["port"]),
             "REQUIRED_RUNTIME_SECRETS": encoded_secret_names,
             "RUNTIME_SECRET_FILE": runtime["runtimeSecretFile"],
         })
@@ -374,10 +374,10 @@ class PM2ProcessAdapter:
         self._validate_restore_recipe(descriptor)
         observed_authority = descriptor["observedAuthority"]
         recipe = descriptor["restoreRecipe"]
-        if recipe["probe"] == recipe["listener"]: raise ProcessError("legacy restore probe must be isolated")
+        if recipe["probe"]["port"] == recipe["listener"]["port"]: raise ProcessError("legacy restore probe must use a non-business port")
         if not self._port_is_free(recipe["probe"]["host"], int(recipe["probe"]["port"])): raise ProcessError("legacy restore probe port is unavailable")
         token = str(uuid.uuid4())
-        env = self._legacy_environment(descriptor, recipe["probe"]["port"])
+        env = self._legacy_environment(descriptor, recipe["probe"])
         env.update({"RELEASE_MANAGER_ENVIRONMENT_ID": descriptor["metadata"]["environmentId"] + "-probe", "RELEASE_MANAGER_SERVICE_ID": descriptor["metadata"]["serviceId"], "RELEASE_MANAGER_RELEASE_SHA": observed_authority["releaseSha"], "RELEASE_MANAGER_LAUNCH_TOKEN": token, "RELEASE_MANAGER_OWNED_HOST": recipe["probe"]["host"], "RELEASE_MANAGER_OWNED_PORT": str(recipe["probe"]["port"])})
         observed = None
         handle = None
@@ -740,7 +740,7 @@ class PM2ProcessAdapter:
             self._validate_restore_recipe(descriptor)
             authority = descriptor["observedAuthority"]
             recipe = descriptor["restoreRecipe"]
-            env = self._legacy_environment(descriptor, recipe["listener"]["port"])
+            env = self._legacy_environment(descriptor, recipe["listener"])
             token = str(uuid.uuid4())
             env.update({"RELEASE_MANAGER_ENVIRONMENT_ID": descriptor["metadata"]["environmentId"], "RELEASE_MANAGER_SERVICE_ID": descriptor["metadata"]["serviceId"], "RELEASE_MANAGER_RELEASE_SHA": authority["releaseSha"], "RELEASE_MANAGER_LAUNCH_TOKEN": token, "RELEASE_MANAGER_OWNED_HOST": recipe["listener"]["host"], "RELEASE_MANAGER_OWNED_PORT": str(recipe["listener"]["port"])})
             observed = self._bridge({"action": "start", "app": {"name": authority["stableName"], "namespace": authority["namespace"], "script": recipe["bootstrap"]["executable"], "args": recipe["bootstrap"]["args"], "cwd": recipe["bootstrap"]["cwd"], "env": env}})["record"]
