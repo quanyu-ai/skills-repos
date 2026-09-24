@@ -160,6 +160,24 @@ test("stop retains record while delete plus pid and port checks prove absence", 
   } finally { cleanup(ctx); }
 });
 
+test("raw orphan delete requires exact launch token, ownership and pidless evidence", async () => {
+  const ctx = context();
+  try {
+    const spec = release(ctx, "e".repeat(40));
+    const port = await freePort();
+    const record = invoke(ctx, { action: "start", app: app(spec, port, "raw-owned-e") }).record;
+    invoke(ctx, { action: "stop", expected: expected(record) });
+    const raw = invoke(ctx, { action: "inventory" }).records.find((item) => item.adapterId === record.adapterId);
+    assert.equal(raw.pid, 0);
+    assert.equal(raw.evidence, null);
+    const tampered = { ...raw, launchToken: "wrong-token" };
+    invoke(ctx, { action: "delete-raw-owned", expected: tampered }, false);
+    assert.equal(invoke(ctx, { action: "inventory" }).records.some((item) => item.adapterId === record.adapterId), true);
+    invoke(ctx, { action: "delete-raw-owned", expected: raw });
+    assert.equal(invoke(ctx, { action: "inventory" }).records.some((item) => item.adapterId === record.adapterId), false);
+  } finally { cleanup(ctx); }
+});
+
 test("ecosystem.cjs wrong-name and duplicate script/namespace records remain visible", async () => {
   const ctx = context();
   try {

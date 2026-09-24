@@ -61,6 +61,8 @@ export interface ProcessAdapter {
   stopExact(handle: ProcessHandle): Promise<void>;
   deleteExact(handle: ProcessHandle): Promise<void>;
   awaitAbsent(handle: ProcessHandle): Promise<unknown>;
+  validateRuntimeSpec(spec: unknown): Promise<void>;
+  removeInterruptedCandidate(spec: unknown): Promise<unknown>;
   startCandidate(spec: unknown): Promise<ProcessHandle>;
   attest(handle: ProcessHandle, expected: unknown): Promise<unknown>;
   restore(handle: ProcessHandle): Promise<ProcessHandle>;

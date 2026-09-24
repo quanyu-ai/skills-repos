@@ -24,6 +24,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/hostRestartReconciliationReceipt" }
     },
+    "recoveries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/interruptedActivationRecoveryReceipt" }
+    },
     "attempt": {
       "type": "object",
       "additionalProperties": false,
@@ -106,6 +110,38 @@
         "healthResult": { "const": "pass" },
         "healthEvidenceDigest": { "$ref": "#/$defs/digest" },
         "reconciledAt": { "$ref": "#/$defs/timestamp" },
+        "receiptDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "interruptedActivationRecoveryReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "kind", "reason", "priorGeneration", "newGeneration", "failedAttemptDigest", "targetSha", "restoredSha", "orphanRecordDigest", "launchTokenDigest", "restoredHandleDigest", "configurationDigests", "healthEvidenceDigest", "recoveredAt", "receiptDigest"],
+      "properties": {
+        "apiVersion": { "const": "quanyu.ai/interrupted-activation-recovery-receipt/v1alpha1" },
+        "kind": { "const": "InterruptedActivationRecoveryReceipt" },
+        "reason": { "const": "candidate-start-orphan" },
+        "priorGeneration": { "type": "integer", "minimum": 1 },
+        "newGeneration": { "type": "integer", "minimum": 2 },
+        "failedAttemptDigest": { "$ref": "#/$defs/digest" },
+        "targetSha": { "$ref": "#/$defs/sha" },
+        "restoredSha": { "$ref": "#/$defs/sha" },
+        "orphanRecordDigest": { "$ref": "#/$defs/digest" },
+        "launchTokenDigest": { "$ref": "#/$defs/digest" },
+        "restoredHandleDigest": { "$ref": "#/$defs/digest" },
+        "configurationDigests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["releaseContract", "environmentPolicy", "build", "runtime"],
+          "properties": {
+            "releaseContract": { "$ref": "#/$defs/digest" },
+            "environmentPolicy": { "$ref": "#/$defs/digest" },
+            "build": { "$ref": "#/$defs/digest" },
+            "runtime": { "$ref": "#/$defs/digest" }
+          }
+        },
+        "healthEvidenceDigest": { "$ref": "#/$defs/digest" },
+        "recoveredAt": { "$ref": "#/$defs/timestamp" },
         "receiptDigest": { "$ref": "#/$defs/digest" }
       }
     },

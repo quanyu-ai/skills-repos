@@ -314,6 +314,36 @@ def validate_state_semantics(data: dict[str, Any]) -> None:
                 or receipt["configurationDigests"] != current["handle"].get("configurationDigests")
             ):
                 raise ValidationError(f"$.reconciliations[{index}]: current authority binding mismatch")
+    recoveries = data.get("recoveries", [])
+    recovery_generations = [item["newGeneration"] for item in recoveries]
+    if recovery_generations != sorted(set(recovery_generations)):
+        raise ValidationError("$.recoveries: generations must be strictly increasing")
+    for index, receipt in enumerate(recoveries):
+        if receipt["newGeneration"] != receipt["priorGeneration"] + 1:
+            raise ValidationError(f"$.recoveries[{index}]: generation must increase exactly once")
+        if receipt["newGeneration"] > data["generation"]:
+            raise ValidationError(f"$.recoveries[{index}]: generation exceeds state generation")
+        payload = dict(receipt)
+        actual_digest = payload.pop("receiptDigest")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        expected_digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
+        if actual_digest != expected_digest:
+            raise ValidationError(f"$.recoveries[{index}]: receipt digest mismatch")
+        current = data.get("current")
+        if current and receipt["newGeneration"] == current["generation"]:
+            handle_payload = json.dumps(current["handle"], sort_keys=True, separators=(",", ":")).encode()
+            handle_digest = "sha256:" + hashlib.sha256(handle_payload).hexdigest()
+            if (
+                data["status"] != "failed"
+                or data["attempt"]["outcome"] != "failed"
+                or receipt["targetSha"] != data["attempt"]["targetSha"]
+                or receipt["restoredSha"] != current["releaseSha"]
+                or receipt["restoredHandleDigest"] != handle_digest
+                or receipt["configurationDigests"] != current["handle"].get("configurationDigests")
+                or not data["attempt"]["events"]
+                or data["attempt"]["events"][-1].get("evidenceDigest") != receipt["receiptDigest"]
+            ):
+                raise ValidationError(f"$.recoveries[{index}]: recovered authority binding mismatch")
 
 
 def validate_transition_trace(data: dict[str, Any]) -> None:
