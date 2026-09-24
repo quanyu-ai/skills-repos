@@ -275,17 +275,50 @@ class PM2ProcessAdapter:
         payload = json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode()
         return "sha256:" + hashlib.sha256(payload).hexdigest()
 
-    def _validate_legacy_paths(self, descriptor: dict[str, Any]) -> None:
-        validate_legacy_restore_descriptor(descriptor)
-        release_raw = Path(descriptor["authority"]["releasePath"])
+    def _validate_observed_authority(self, descriptor: dict[str, Any]) -> None:
+        try:
+            observed = descriptor["observedAuthority"]
+        except (KeyError, TypeError) as error:
+            raise ProcessError("legacy observed authority is structurally incomplete") from error
+        release_raw = Path(observed["releasePath"])
         release_meta = release_raw.lstat()
         if stat.S_ISLNK(release_meta.st_mode) or not stat.S_ISDIR(release_meta.st_mode): raise ProcessError("legacy release path must be a regular directory")
         if release_meta.st_uid not in (0, self.secret_owner_uid) or stat.S_IMODE(release_meta.st_mode) & 0o022: raise ProcessError("legacy release path ownership or permissions are unsafe")
         release = release_raw.resolve(strict=True)
         checks = (
-            (Path(descriptor["launcher"]["executable"]), "file"),
-            (Path(descriptor["launcher"]["cwd"]), "dir"),
-            (Path(descriptor["wrapper"]["executable"]), "file"),
+            (Path(observed["invocation"]["executable"]), "file"),
+            (Path(observed["invocation"]["cwd"]), "dir"),
+        )
+        for raw, kind in checks:
+            metadata = raw.lstat()
+            if stat.S_ISLNK(metadata.st_mode):
+                raise ProcessError("legacy authority path cannot be a symlink")
+            resolved = raw.resolve(strict=True)
+            if metadata.st_uid not in (0, self.secret_owner_uid) or stat.S_IMODE(metadata.st_mode) & 0o022:
+                raise ProcessError("legacy authority path ownership or permissions are unsafe")
+            if kind == "file" and not resolved.is_file(): raise ProcessError("legacy authority executable is not a regular file")
+            if kind == "dir" and not resolved.is_dir(): raise ProcessError("legacy authority cwd is not a directory")
+        contained = (
+            Path(observed["invocation"]["executable"]),
+            Path(observed["invocation"]["cwd"]),
+        )
+        if any(not item.resolve().is_relative_to(release) for item in contained):
+            raise ProcessError("legacy authority path escapes release path")
+
+    def _validate_restore_recipe(self, descriptor: dict[str, Any]) -> None:
+        validate_legacy_restore_descriptor(descriptor)
+        observed = descriptor["observedAuthority"]
+        recipe = descriptor["restoreRecipe"]
+        release_raw = Path(observed["releasePath"])
+        release_meta = release_raw.lstat()
+        if stat.S_ISLNK(release_meta.st_mode) or not stat.S_ISDIR(release_meta.st_mode): raise ProcessError("legacy release path must be a regular directory")
+        if release_meta.st_uid not in (0, self.secret_owner_uid) or stat.S_IMODE(release_meta.st_mode) & 0o022: raise ProcessError("legacy release path ownership or permissions are unsafe")
+        release = release_raw.resolve(strict=True)
+        checks = (
+            (Path(recipe["bootstrap"]["executable"]), "file"),
+            (Path(recipe["bootstrap"]["cwd"]), "dir"),
+            (Path(recipe["payload"]["executable"]), "file"),
+            (Path(recipe["payload"]["cwd"]), "dir"),
         )
         for raw, kind in checks:
             metadata = raw.lstat()
@@ -296,11 +329,14 @@ class PM2ProcessAdapter:
                 raise ProcessError("legacy restore path ownership or permissions are unsafe")
             if kind == "file" and not resolved.is_file(): raise ProcessError("legacy restore executable is not a regular file")
             if kind == "dir" and not resolved.is_dir(): raise ProcessError("legacy restore cwd is not a directory")
-        if not Path(descriptor["launcher"]["cwd"]).resolve().is_relative_to(release):
-            raise ProcessError("legacy restore cwd escapes release path")
-        if not Path(descriptor["wrapper"]["executable"]).resolve().is_relative_to(release):
-            raise ProcessError("legacy wrapped executable escapes release path")
-        self._load_secret_document(descriptor["secrets"])
+        contained = (
+            Path(recipe["bootstrap"]["cwd"]),
+            Path(recipe["payload"]["executable"]),
+            Path(recipe["payload"]["cwd"]),
+        )
+        if any(not item.resolve().is_relative_to(release) for item in contained):
+            raise ProcessError("legacy invocation path escapes release path")
+        self._load_secret_document(recipe["secrets"])
 
     def _load_secret_document(self, source_spec: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
         source = Path(source_spec["sourcePath"])
@@ -314,37 +350,42 @@ class PM2ProcessAdapter:
         if not isinstance(document, dict) or any(name not in document or not isinstance(document[name], str) or not document[name] for name in required): raise ProcessError("external secret source is missing required names")
         return {name: document[name] for name in required}, [document[name] for name in required]
 
-    def _legacy_environment(self, descriptor: dict[str, Any], port: int) -> dict[str, str]:
-        values = {item["name"]: item["value"] for item in descriptor["wrapper"]["nonSecretValues"]}
-        secret_names = descriptor["wrapper"]["requiredSecretNames"]
-        if descriptor["wrapper"]["requiredSecretNamesFormat"] == "json-array":
+    def _legacy_environment(self, descriptor: dict[str, Any], listener: dict[str, Any]) -> dict[str, str]:
+        recipe = descriptor["restoreRecipe"]
+        runtime = recipe["runtime"]
+        payload = recipe["payload"]
+        values = {item["name"]: item["value"] for item in runtime["nonSecretValues"]}
+        secret_names = runtime["requiredSecretNames"]
+        if runtime["requiredSecretNamesFormat"] == "json-array":
             encoded_secret_names = json.dumps(secret_names, separators=(",", ":"))
         else:
             encoded_secret_names = ",".join(secret_names)
         values.update({
-            "LEGACY_EXECUTABLE": descriptor["wrapper"]["executable"],
-            "LEGACY_ARGS_JSON": json.dumps(descriptor["wrapper"]["args"], separators=(",", ":")),
-            "LEGACY_HOST": descriptor["wrapper"]["host"],
-            "LEGACY_INTERNAL_PORT": str(port),
+            "LEGACY_EXECUTABLE": payload["executable"],
+            "LEGACY_ARGS_JSON": json.dumps(payload["args"], separators=(",", ":")),
+            "LEGACY_HOST": listener["host"],
+            "LEGACY_INTERNAL_PORT": str(listener["port"]),
             "REQUIRED_RUNTIME_SECRETS": encoded_secret_names,
-            "RUNTIME_SECRET_FILE": descriptor["wrapper"]["runtimeSecretFile"],
+            "RUNTIME_SECRET_FILE": runtime["runtimeSecretFile"],
         })
         return values
 
     def preflight_legacy_restore(self, descriptor: dict[str, Any]) -> dict[str, Any]:
-        self._validate_legacy_paths(descriptor)
-        if descriptor["probe"] == descriptor["listener"]: raise ProcessError("legacy restore probe must be isolated")
-        if not self._port_is_free(descriptor["probe"]["host"], int(descriptor["probe"]["port"])): raise ProcessError("legacy restore probe port is unavailable")
+        self._validate_restore_recipe(descriptor)
+        observed_authority = descriptor["observedAuthority"]
+        recipe = descriptor["restoreRecipe"]
+        if recipe["probe"]["port"] == recipe["listener"]["port"]: raise ProcessError("legacy restore probe must use a non-business port")
+        if not self._port_is_free(recipe["probe"]["host"], int(recipe["probe"]["port"])): raise ProcessError("legacy restore probe port is unavailable")
         token = str(uuid.uuid4())
-        env = self._legacy_environment(descriptor, descriptor["probe"]["port"])
-        env.update({"RELEASE_MANAGER_ENVIRONMENT_ID": descriptor["metadata"]["environmentId"] + "-probe", "RELEASE_MANAGER_SERVICE_ID": descriptor["metadata"]["serviceId"], "RELEASE_MANAGER_RELEASE_SHA": descriptor["authority"]["releaseSha"], "RELEASE_MANAGER_LAUNCH_TOKEN": token, "RELEASE_MANAGER_OWNED_HOST": descriptor["probe"]["host"], "RELEASE_MANAGER_OWNED_PORT": str(descriptor["probe"]["port"])})
+        env = self._legacy_environment(descriptor, recipe["probe"])
+        env.update({"RELEASE_MANAGER_ENVIRONMENT_ID": descriptor["metadata"]["environmentId"] + "-probe", "RELEASE_MANAGER_SERVICE_ID": descriptor["metadata"]["serviceId"], "RELEASE_MANAGER_RELEASE_SHA": observed_authority["releaseSha"], "RELEASE_MANAGER_LAUNCH_TOKEN": token, "RELEASE_MANAGER_OWNED_HOST": recipe["probe"]["host"], "RELEASE_MANAGER_OWNED_PORT": str(recipe["probe"]["port"])})
         observed = None
         handle = None
         try:
-            observed = self._bridge({"action": "start", "app": {"name": descriptor["authority"]["stableName"] + "-restore-probe-" + token[:8], "namespace": descriptor["authority"]["namespace"], "script": descriptor["launcher"]["executable"], "args": descriptor["launcher"]["args"], "cwd": descriptor["launcher"]["cwd"], "env": env}})["record"]
-            handle = self._handle_from_observation(observed, environment_id=descriptor["metadata"]["environmentId"] + "-probe", service_id=descriptor["metadata"]["serviceId"], release_sha=descriptor["authority"]["releaseSha"], origin="started", observed_at=self._now(), sidecar={"stableName": observed["name"], "listener": descriptor["probe"], "health": descriptor["health"]})
-            url = f"http://{descriptor['probe']['host']}:{descriptor['probe']['port']}{descriptor['health']['path']}"
-            self.attest(handle, descriptor["authority"]["releaseSha"], (url, url))
+            observed = self._bridge({"action": "start", "app": {"name": observed_authority["stableName"] + "-restore-probe-" + token[:8], "namespace": observed_authority["namespace"], "script": recipe["bootstrap"]["executable"], "args": recipe["bootstrap"]["args"], "cwd": recipe["bootstrap"]["cwd"], "env": env}})["record"]
+            handle = self._handle_from_observation(observed, environment_id=descriptor["metadata"]["environmentId"] + "-probe", service_id=descriptor["metadata"]["serviceId"], release_sha=observed_authority["releaseSha"], origin="started", observed_at=self._now(), sidecar={"stableName": observed["name"], "listener": recipe["probe"], "health": descriptor["health"]})
+            url = f"http://{recipe['probe']['host']}:{recipe['probe']['port']}{descriptor['health']['path']}"
+            self.attest(handle, observed_authority["releaseSha"], (url, url))
         finally:
             if handle is not None:
                 self._remove_probe_exact(handle, token)
@@ -389,8 +430,9 @@ class PM2ProcessAdapter:
         self.await_absent(handle)
 
     def observe_legacy(self, spec: dict[str, Any]) -> AdapterHandle:
-        self._validate_legacy_paths(spec)
-        authority = spec["authority"]
+        self._validate_observed_authority(spec)
+        authority = spec["observedAuthority"]
+        invocation = authority["invocation"]
         matches = []
         for observed in self._all_inventory():
             if (
@@ -400,9 +442,9 @@ class PM2ProcessAdapter:
                 and observed.get("evidence", {}).get("processStartId") == authority["processStartId"]
                 and observed["namespace"] == authority["namespace"]
                 and observed["name"] == authority["stableName"]
-                and observed["executable"] == str(Path(spec["launcher"]["executable"]).resolve())
-                and observed["cwd"] == str(Path(spec["launcher"]["cwd"]).resolve())
-                and observed["args"] == spec["launcher"]["args"]
+                and observed["executable"] == str(Path(invocation["executable"]).resolve())
+                and observed["cwd"] == str(Path(invocation["cwd"]).resolve())
+                and observed["args"] == invocation["args"]
             ):
                 matches.append(observed)
         if len(matches) != 1:
@@ -417,7 +459,7 @@ class PM2ProcessAdapter:
             observed_at=self._now(),
             sidecar={
                 "stableName": observed["name"],
-                "listener": copy.deepcopy(spec["listener"]),
+                "listener": copy.deepcopy(authority["listener"]),
                 "legacyDescriptor": copy.deepcopy(spec),
                 "legacyDescriptorDigest": self._descriptor_digest(spec),
                 "observedOwnership": {"environmentId": observed["environmentId"], "serviceId": observed["serviceId"], "releaseSha": observed["releaseSha"], "buildConfigDigest": observed.get("buildConfigDigest"), "runtimeConfigDigest": observed.get("runtimeConfigDigest"), "releaseContractDigest": observed.get("releaseContractDigest"), "environmentPolicyDigest": observed.get("environmentPolicyDigest")},
@@ -461,8 +503,8 @@ class PM2ProcessAdapter:
             descriptor = self.legacy_restore_descriptor
             if descriptor is None or self._descriptor_digest(descriptor) != record["legacyRestoreDescriptorDigest"]:
                 raise ProcessError("persisted legacy handle requires its exact external restore descriptor")
-            self._validate_legacy_paths(descriptor)
-            expected["name"] = descriptor["authority"]["stableName"]
+            self._validate_observed_authority(descriptor)
+            expected["name"] = descriptor["observedAuthority"]["stableName"]
             scoped = [item for item in self._all_inventory() if item["adapterId"] == str(expected["adapterId"])]
         else:
             scoped = [
@@ -695,12 +737,14 @@ class PM2ProcessAdapter:
         if sidecar and sidecar.get("legacyDescriptor"):
             descriptor = sidecar["legacyDescriptor"]
             if sidecar.get("legacyDescriptorDigest") != self._descriptor_digest(descriptor): raise ProcessError("legacy restore descriptor digest mismatch")
-            self._validate_legacy_paths(descriptor)
-            env = self._legacy_environment(descriptor, descriptor["listener"]["port"])
+            self._validate_restore_recipe(descriptor)
+            authority = descriptor["observedAuthority"]
+            recipe = descriptor["restoreRecipe"]
+            env = self._legacy_environment(descriptor, recipe["listener"])
             token = str(uuid.uuid4())
-            env.update({"RELEASE_MANAGER_ENVIRONMENT_ID": descriptor["metadata"]["environmentId"], "RELEASE_MANAGER_SERVICE_ID": descriptor["metadata"]["serviceId"], "RELEASE_MANAGER_RELEASE_SHA": descriptor["authority"]["releaseSha"], "RELEASE_MANAGER_LAUNCH_TOKEN": token, "RELEASE_MANAGER_OWNED_HOST": descriptor["listener"]["host"], "RELEASE_MANAGER_OWNED_PORT": str(descriptor["listener"]["port"])})
-            observed = self._bridge({"action": "start", "app": {"name": descriptor["authority"]["stableName"], "namespace": descriptor["authority"]["namespace"], "script": descriptor["launcher"]["executable"], "args": descriptor["launcher"]["args"], "cwd": descriptor["launcher"]["cwd"], "env": env}})["record"]
-            return self._handle_from_observation(observed, environment_id=descriptor["metadata"]["environmentId"], service_id=descriptor["metadata"]["serviceId"], release_sha=descriptor["authority"]["releaseSha"], origin="started", observed_at=self._now(), sidecar={"stableName": descriptor["authority"]["stableName"], "listener": descriptor["listener"], "legacyDescriptor": copy.deepcopy(descriptor), "legacyDescriptorDigest": self._descriptor_digest(descriptor), "health": descriptor["health"]})
+            env.update({"RELEASE_MANAGER_ENVIRONMENT_ID": descriptor["metadata"]["environmentId"], "RELEASE_MANAGER_SERVICE_ID": descriptor["metadata"]["serviceId"], "RELEASE_MANAGER_RELEASE_SHA": authority["releaseSha"], "RELEASE_MANAGER_LAUNCH_TOKEN": token, "RELEASE_MANAGER_OWNED_HOST": recipe["listener"]["host"], "RELEASE_MANAGER_OWNED_PORT": str(recipe["listener"]["port"])})
+            observed = self._bridge({"action": "start", "app": {"name": authority["stableName"], "namespace": authority["namespace"], "script": recipe["bootstrap"]["executable"], "args": recipe["bootstrap"]["args"], "cwd": recipe["bootstrap"]["cwd"], "env": env}})["record"]
+            return self._handle_from_observation(observed, environment_id=descriptor["metadata"]["environmentId"], service_id=descriptor["metadata"]["serviceId"], release_sha=authority["releaseSha"], origin="started", observed_at=self._now(), sidecar={"stableName": authority["stableName"], "listener": recipe["listener"], "legacyDescriptor": copy.deepcopy(descriptor), "legacyDescriptorDigest": self._descriptor_digest(descriptor), "health": descriptor["health"]})
         if not sidecar or not sidecar.get("startSpec"):
             raise ProcessError("exact restore descriptor is unavailable")
         return self.start_candidate(copy.deepcopy(sidecar["startSpec"]))

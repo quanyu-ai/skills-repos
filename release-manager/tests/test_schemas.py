@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import copy
 import json
 import unittest
 import tempfile
@@ -16,7 +17,7 @@ validator = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(validator)
 sys.path.insert(0, str(ROOT))
-from engine.contracts import validate_contract_and_policy  # noqa: E402
+from engine.contracts import canonical_document_digest, validate_contract_and_policy, validate_legacy_restore_descriptor  # noqa: E402
 from engine import load_legacy_restore_descriptor  # noqa: E402
 
 
@@ -171,6 +172,45 @@ class SchemaHarnessTest(unittest.TestCase):
             path.chmod(0o600)
             link = Path(directory) / "link.json"; link.symlink_to(path)
             with self.assertRaisesRegex(Exception, "regular non-symlink"): load_legacy_restore_descriptor(link, os.geteuid())
+
+    def test_legacy_descriptor_binds_observation_and_typed_restore_recipe(self) -> None:
+        descriptor = self.load_valid("legacy-restore-descriptor.json")
+        validate_legacy_restore_descriptor(descriptor)
+        digest = canonical_document_digest(descriptor)
+        observed_tamper = copy.deepcopy(descriptor)
+        observed_tamper["observedAuthority"]["adapterId"] = "42"
+        self.assertNotEqual(digest, canonical_document_digest(observed_tamper))
+        restore_tamper = copy.deepcopy(descriptor)
+        restore_tamper["restoreRecipe"]["probe"]["port"] += 1
+        self.assertNotEqual(digest, canonical_document_digest(restore_tamper))
+        listener_tamper = copy.deepcopy(descriptor)
+        listener_tamper["restoreRecipe"]["listener"]["port"] += 1
+        self.assertNotEqual(digest, canonical_document_digest(listener_tamper))
+
+        cases = []
+        wrong_source = copy.deepcopy(descriptor)
+        wrong_source["restoreRecipe"]["source"]["releaseSha"] = "e" * 40
+        cases.append((wrong_source, "must match observedAuthority"))
+        wrong_payload = copy.deepcopy(descriptor)
+        wrong_payload["restoreRecipe"]["payload"]["args"].append("--unsafe")
+        cases.append((wrong_payload, "only typed listener adaptation"))
+        arbitrary_bootstrap = copy.deepcopy(descriptor)
+        arbitrary_bootstrap["restoreRecipe"]["bootstrap"]["args"] = ["--rewrite"]
+        cases.append((arbitrary_bootstrap, "arbitrary argv is forbidden"))
+        wrong_secret_source = copy.deepcopy(descriptor)
+        wrong_secret_source["restoreRecipe"]["runtime"]["runtimeSecretFile"] = "/var/lib/example/secrets/other.json"
+        cases.append((wrong_secret_source, "must equal secrets.sourcePath"))
+        cases.append((listener_tamper, "must preserve the observed business listener"))
+        reused_business_port = copy.deepcopy(descriptor)
+        reused_business_port["restoreRecipe"]["probe"] = {
+            "host": "::1",
+            "port": descriptor["restoreRecipe"]["listener"]["port"],
+        }
+        cases.append((reused_business_port, "must use a non-business port"))
+        for invalid, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(Exception, message):
+                    validate_legacy_restore_descriptor(invalid)
 
     def test_adapter_interface_has_no_state_commit_method(self) -> None:
         declarations = (ROOT / "spec" / "process-adapter.d.ts").read_text()

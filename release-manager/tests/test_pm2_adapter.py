@@ -125,6 +125,52 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             "health": copy.deepcopy(spec["health"]),
         }
 
+    def legacy_descriptor(self, *, failing_bootstrap: bool = False) -> tuple[dict, Path]:
+        release = self.root / "legacy-release" / SHA_A
+        cwd = release / "apps/web"
+        cwd.mkdir(parents=True)
+        payload = cwd / "node_modules/next/dist/bin/next"
+        payload.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "tests/fixtures/disposable-next-like.cjs", payload)
+        payload.chmod(0o755)
+        bootstrap = self.root / "trusted-tools/legacy-bootstrap.cjs"
+        bootstrap.parent.mkdir(parents=True)
+        if failing_bootstrap:
+            bootstrap.write_text("setTimeout(() => process.exit(64), 25);\n")
+        else:
+            shutil.copy2(ROOT / "tests/fixtures/disposable-legacy-wrapper.cjs", bootstrap)
+        secrets = self.root / "legacy-secrets.json"
+        secrets.write_text(json.dumps({"TEST_SECRET": "legacy-secret-must-not-leak"}))
+        secrets.chmod(0o600)
+        listener = {"host": "127.0.0.1", "port": free_port()}
+        probe_port = free_port()
+        while probe_port == listener["port"]:
+            probe_port = free_port()
+        descriptor = {
+            "apiVersion": "quanyu.ai/legacy-restore-descriptor/v1alpha1",
+            "kind": "LegacyRestoreDescriptor",
+            "metadata": {"environmentId": "legacy-demo", "serviceId": "legacy-web"},
+            "observedAuthority": {
+                "releaseSha": SHA_A, "releasePath": str(release), "namespace": "legacy-isolated",
+                "stableName": "legacy-service", "adapterId": "pending", "pid": 1,
+                "processStartId": "pending",
+                "invocation": {"executable": str(payload), "args": ["start", "-H", listener["host"], "-p", str(listener["port"])], "cwd": str(cwd)},
+                "listener": dict(listener),
+            },
+            "restoreRecipe": {
+                "source": {"releaseSha": SHA_A, "releasePath": str(release)},
+                "bootstrap": {"executable": str(bootstrap), "args": [], "cwd": str(cwd)},
+                "payload": {"executable": str(payload), "args": ["start"], "cwd": str(cwd)},
+                "listenerAdaptation": {"kind": "argv-host-port", "hostFlag": "-H", "portFlag": "-p"},
+                "runtime": {"requiredSecretNames": ["TEST_SECRET"], "requiredSecretNamesFormat": "comma-separated", "runtimeSecretFile": str(secrets), "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}]},
+                "secrets": {"provider": "external-json-file", "sourcePath": str(secrets), "requiredNames": ["TEST_SECRET"]},
+                "listener": dict(listener),
+                "probe": {"host": "127.0.0.1", "port": probe_port},
+            },
+            "health": {"path": "/api/health", "acceptedStatusClasses": [2], "attempts": 30, "intervalMs": 100},
+        }
+        return descriptor, secrets
+
     def start(self, spec: dict):
         handle = self.adapter.start_candidate(spec)
         self.created_handles.append(handle)
@@ -313,65 +359,96 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         self.assertFalse((self.pm2_home / "pm2.pid").exists())
 
     def test_legacy_restore_descriptor_probe_and_exact_restore(self) -> None:
-        release = self.root / "legacy-release" / SHA_A
-        cwd = release / "apps/web"; cwd.mkdir(parents=True)
-        launcher = release / "legacy-wrapper.cjs"
-        shutil.copy2(ROOT / "tests/fixtures/disposable-legacy-wrapper.cjs", launcher)
-        secrets = self.root / "legacy-secrets.json"
-        secrets.write_text(json.dumps({"TEST_SECRET": "legacy-secret-must-not-leak"})); secrets.chmod(0o600)
-        descriptor = {
-            "apiVersion": "quanyu.ai/legacy-restore-descriptor/v1alpha1", "kind": "LegacyRestoreDescriptor",
-            "metadata": {"environmentId": "legacy-demo", "serviceId": "legacy-web"},
-            "authority": {"releaseSha": SHA_A, "releasePath": str(release), "namespace": "legacy-isolated", "stableName": "legacy-service", "adapterId": "pending", "pid": 1, "processStartId": "pending"},
-            "launcher": {"executable": str(launcher), "args": [], "cwd": str(cwd)},
-            "wrapper": {"executable": str(launcher), "args": [], "host": "127.0.0.1", "internalPort": free_port(), "requiredSecretNames": ["TEST_SECRET"], "requiredSecretNamesFormat": "comma-separated", "runtimeSecretFile": str(secrets), "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}]},
-            "secrets": {"provider": "external-json-file", "sourcePath": str(secrets), "requiredNames": ["TEST_SECRET"]},
-            "listener": {"host": "127.0.0.1", "port": 0}, "probe": {"host": "127.0.0.1", "port": free_port()},
-            "health": {"path": "/api/health", "acceptedStatusClasses": [2], "attempts": 30, "intervalMs": 100},
-        }
-        descriptor["listener"]["port"] = descriptor["wrapper"]["internalPort"]
+        descriptor, _ = self.legacy_descriptor()
+        authority = descriptor["observedAuthority"]
+        recipe = descriptor["restoreRecipe"]
         evidence = self.adapter.preflight_legacy_restore(descriptor)
         self.assertEqual("pass", evidence["probe"])
         self.assertEqual([], self.adapter._all_inventory())
-        env = self.adapter._legacy_environment(descriptor, descriptor["listener"]["port"])
-        env["RELEASE_MANAGER_LAUNCH_TOKEN"] = "legacy-observe-token"
-        observed = self.adapter._bridge({"action": "test-start", "app": {"name": "legacy-service", "namespace": "legacy-isolated", "script": str(launcher), "args": [], "cwd": str(cwd), "env": env}})["record"]
-        descriptor["authority"].update({"adapterId": observed["adapterId"], "pid": observed["pid"], "processStartId": observed["evidence"]["processStartId"]})
+        observed = self.adapter._bridge({"action": "test-start", "app": {"name": authority["stableName"], "namespace": authority["namespace"], "script": authority["invocation"]["executable"], "args": authority["invocation"]["args"], "cwd": authority["invocation"]["cwd"], "env": {"RELEASE_MANAGER_LAUNCH_TOKEN": "legacy-observe-token"}}})["record"]
+        authority.update({"adapterId": observed["adapterId"], "pid": observed["pid"], "processStartId": observed["evidence"]["processStartId"]})
+        observation_tamper = copy.deepcopy(descriptor)
+        observation_tamper["observedAuthority"]["pid"] += 1
+        with self.assertRaisesRegex(ProcessError, "expected one exact process, found 0"):
+            self.adapter.observe_legacy(observation_tamper)
         handle = self.adapter.observe_legacy(descriptor)
-        wrong = copy.deepcopy(descriptor); wrong["authority"]["releaseSha"] = SHA_B
+        wrong = copy.deepcopy(descriptor); wrong["observedAuthority"]["releaseSha"] = SHA_B
         restart_spec, _, _ = self.spec(SHA_B)
         with self.assertRaisesRegex(ProcessError, "exact external restore descriptor"):
             self.restarted_adapter(restart_spec, legacy_descriptor=wrong).resolve_persisted(handle.record)
         reobserved = self.restarted_adapter(restart_spec, legacy_descriptor=descriptor).resolve_persisted(handle.record)
         self.assertEqual(handle.record["identity"], reobserved.record["identity"])
-        target = f"http://127.0.0.1:{descriptor['listener']['port']}/api/health"
+        target = f"http://127.0.0.1:{authority['listener']['port']}/api/health"
         self.adapter.attest(handle, SHA_A, (target, target))
         self.remove(handle)
         restored = self.adapter.restore(handle)
         self.adapter.attest(restored, SHA_A, (target, target))
         self.assertEqual(SHA_A, restored.record["releaseSha"])
+        self.assertEqual(str(Path(recipe["bootstrap"]["executable"]).resolve()), restored.record["runtime"]["executable"])
         self.remove(restored)
 
     def test_failed_legacy_restore_probe_is_removed_after_early_exit(self) -> None:
-        release = self.root / "legacy-release" / SHA_A
-        cwd = release / "apps/web"; cwd.mkdir(parents=True)
-        launcher = release / "legacy-wrapper.cjs"
-        launcher.write_text("setTimeout(() => process.exit(64), 25);\n")
-        secrets = self.root / "legacy-secrets.json"
-        secrets.write_text(json.dumps({"TEST_SECRET": "legacy-secret-must-not-leak"})); secrets.chmod(0o600)
-        descriptor = {
-            "apiVersion": "quanyu.ai/legacy-restore-descriptor/v1alpha1", "kind": "LegacyRestoreDescriptor",
-            "metadata": {"environmentId": "legacy-demo", "serviceId": "legacy-web"},
-            "authority": {"releaseSha": SHA_A, "releasePath": str(release), "namespace": "legacy-isolated", "stableName": "legacy-service", "adapterId": "pending", "pid": 1, "processStartId": "pending"},
-            "launcher": {"executable": str(launcher), "args": [], "cwd": str(cwd)},
-            "wrapper": {"executable": str(launcher), "args": [], "host": "127.0.0.1", "internalPort": free_port(), "requiredSecretNames": ["TEST_SECRET"], "requiredSecretNamesFormat": "json-array", "runtimeSecretFile": str(secrets), "nonSecretValues": [{"name": "NODE_ENV", "value": "production"}]},
-            "secrets": {"provider": "external-json-file", "sourcePath": str(secrets), "requiredNames": ["TEST_SECRET"]},
-            "listener": {"host": "127.0.0.1", "port": 0}, "probe": {"host": "127.0.0.1", "port": free_port()},
-            "health": {"path": "/api/health", "acceptedStatusClasses": [2], "attempts": 2, "intervalMs": 100},
-        }
-        descriptor["listener"]["port"] = descriptor["wrapper"]["internalPort"]
+        descriptor, _ = self.legacy_descriptor(failing_bootstrap=True)
+        descriptor["health"]["attempts"] = 2
         with self.assertRaisesRegex(ProcessError, "health attestation failed|live process identity mismatch"):
             self.adapter.preflight_legacy_restore(descriptor)
+        self.assertEqual([], self.adapter._all_inventory())
+
+    def test_legacy_restore_probe_injects_selected_host_and_non_business_port(self) -> None:
+        descriptor, _ = self.legacy_descriptor()
+        descriptor["observedAuthority"]["listener"]["host"] = "::1"
+        descriptor["observedAuthority"]["invocation"]["args"][2] = "::1"
+        descriptor["restoreRecipe"]["listener"]["host"] = "::1"
+        self.assertEqual("127.0.0.1", descriptor["restoreRecipe"]["probe"]["host"])
+        self.assertNotEqual(
+            descriptor["restoreRecipe"]["listener"]["port"],
+            descriptor["restoreRecipe"]["probe"]["port"],
+        )
+        evidence = self.adapter.preflight_legacy_restore(descriptor)
+        self.assertEqual("pass", evidence["probe"])
+        self.assertEqual([], self.adapter._all_inventory())
+
+    def test_legacy_descriptor_tamper_source_and_unsafe_inputs_fail_before_mutation(self) -> None:
+        descriptor, secrets = self.legacy_descriptor()
+        original_digest = self.adapter._descriptor_digest(descriptor)
+        observed_tamper = copy.deepcopy(descriptor)
+        observed_tamper["observedAuthority"]["invocation"]["args"][-1] = str(free_port())
+        self.assertNotEqual(original_digest, self.adapter._descriptor_digest(observed_tamper))
+        with self.assertRaisesRegex(Exception, "typed listener mismatch"):
+            self.adapter.preflight_legacy_restore(observed_tamper)
+        source_tamper = copy.deepcopy(descriptor)
+        source_tamper["restoreRecipe"]["source"]["releaseSha"] = SHA_B
+        self.assertNotEqual(original_digest, self.adapter._descriptor_digest(source_tamper))
+        with self.assertRaisesRegex(Exception, "must match observedAuthority"):
+            self.adapter.preflight_legacy_restore(source_tamper)
+        listener_tamper = copy.deepcopy(descriptor)
+        business_port = descriptor["restoreRecipe"]["listener"]["port"]
+        listener_tamper["restoreRecipe"]["listener"] = {
+            **listener_tamper["restoreRecipe"]["listener"],
+            "port": business_port + 1 if business_port < 65535 else business_port - 1,
+        }
+        self.assertNotEqual(original_digest, self.adapter._descriptor_digest(listener_tamper))
+        with self.assertRaisesRegex(Exception, "must preserve the observed business listener"):
+            self.adapter.preflight_legacy_restore(listener_tamper)
+        argv_tamper = copy.deepcopy(descriptor)
+        argv_tamper["restoreRecipe"]["payload"]["args"].append("--unsafe")
+        with self.assertRaisesRegex(Exception, "only typed listener adaptation"):
+            self.adapter.preflight_legacy_restore(argv_tamper)
+        unsafe_wrapper = copy.deepcopy(descriptor)
+        link = self.root / "unsafe-wrapper-link.cjs"
+        link.symlink_to(Path(descriptor["restoreRecipe"]["bootstrap"]["executable"]))
+        unsafe_wrapper["restoreRecipe"]["bootstrap"]["executable"] = str(link)
+        with self.assertRaisesRegex(ProcessError, "cannot be a symlink"):
+            self.adapter.preflight_legacy_restore(unsafe_wrapper)
+        secrets.chmod(0o644)
+        with self.assertRaisesRegex(ProcessError, "secret source ownership or permissions are unsafe"):
+            self.adapter.preflight_legacy_restore(descriptor)
+        self.assertEqual([], self.adapter._all_inventory())
+
+    def test_shadow_proof_does_not_persist_pm2_state(self) -> None:
+        descriptor, _ = self.legacy_descriptor()
+        self.adapter.preflight_legacy_restore(descriptor)
+        self.assertFalse((self.pm2_home / "dump.pm2").exists())
         self.assertEqual([], self.adapter._all_inventory())
 
     def test_runtime_source_overlap_fails_before_pm2_mutation(self) -> None:
