@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -63,6 +64,7 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
             health_attempts=30,
             health_interval_seconds=0.1,
         )
+        self.daemon_evidence = self.adapter.bootstrap_pinned_daemon()
         self.created_handles = []
 
     def restarted_adapter(self, spec: dict, *, secret_owner_uid: int | None = None, legacy_descriptor: dict | None = None) -> PM2ProcessAdapter:
@@ -85,6 +87,37 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         except Exception:
             pass
         self.temp.cleanup()
+
+    def replace_with_fake_daemon(self, version: str, *, poisoned: bool = False) -> subprocess.Popen:
+        self.adapter.kill_isolated_daemon()
+        self.pm2_home.mkdir(parents=True, exist_ok=True)
+        environment = {
+            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            "HOME": str(self.pm2_home),
+            "PM2_HOME": str(self.pm2_home),
+        }
+        if poisoned:
+            environment["NODE_CHANNEL_FD"] = "9"
+        process = subprocess.Popen(
+            ["bash", "-c", f"exec -a 'PM2 v{version}: God Daemon ({self.pm2_home})' sleep 60"],
+            env=environment,
+        )
+        (self.pm2_home / "pm2.pid").write_text(f"{process.pid}\n")
+        for _ in range(50):
+            if Path(f"/proc/{process.pid}/stat").is_file():
+                return process
+            time.sleep(0.02)
+        process.terminate()
+        raise RuntimeError("fake daemon did not become observable")
+
+    def remove_fake_daemon(self, process: subprocess.Popen) -> None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        (self.pm2_home / "pm2.pid").unlink(missing_ok=True)
 
     def spec(self, sha: str, status: int = 200, mode: int = 0o600) -> tuple[dict, Path, Path]:
         release = self.root / "releases" / sha
@@ -712,12 +745,16 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
                 with self.assertRaisesRegex(ProcessError, message) as raised:
                     adapter.start_candidate(candidate)
                 self.assertNotIn(secret_value, str(raised.exception))
-                self.assertFalse((self.pm2_home / "pm2.pid").exists())
+                self.assertTrue((self.pm2_home / "pm2.pid").exists())
+                self.assertEqual([], self.adapter._all_inventory())
 
     def test_adapter_self_attests_versions_and_rejects_pm2_package_drift(self) -> None:
         self.assertEqual("0.1.0", self.adapter.version_evidence["adapterVersion"])
         self.assertEqual("7.0.4", self.adapter.version_evidence["pm2PackageVersion"])
         self.assertRegex(self.adapter.version_evidence["nodeRuntime"], r"^v\d+\.\d+\.\d+$")
+        self.assertEqual("7.0.4", self.daemon_evidence["daemonPm2Version"])
+        self.assertEqual([], self.daemon_evidence["forbiddenAmbientNames"])
+        self.assertRegex(self.daemon_evidence["daemonProcessStartId"], r"^[a-f0-9-]{36}:[1-9][0-9]*$")
 
         original = PM2ProcessAdapter.pinned_pm2_version
         PM2ProcessAdapter.pinned_pm2_version = "7.0.3"
@@ -726,7 +763,60 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
                 self.restarted_adapter(self.spec(SHA_A)[0])
         finally:
             PM2ProcessAdapter.pinned_pm2_version = original
-        self.assertFalse((self.pm2_home / "pm2.pid").exists())
+        self.assertTrue((self.pm2_home / "pm2.pid").exists())
+
+    def test_daemon_version_drift_fails_before_managed_start(self) -> None:
+        fake = self.replace_with_fake_daemon("7.0.1")
+        try:
+            spec, _, _ = self.spec(SHA_A)
+            with self.assertRaisesRegex(ProcessError, "daemon version does not match"):
+                self.adapter.start_candidate(spec)
+            self.assertEqual(fake.pid, int((self.pm2_home / "pm2.pid").read_text()))
+        finally:
+            self.remove_fake_daemon(fake)
+
+    def test_forbidden_daemon_ambient_environment_fails_closed(self) -> None:
+        fake = self.replace_with_fake_daemon("7.0.4", poisoned=True)
+        try:
+            spec, _, _ = self.spec(SHA_A)
+            with self.assertRaisesRegex(ProcessError, "forbidden ambient variables") as raised:
+                self.adapter.start_candidate(spec)
+            self.assertIn("NODE_CHANNEL_FD", str(raised.exception))
+        finally:
+            self.remove_fake_daemon(fake)
+
+    def test_pinned_daemon_restart_is_sanitized_and_preserves_dump_without_claiming_authority(self) -> None:
+        dump = self.pm2_home / "dump.pm2"
+        dump.write_text("[]\n")
+        before = dump.read_bytes()
+        evidence = self.adapter.bootstrap_pinned_daemon(restart=True)
+        self.assertEqual("7.0.4", evidence["daemonPm2Version"])
+        self.assertEqual([], evidence["forbiddenAmbientNames"])
+        self.assertEqual(before, dump.read_bytes())
+        self.assertTrue(evidence["dumpPreserved"])
+        self.assertEqual([], self.adapter._all_inventory())
+
+    def test_failed_child_diagnostics_are_bounded_redacted_and_residual_is_removed(self) -> None:
+        spec, _, secrets = self.spec(SHA_A)
+        secret_value = json.loads(secrets.read_text())["TEST_SECRET"]
+        Path(spec["runtime"]["executable"]).write_text(
+            "#!/usr/bin/env node\nconsole.error('managed failure '+process.env.TEST_SECRET); process.exit(73);\n"
+        )
+        Path(spec["runtime"]["executable"]).chmod(0o755)
+        with self.assertRaisesRegex(ProcessError, "bounded diagnostics") as raised:
+            self.adapter.start_candidate(spec)
+        self.assertNotIn(secret_value, str(raised.exception))
+        diagnostics = sorted((self.pm2_home / "release-manager-diagnostics").glob("failure-*.json"))
+        self.assertEqual(1, len(diagnostics))
+        self.assertEqual(0o600, diagnostics[0].stat().st_mode & 0o777)
+        content = diagnostics[0].read_text()
+        self.assertNotIn(secret_value, content)
+        self.assertIn("[REDACTED]", content)
+        record = json.loads(content)
+        self.assertLessEqual(len(record["stdoutTail"].encode()), self.adapter.diagnostic_limit_bytes)
+        self.assertLessEqual(len(record["stderrTail"].encode()), self.adapter.diagnostic_limit_bytes)
+        self.assertEqual([], self.adapter._all_inventory())
+        self.assertTrue(self.adapter._port_is_free(spec["listener"]["host"], spec["listener"]["port"]))
 
     def test_legacy_restore_descriptor_probe_and_exact_restore(self) -> None:
         descriptor, _ = self.legacy_descriptor()

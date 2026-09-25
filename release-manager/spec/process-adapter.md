@@ -99,3 +99,25 @@ Candidate handles attest canonical digests of the complete Release Contract and 
 ## PM2 v1 implementation constraints
 
 The PM2 adapter uses the programmatic API with an explicit process object. A recognized `*.config.cjs` file is allowed only as a compatibility fixture. Cluster reload is not a v1 capability. Tests use an isolated `PM2_HOME`, disposable processes, fake secrets, Linux `/proc` evidence, and non-business ports.
+
+The adapter separately attests the bridge/client package and the connected PM2
+daemon. Every managed inventory or mutation path requires a fresh daemon proof:
+the daemon PM2 version must equal pinned `7.0.4`; its PID and Linux process-start
+identity must be live; its Node executable/runtime must match the trusted bridge
+runtime; and its ambient environment must exclude `NODE_CHANNEL_FD`,
+`NODE_UNIQUE_ID`, and future explicitly forbidden poison variables. Client
+package evidence cannot substitute for daemon evidence.
+
+Pinned daemon bootstrap/restart is an explicit operator operation. It invokes
+the installed pinned PM2 package through the trusted Node/PATH and a closed,
+sanitized environment. It preserves the existing PM2 dump byte-for-byte and
+does not observe, mint, restore, or commit application authority. Callers must
+independently apply the reviewed service restoration procedure after bootstrap.
+
+Managed starts write stdout/stderr only to per-launch raw files in a trusted
+`0700` diagnostics directory under `PM2_HOME`. On success the raw files are
+unlinked. On failure, known secret plaintext/JSON-escaped/URL-encoded/base64
+variants are redacted, output is bounded, raw files are removed, and at most
+five `0600` structured diagnostic records are retained. Diagnostics never
+enter immutable release directories, secret sources, ProcessHandles, or the
+State Store.

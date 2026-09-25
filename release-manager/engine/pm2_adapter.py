@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import base64
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import stat
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timezone
@@ -27,6 +29,9 @@ class PM2ProcessAdapter:
     version = "0.1.0"
     pinned_pm2_version = "7.0.4"
     minimum_node_major = 20
+    forbidden_daemon_environment = frozenset({"NODE_CHANNEL_FD", "NODE_UNIQUE_ID"})
+    diagnostic_limit_bytes = 16 * 1024
+    diagnostic_retention = 5
 
     def __init__(
         self,
@@ -41,6 +46,7 @@ class PM2ProcessAdapter:
         health_interval_seconds: float = 0.1,
         runtime_policy: dict[str, Any] | None = None,
         legacy_restore_descriptor: dict[str, Any] | None = None,
+        diagnostics_root: Path | None = None,
     ) -> None:
         if not re.fullmatch(r"[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}", instance_id):
             raise ProcessError("invalid PM2 adapter instance ID")
@@ -58,6 +64,10 @@ class PM2ProcessAdapter:
         self.health_interval_seconds = health_interval_seconds
         self.runtime_policy = copy.deepcopy(runtime_policy)
         self.legacy_restore_descriptor = copy.deepcopy(legacy_restore_descriptor)
+        raw_diagnostics_root = (diagnostics_root or (self.pm2_home / "release-manager-diagnostics")).absolute()
+        if not raw_diagnostics_root.resolve(strict=False).is_relative_to(self.pm2_home):
+            raise ProcessError("PM2 diagnostics root must remain inside PM2_HOME")
+        self.diagnostics_root = raw_diagnostics_root
         self.bridge = Path(__file__).resolve().parents[1] / "pm2-adapter" / "bridge.cjs"
         self.issuer = f"pm2-programmatic:{instance_id}"
         self._sidecars: dict[str, dict[str, Any]] = {}
@@ -68,16 +78,73 @@ class PM2ProcessAdapter:
         evidence = self._bridge({"action": "runtime-version"})
         pm2_version = evidence.get("pm2PackageVersion")
         node_runtime = evidence.get("nodeRuntime")
+        node_executable = evidence.get("nodeExecutable")
         match = re.fullmatch(r"v(\d+)\.\d+\.\d+", str(node_runtime))
         if pm2_version != self.pinned_pm2_version:
             raise ProcessError("loaded PM2 package version does not match the pinned adapter version")
         if not match or int(match.group(1)) < self.minimum_node_major:
             raise ProcessError("loaded Node runtime is outside the supported adapter range")
+        if not isinstance(node_executable, str) or not Path(node_executable).is_file():
+            raise ProcessError("loaded Node executable is unavailable")
         return {
             "adapterVersion": self.version,
             "pm2PackageVersion": pm2_version,
             "nodeRuntime": node_runtime,
+            "nodeExecutable": str(Path(node_executable).resolve()),
         }
+
+    def _validate_daemon_evidence(self, evidence: dict[str, Any]) -> dict[str, Any]:
+        try:
+            version = evidence["daemonPm2Version"]
+            pid = int(evidence["daemonPid"])
+            process_start_id = evidence["daemonProcessStartId"]
+            node_executable = str(Path(evidence["daemonNodeExecutable"]).resolve(strict=True))
+            node_runtime = evidence["daemonNodeRuntime"]
+            ambient_names = evidence["ambientEnvironmentNames"]
+            forbidden = evidence["forbiddenAmbientNames"]
+        except (KeyError, TypeError, ValueError, OSError) as error:
+            raise ProcessError("connected PM2 daemon attestation is incomplete") from error
+        if version != self.pinned_pm2_version:
+            raise ProcessError("connected PM2 daemon version does not match the pinned adapter version")
+        if pid <= 0 or not re.fullmatch(r"[a-f0-9-]{36}:[1-9][0-9]*", str(process_start_id)):
+            raise ProcessError("connected PM2 daemon process identity is invalid")
+        if not isinstance(ambient_names, list) or any(not isinstance(name, str) for name in ambient_names):
+            raise ProcessError("connected PM2 daemon ambient environment evidence is invalid")
+        detected = sorted(self.forbidden_daemon_environment.intersection(ambient_names))
+        if sorted(forbidden) != detected:
+            raise ProcessError("connected PM2 daemon forbidden-environment evidence is inconsistent")
+        if detected:
+            raise ProcessError(f"connected PM2 daemon contains forbidden ambient variables: {detected}")
+        if node_executable != self.version_evidence["nodeExecutable"]:
+            raise ProcessError("connected PM2 daemon Node executable differs from the trusted adapter runtime")
+        match = re.fullmatch(r"v(\d+)\.\d+\.\d+", str(node_runtime))
+        if not match or int(match.group(1)) < self.minimum_node_major:
+            raise ProcessError("connected PM2 daemon Node runtime is outside the supported adapter range")
+        return {
+            "daemonPm2Version": version,
+            "daemonPid": pid,
+            "daemonProcessStartId": process_start_id,
+            "daemonNodeExecutable": node_executable,
+            "daemonNodeRuntime": node_runtime,
+            "ambientEnvironmentNameDigest": self._raw_record_digest(sorted(ambient_names)),
+            "forbiddenAmbientNames": [],
+        }
+
+    def attest_connected_daemon(self) -> dict[str, Any]:
+        evidence = self._bridge({"action": "daemon-attestation"})
+        return self._validate_daemon_evidence(evidence.get("daemon", {}))
+
+    def bootstrap_pinned_daemon(self, *, restart: bool = False) -> dict[str, Any]:
+        evidence = self._bridge({"action": "bootstrap-daemon", "restart": restart})
+        daemon = self._validate_daemon_evidence(evidence.get("daemon", {}))
+        if evidence.get("daemon", {}).get("dumpPreserved") is not True:
+            raise ProcessError("pinned PM2 daemon bootstrap did not preserve the persisted dump")
+        daemon["dumpDigest"] = evidence["daemon"].get("dumpDigest")
+        daemon["dumpPreserved"] = True
+        return daemon
+
+    def _require_governed_daemon(self) -> dict[str, Any]:
+        return self.attest_connected_daemon()
 
     @staticmethod
     def _now() -> str:
@@ -85,10 +152,107 @@ class PM2ProcessAdapter:
 
     @staticmethod
     def _redact(text: str, values: list[str]) -> str:
+        variants = set()
         for value in values:
-            if value:
-                text = text.replace(value, "[REDACTED]")
+            if not value:
+                continue
+            variants.update({
+                value,
+                json.dumps(value, ensure_ascii=False)[1:-1],
+                urllib.parse.quote(value, safe=""),
+                base64.b64encode(value.encode()).decode(),
+            })
+        for value in sorted(variants, key=len, reverse=True):
+            text = text.replace(value, "[REDACTED]")
+        text = re.sub(r"(?i)(postgres(?:ql)?://)[^\s'\"`]+", r"\1[REDACTED]", text)
         return text
+
+    def _prepare_diagnostics(self, launch_token: str) -> tuple[Path, Path]:
+        root = self.diagnostics_root
+        if root.exists():
+            metadata = root.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+                raise ProcessError("PM2 diagnostics root must be a regular directory")
+            if metadata.st_uid != self.secret_owner_uid or stat.S_IMODE(metadata.st_mode) != 0o700:
+                raise ProcessError("PM2 diagnostics root ownership or permissions are unsafe")
+        else:
+            root.mkdir(parents=True, mode=0o700)
+            metadata = root.lstat()
+            if metadata.st_uid != self.secret_owner_uid or stat.S_IMODE(metadata.st_mode) != 0o700:
+                raise ProcessError("PM2 diagnostics root ownership or permissions are unsafe")
+        paths = (root / f"{launch_token}.stdout.raw", root / f"{launch_token}.stderr.raw")
+        for path in paths:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            os.close(descriptor)
+        return paths
+
+    @staticmethod
+    def _diagnostic_categories(text: str) -> list[str]:
+        patterns = {
+            "address-in-use": r"EADDRINUSE|address already in use",
+            "artifact-not-found": r"Could not find a production build|BUILD_ID|ENOENT.*\.next",
+            "module-not-found": r"MODULE_NOT_FOUND|Cannot find module",
+            "permission-or-readonly": r"EACCES|EPERM|EROFS|permission denied|read-only file system",
+            "node-abort-or-oom": r"FATAL ERROR|heap out of memory|SIGABRT|Assertion failed",
+            "database": r"Prisma|database|ECONNREFUSED.*5432",
+            "runtime": r"Error|exception|failed|invalid",
+        }
+        return sorted(name for name, pattern in patterns.items() if re.search(pattern, text, re.IGNORECASE)) or ["unclassified"]
+
+    def _bounded_redacted_tail(self, path: Path, sensitive: list[str]) -> str:
+        overlap = max((len(value.encode()) for value in sensitive if value), default=0)
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - self.diagnostic_limit_bytes - overlap))
+            raw = stream.read()
+        redacted = self._redact(raw.decode("utf-8", "replace"), sensitive)
+        return redacted[-self.diagnostic_limit_bytes:]
+
+    def _finalize_failed_diagnostics(
+        self,
+        launch_token: str,
+        paths: tuple[Path, Path],
+        sensitive: list[str],
+        observed: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        stdout = self._bounded_redacted_tail(paths[0], sensitive)
+        stderr = self._bounded_redacted_tail(paths[1], sensitive)
+        for path in paths:
+            path.unlink(missing_ok=True)
+        record = {
+            "apiVersion": "quanyu.ai/pm2-start-diagnostic/v1alpha1",
+            "kind": "Pm2StartDiagnostic",
+            "capturedAt": self._now(),
+            "launchTokenDigest": self._raw_record_digest({"launchToken": launch_token}),
+            "exitCode": None if observed is None else observed.get("exitCode"),
+            "exitSignal": None if observed is None else observed.get("exitSignal"),
+            "categories": self._diagnostic_categories(stdout + "\n" + stderr),
+            "stdoutTail": stdout,
+            "stderrTail": stderr,
+            "truncatedToBytes": self.diagnostic_limit_bytes,
+        }
+        destination = self.diagnostics_root / f"failure-{launch_token}.json"
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(record, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        retained = sorted(self.diagnostics_root.glob("failure-*.json"), key=lambda item: item.stat().st_mtime_ns, reverse=True)
+        for stale in retained[self.diagnostic_retention:]:
+            stale.unlink()
+        return {
+            "record": str(destination),
+            "categories": record["categories"],
+            "exitCode": record["exitCode"],
+            "exitSignal": record["exitSignal"],
+        }
+
+    @staticmethod
+    def _discard_diagnostics(paths: tuple[Path, Path]) -> None:
+        for path in paths:
+            path.unlink(missing_ok=True)
 
     def _bridge(self, request: dict[str, Any], sensitive_values: list[str] | None = None) -> dict[str, Any]:
         environment = {
@@ -199,6 +363,7 @@ class PM2ProcessAdapter:
         return self._bridge({"action": "inventory"})["records"]
 
     def inventory(self, environment_id: str, service_id: str, namespace: str) -> list[AdapterHandle]:
+        self._require_governed_daemon()
         handles = []
         for observed in self._all_inventory():
             if (
@@ -371,6 +536,7 @@ class PM2ProcessAdapter:
         return values
 
     def preflight_legacy_restore(self, descriptor: dict[str, Any]) -> dict[str, Any]:
+        self._require_governed_daemon()
         self._validate_restore_recipe(descriptor)
         observed_authority = descriptor["observedAuthority"]
         recipe = descriptor["restoreRecipe"]
@@ -430,6 +596,7 @@ class PM2ProcessAdapter:
         self.await_absent(handle)
 
     def observe_legacy(self, spec: dict[str, Any]) -> AdapterHandle:
+        self._require_governed_daemon()
         self._validate_observed_authority(spec)
         authority = spec["observedAuthority"]
         invocation = authority["invocation"]
@@ -467,6 +634,7 @@ class PM2ProcessAdapter:
         )
 
     def resolve_persisted(self, record: dict[str, Any]) -> AdapterHandle:
+        self._require_governed_daemon()
         # A persisted receipt is correlation evidence only. Restart recovery does
         # not authenticate it or accept it as live authority. Every field below
         # is reconciled against a fresh full PM2 inventory plus /proc evidence.
@@ -577,6 +745,7 @@ class PM2ProcessAdapter:
         self, record: dict[str, Any], expected: dict[str, Any]
     ) -> ManagedReconciliationObservation:
         """Mint fresh evidence without weakening exact persisted-handle resolution."""
+        self._require_governed_daemon()
         try:
             adapter = record["adapter"]
             identity = record["identity"]
@@ -715,6 +884,7 @@ class PM2ProcessAdapter:
         )
 
     def assert_replaceable(self, current: AdapterHandle, candidate: dict[str, Any]) -> None:
+        self._require_governed_daemon()
         expected = self._exact_expected(current)
         inventory = self._all_inventory()
         exact = [item for item in inventory if item["adapterId"] == expected["adapterId"]]
@@ -731,9 +901,11 @@ class PM2ProcessAdapter:
             raise ProcessError("unexpected overlapping PM2 inventory blocks replacement")
 
     def stop_exact(self, handle: AdapterHandle) -> None:
+        self._require_governed_daemon()
         self._bridge({"action": "stop", "expected": self._exact_expected(handle)})
 
     def delete_exact(self, handle: AdapterHandle) -> None:
+        self._require_governed_daemon()
         self._bridge({"action": "delete", "expected": self._exact_expected(handle)})
 
     @staticmethod
@@ -752,6 +924,7 @@ class PM2ProcessAdapter:
         return True
 
     def await_absent(self, handle: AdapterHandle) -> None:
+        self._require_governed_daemon()
         expected = self._exact_expected(handle)
         sidecar = self._sidecars.get(handle.record["provenance"]["adapterReceipt"], {})
         listener = sidecar.get("listener") or {}
@@ -854,6 +1027,7 @@ class PM2ProcessAdapter:
         raise ProcessError("raw PM2 orphan absence proof failed")
 
     def remove_interrupted_candidate(self, spec: dict[str, Any]) -> dict[str, Any]:
+        self._require_governed_daemon()
         if "releasePath" not in spec:
             raise ProcessError("interrupted activation candidate root is unavailable")
         inventory = self._all_inventory()
@@ -872,10 +1046,12 @@ class PM2ProcessAdapter:
         return self._delete_raw_owned_candidate(exact[0], spec, launch_token=None)
 
     def start_candidate(self, spec: dict[str, Any]) -> AdapterHandle:
+        self._require_governed_daemon()
         runtime_env, sensitive = self._runtime_environment(spec)
         if any(self._overlaps(item, spec) for item in self._all_inventory()):
             raise ProcessError("PM2 inventory is not clear for exact candidate start")
         launch_token = str(uuid.uuid4())
+        diagnostic_paths = self._prepare_diagnostics(launch_token)
         runtime_env.update({
             "RELEASE_MANAGER_ENVIRONMENT_ID": spec["environmentId"],
             "RELEASE_MANAGER_SERVICE_ID": spec["serviceId"],
@@ -888,19 +1064,28 @@ class PM2ProcessAdapter:
             "RELEASE_MANAGER_RELEASE_CONTRACT_DIGEST": spec["configurationDigests"]["releaseContract"],
             "RELEASE_MANAGER_ENVIRONMENT_POLICY_DIGEST": spec["configurationDigests"]["environmentPolicy"],
         })
-        response = self._bridge({
-            "action": "start",
-            "app": {
-                "name": spec["stableName"],
-                "namespace": spec["namespace"],
-                "script": spec["runtime"]["executable"],
-                "args": spec["runtime"]["args"],
-                "cwd": spec["runtime"]["cwd"],
-                "env": runtime_env,
-            },
-        }, sensitive)
+        try:
+            response = self._bridge({
+                "action": "start",
+                "app": {
+                    "name": spec["stableName"],
+                    "namespace": spec["namespace"],
+                    "script": spec["runtime"]["executable"],
+                    "args": spec["runtime"]["args"],
+                    "cwd": spec["runtime"]["cwd"],
+                    "env": runtime_env,
+                    "outFile": str(diagnostic_paths[0]),
+                    "errorFile": str(diagnostic_paths[1]),
+                },
+            }, sensitive)
+        except Exception as error:
+            diagnostics = self._finalize_failed_diagnostics(launch_token, diagnostic_paths, sensitive, None)
+            raise ProcessError(
+                f"PM2 candidate start failed; bounded diagnostics categories={diagnostics['categories']}"
+            ) from error
         observed = response["record"]
         if observed["launchToken"] != launch_token:
+            diagnostics = self._finalize_failed_diagnostics(launch_token, diagnostic_paths, sensitive, observed)
             raise ProcessError("PM2 candidate launch identity mismatch")
         sidecar = {
             "stableName": spec["stableName"],
@@ -917,6 +1102,7 @@ class PM2ProcessAdapter:
                 if item.get("launchToken") == launch_token
             ]
             if len(matches) > 1:
+                self._finalize_failed_diagnostics(launch_token, diagnostic_paths, sensitive, None)
                 raise ProcessError("candidate launch token matched multiple PM2 records")
             if len(matches) == 1:
                 observed = matches[0]
@@ -942,13 +1128,21 @@ class PM2ProcessAdapter:
                 item for item in self._all_inventory()
                 if item.get("launchToken") == launch_token
             ]
+            failed_observation = matches[0] if len(matches) == 1 else observed
             if len(matches) == 1:
                 self._delete_raw_owned_candidate(
                     matches[0], spec, launch_token=launch_token
                 )
             elif len(matches) > 1:
+                self._finalize_failed_diagnostics(launch_token, diagnostic_paths, sensitive, None)
                 raise ProcessError("candidate launch token matched multiple PM2 records")
-            raise original_failure
+            diagnostics = self._finalize_failed_diagnostics(
+                launch_token, diagnostic_paths, sensitive, failed_observation
+            )
+            raise ProcessError(
+                f"{original_failure}; bounded diagnostics categories={diagnostics['categories']} "
+                f"exitCode={diagnostics['exitCode']} exitSignal={diagnostics['exitSignal']}"
+            )
         owned = [
             item for item in self._all_inventory()
             if item["environmentId"] == spec["environmentId"]
@@ -959,10 +1153,13 @@ class PM2ProcessAdapter:
             expected = self._exact_expected(handle)
             self._bridge({"action": "stop", "expected": expected})
             self._bridge({"action": "delete", "expected": expected})
+            self._finalize_failed_diagnostics(launch_token, diagnostic_paths, sensitive, owned[0] if owned else observed)
             raise ProcessError("candidate start did not produce exactly one owned PM2 record")
+        self._discard_diagnostics(diagnostic_paths)
         return handle
 
     def attest(self, handle: AdapterHandle, expected_sha: str, health_targets: tuple[str, str]) -> dict[str, Any]:
+        self._require_governed_daemon()
         expected = self._exact_expected(handle)
         matches = [item for item in self._all_inventory() if item["adapterId"] == expected["adapterId"]]
         if len(matches) != 1:
@@ -1002,6 +1199,7 @@ class PM2ProcessAdapter:
         return {"releaseSha": expected_sha, "health": results, "processStartId": evidence["processStartId"]}
 
     def restore(self, handle: AdapterHandle) -> AdapterHandle:
+        self._require_governed_daemon()
         self.assert_handle(handle)
         sidecar = self._sidecars.get(handle.record["provenance"]["adapterReceipt"])
         if sidecar and sidecar.get("legacyDescriptor"):
@@ -1020,6 +1218,7 @@ class PM2ProcessAdapter:
         return self.start_candidate(copy.deepcopy(sidecar["startSpec"]))
 
     def persist(self, handle: AdapterHandle) -> dict[str, Any]:
+        self._require_governed_daemon()
         self.assert_handle(handle)
         receipt = handle.record["provenance"]["adapterReceipt"]
         if receipt not in self._attested:
