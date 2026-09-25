@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const pm2 = require("pm2");
 const pm2Package = require("pm2/package.json");
 
@@ -84,6 +84,46 @@ async function waitDaemonAbsent(pid) {
   throw new Error("previous PM2 daemon did not become absent");
 }
 
+async function waitDaemonReady() {
+  const pidFile = path.join(process.env.PM2_HOME, "pm2.pid");
+  const rpcSocket = path.join(process.env.PM2_HOME, "rpc.sock");
+  const pubSocket = path.join(process.env.PM2_HOME, "pub.sock");
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (fs.existsSync(pidFile) && fs.existsSync(rpcSocket) && fs.existsSync(pubSocket)) {
+      try {
+        return daemonAttestation();
+      } catch (error) {
+        if (!error || !["ENOENT", "ESRCH"].includes(error.code)) throw error;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("pinned PM2 daemon did not become ready");
+}
+
+function launchPinnedDaemonWithoutIpc() {
+  const daemonEntry = require.resolve("pm2/lib/Daemon.js");
+  const logFile = path.join(process.env.PM2_HOME, "pm2.log");
+  fs.mkdirSync(process.env.PM2_HOME, { recursive: true, mode: 0o700 });
+  const log = fs.openSync(logFile, "a", 0o600);
+  const environment = {
+    HOME: process.env.HOME,
+    PATH: process.env.PATH,
+    PM2_HOME: process.env.PM2_HOME,
+    NODE_PATH: process.env.NODE_PATH,
+    SILENT: "true",
+  };
+  const child = spawn(process.execPath, [daemonEntry], {
+    detached: true,
+    cwd: process.env.PM2_HOME,
+    windowsHide: true,
+    env: environment,
+    stdio: ["ignore", log, log],
+  });
+  fs.closeSync(log);
+  child.unref();
+}
+
 async function bootstrapDaemon(restart) {
   const dump = path.join(process.env.PM2_HOME, "dump.pm2");
   const dumpBefore = fileDigest(dump);
@@ -97,8 +137,9 @@ async function bootstrapDaemon(restart) {
   } else if (!restart && fs.existsSync(pidFile)) {
     throw new Error("PM2 daemon already exists; explicit restart is required");
   }
+  launchPinnedDaemonWithoutIpc();
+  const attestation = await waitDaemonReady();
   await connect();
-  const attestation = daemonAttestation();
   disconnect();
   const dumpAfter = fileDigest(dump);
   if (dumpAfter !== dumpBefore) throw new Error("PM2 daemon bootstrap changed the persisted dump");
