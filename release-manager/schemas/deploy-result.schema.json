@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "decision", "attemptId", "releaseSha", "artifactDigest", "stateGeneration", "transitionDigest"],
+  "properties": {
+    "schemaVersion": {"const": "quanyu.ai/release-manager-deploy-result/v1"},
+    "decision": {"enum": ["DEPLOYED", "FAIL_CLOSED"]},
+    "attemptId": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$"},
+    "releaseSha": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "artifactDigest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "stateGeneration": {"type": "integer", "minimum": 1},
+    "transitionDigest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+  }
+}

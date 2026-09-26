@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "decision", "code"],
+  "properties": {
+    "schemaVersion": {"const": "quanyu.ai/release-manager-preflight-error/v1"},
+    "decision": {"const": "FAIL_CLOSED"},
+    "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$"}
+  }
+}

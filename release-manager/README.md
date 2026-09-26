@@ -14,6 +14,7 @@ ENV-1b-a defines the experimental `v1alpha1` contracts. ENV-1b-b adds the contra
 - `pm2-adapter/`: pinned PM2 programmatic bridge, explicit-process isolated harness, and adapter operational boundary.
 - `tests/test_pm2_adapter.py`: Linux `/proc`, external-secret, exact mutation/absence, health, persistence, restart and restore integration tests.
 - `scripts/release_manager.py preflight-status`: host-bound, fail-closed, strictly read-only Control Tower operator; see `spec/preflight-status.md`.
+- `transport/`: forced-command managed-host gateway and fixed Demo client; see `spec/managed-host-transport.md`. It delegates to registered canonical operator commands and is not a second engine.
 
 ## Validation
 
