@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanyu.ai/schemas/release-manager-preflight-status/v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operator", "observedAt", "decision", "scope", "policy", "contract", "stateStore", "current", "previous", "live", "health", "candidate", "mutationProof"],
+  "properties": {
+    "schemaVersion": { "const": "quanyu.ai/release-manager-preflight-status/v1alpha1" },
+    "operator": { "type": "object", "additionalProperties": false, "required": ["version", "buildDigest"], "properties": { "version": { "const": "1.0.0" }, "buildDigest": { "$ref": "#/$defs/digest" } } },
+    "observedAt": { "$ref": "#/$defs/time" },
+    "decision": { "const": "PASS" },
+    "scope": { "type": "object", "additionalProperties": false, "required": ["environmentId", "serviceId", "repository"], "properties": { "environmentId": { "$ref": "#/$defs/id" }, "serviceId": { "$ref": "#/$defs/id" }, "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" } } },
+    "policy": { "$ref": "#/$defs/document" },
+    "contract": { "type": "object", "additionalProperties": false, "required": ["apiVersion", "application", "digest", "fileDigest"], "properties": { "apiVersion": { "type": "string" }, "application": { "$ref": "#/$defs/id" }, "digest": { "$ref": "#/$defs/digest" }, "fileDigest": { "$ref": "#/$defs/digest" } } },
+    "stateStore": { "type": "object", "additionalProperties": false, "required": ["apiVersion", "generation", "recordDigest", "updatedAt", "ageSeconds"], "properties": { "apiVersion": { "type": "string" }, "generation": { "type": "integer", "minimum": 1 }, "recordDigest": { "$ref": "#/$defs/digest" }, "updatedAt": { "$ref": "#/$defs/time" }, "ageSeconds": { "type": "integer", "minimum": 0 } } },
+    "current": { "$ref": "#/$defs/authority" },
+    "previous": { "$ref": "#/$defs/authority" },
+    "live": { "type": "object", "additionalProperties": false, "required": ["runningSha", "repository", "processHandleDigest", "adapter", "identity", "linux"], "properties": { "runningSha": { "$ref": "#/$defs/sha" }, "repository": { "type": "string" }, "processHandleDigest": { "$ref": "#/$defs/digest" }, "adapter": { "type": "object", "additionalProperties": false, "required": ["kind", "version", "instanceId"], "properties": { "kind": { "type": "string" }, "version": { "type": "string" }, "instanceId": { "type": "string" } } }, "identity": { "type": "object", "additionalProperties": false, "required": ["environmentId", "serviceId", "namespace", "adapterId", "pid", "processStartId"], "properties": { "environmentId": { "$ref": "#/$defs/id" }, "serviceId": { "$ref": "#/$defs/id" }, "namespace": { "$ref": "#/$defs/id" }, "adapterId": { "type": "string" }, "pid": { "type": "integer", "minimum": 1 }, "processStartId": { "type": "string" } } }, "linux": { "type": "object", "additionalProperties": false, "required": ["bootId", "startTicks"], "properties": { "bootId": { "type": "string", "minLength": 1 }, "startTicks": { "type": "integer", "minimum": 1 } } } } },
+    "health": { "type": "object", "additionalProperties": false, "required": ["observedAt", "internal", "public", "evidenceDigest"], "properties": { "observedAt": { "$ref": "#/$defs/time" }, "internal": { "const": "pass" }, "public": { "const": "pass" }, "evidenceDigest": { "$ref": "#/$defs/digest" } } },
+    "candidate": { "type": "object", "additionalProperties": false, "required": ["provided", "sha", "reachable"], "properties": { "provided": { "type": "boolean" }, "sha": { "oneOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] }, "reachable": { "oneOf": [{ "type": "boolean" }, { "type": "null" }] } } },
+    "mutationProof": { "type": "object", "additionalProperties": false, "required": ["stateBeforeDigest", "stateAfterDigest", "unchanged"], "properties": { "stateBeforeDigest": { "$ref": "#/$defs/digest" }, "stateAfterDigest": { "$ref": "#/$defs/digest" }, "unchanged": { "const": true } } }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "time": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "document": { "type": "object", "additionalProperties": false, "required": ["apiVersion", "digest", "fileDigest"], "properties": { "apiVersion": { "type": "string" }, "digest": { "$ref": "#/$defs/digest" }, "fileDigest": { "$ref": "#/$defs/digest" } } },
+    "digests": { "type": "object", "additionalProperties": false, "required": ["releaseContract", "environmentPolicy", "build", "runtime"], "properties": { "releaseContract": { "$ref": "#/$defs/digest" }, "environmentPolicy": { "$ref": "#/$defs/digest" }, "build": { "$ref": "#/$defs/digest" }, "runtime": { "$ref": "#/$defs/digest" } } },
+    "authority": { "type": "object", "additionalProperties": false, "required": ["releaseSha", "releasePathDigest", "processHandleDigest", "artifactDigest", "configurationDigests"], "properties": { "releaseSha": { "$ref": "#/$defs/sha" }, "releasePathDigest": { "$ref": "#/$defs/digest" }, "processHandleDigest": { "$ref": "#/$defs/digest" }, "artifactDigest": { "$ref": "#/$defs/digest" }, "configurationDigests": { "$ref": "#/$defs/digests" } } }
+  }
+}

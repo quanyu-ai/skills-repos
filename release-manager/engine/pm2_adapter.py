@@ -360,7 +360,9 @@ class PM2ProcessAdapter:
             raise ProcessError("PM2 stable service identity does not match adapter configuration")
 
     def _all_inventory(self) -> list[dict[str, Any]]:
-        return self._bridge({"action": "inventory"})["records"]
+        response = self._bridge({"action": "inventory"})
+        self._validate_daemon_evidence(response.get("daemon", {}))
+        return response["records"]
 
     def inventory(self, environment_id: str, service_id: str, namespace: str) -> list[AdapterHandle]:
         self._require_governed_daemon()
@@ -1159,6 +1161,15 @@ class PM2ProcessAdapter:
         return handle
 
     def attest(self, handle: AdapterHandle, expected_sha: str, health_targets: tuple[str, str]) -> dict[str, Any]:
+        result = self._observe_health(handle, expected_sha, health_targets)
+        self._attested.add(handle.record["provenance"]["adapterReceipt"])
+        return result
+
+    def observe_preflight(self, handle: AdapterHandle, expected_sha: str, health_targets: tuple[str, str]) -> dict[str, Any]:
+        """Fresh PM2, /proc, listener and health evidence without changing adapter or PM2 state."""
+        return self._observe_health(handle, expected_sha, health_targets)
+
+    def _observe_health(self, handle: AdapterHandle, expected_sha: str, health_targets: tuple[str, str]) -> dict[str, Any]:
         self._require_governed_daemon()
         expected = self._exact_expected(handle)
         matches = [item for item in self._all_inventory() if item["adapterId"] == expected["adapterId"]]
@@ -1194,8 +1205,6 @@ class PM2ProcessAdapter:
             if status is None or status // 100 not in accepted:
                 raise ProcessError("runtime health attestation failed")
             results.append({"target": target, "statusClass": status // 100})
-        receipt = handle.record["provenance"]["adapterReceipt"]
-        self._attested.add(receipt)
         return {"releaseSha": expected_sha, "health": results, "processStartId": evidence["processStartId"]}
 
     def restore(self, handle: AdapterHandle) -> AdapterHandle:

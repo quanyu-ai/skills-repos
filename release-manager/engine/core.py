@@ -59,6 +59,7 @@ class Candidate:
     environment_policy_digest: str
     build_config_digest: str
     runtime_config_digest: str
+    artifact_digest: str
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,16 @@ class ReleaseEngine:
     def _digest(value: Any) -> str:
         payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
         return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+    @classmethod
+    def _artifact_digest(cls, release: Path, contract: dict[str, Any]) -> str:
+        manifest = []
+        for relative in contract["artifact"]["required"]:
+            path = cls._resolve_release_path(release, relative, "artifact")
+            if not path.is_file():
+                raise ArtifactError("required artifact is not a file")
+            manifest.append({"path": relative, "size": path.stat().st_size, "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
+        return cls._digest(manifest)
 
     def _sanitize_build_environment(self, environment: dict[str, str], policy: dict[str, Any]) -> dict[str, str]:
         clean = {key: value for key, value in environment.items() if key in BUILD_ENV_ALLOWLIST}
@@ -233,7 +244,7 @@ class ReleaseEngine:
         return Candidate(
             destination, request.target_sha, attempt_id, sequence, tuple(machine.trace), health_targets,
             canonical_document_digest(request.contract), canonical_document_digest(request.policy),
-            build_digest, runtime_digest,
+            build_digest, runtime_digest, self._artifact_digest(destination, request.contract),
         )
 
     def _attempt(self, candidate: Candidate, phase: str, outcome: str, event: str) -> dict[str, Any]:
@@ -431,7 +442,7 @@ class ReleaseEngine:
                 "runtime": request.policy["runtime"],
                 "network": request.policy["network"],
                 "secrets": request.policy["secrets"],
-            }),
+            }), self._artifact_digest(candidate_root, request.contract),
         )
         if (
             candidate.release_contract_digest != context["releaseContract"]
@@ -466,7 +477,7 @@ class ReleaseEngine:
             raise
         generation = state["generation"] + 1
         current = self._authority(
-            restored, state["current"]["releasePath"], generation, health
+            restored, state["current"]["releasePath"], generation, health, state["current"].get("artifactDigest")
         )
         receipt = {
             "apiVersion": "quanyu.ai/interrupted-activation-recovery-receipt/v1alpha1",
@@ -507,6 +518,7 @@ class ReleaseEngine:
         release_path: str,
         generation: int,
         runtime_attestation: dict[str, Any] | None = None,
+        artifact_digest: str | None = None,
     ) -> dict[str, Any]:
         self.adapter.assert_handle(handle)
         sha = handle.record["releaseSha"]
@@ -514,7 +526,7 @@ class ReleaseEngine:
         if runtime_attestation is not None:
             evidence_payload["runtimeAttestation"] = runtime_attestation
         evidence = self._digest(evidence_payload)
-        return {
+        authority = {
             "generation": generation,
             "releaseSha": sha,
             "releasePath": release_path,
@@ -529,6 +541,9 @@ class ReleaseEngine:
                 "evidenceDigest": evidence,
             },
         }
+        if artifact_digest is not None:
+            authority["artifactDigest"] = artifact_digest
+        return authority
 
     def _managed_reconciliation_context(
         self, request: ReleaseRequest, state: dict[str, Any]
@@ -639,7 +654,7 @@ class ReleaseEngine:
 
             generation = state["generation"] + 1
             current = self._authority(
-                observation.handle, state["current"]["releasePath"], generation, attestation
+                observation.handle, state["current"]["releasePath"], generation, attestation, state["current"].get("artifactDigest")
             )
             receipt_payload = {
                 "apiVersion": "quanyu.ai/host-restart-reconciliation-receipt/v1alpha1",
@@ -793,7 +808,7 @@ class ReleaseEngine:
                 self.adapter.attest(candidate_handle, candidate.sha, candidate.health_targets)
                 machine.send("CANDIDATE_ATTESTED", "CANDIDATE_ATTESTED")
                 final_generation = adoption_generation + 1
-                current = self._authority(candidate_handle, str(candidate.path), final_generation)
+                current = self._authority(candidate_handle, str(candidate.path), final_generation, artifact_digest=candidate.artifact_digest)
                 attempt = self._record_approval(
                     self._attempt(candidate, "complete", "succeeded", "RUNTIME_ATTESTED"), approval_digest
                 )
@@ -866,7 +881,7 @@ class ReleaseEngine:
                 self.adapter.attest(candidate_handle, candidate.sha, candidate.health_targets)
                 machine.send("CANDIDATE_ATTESTED", "CANDIDATE_ATTESTED")
                 generation = expected + 1
-                current = self._authority(candidate_handle, str(candidate.path), generation)
+                current = self._authority(candidate_handle, str(candidate.path), generation, artifact_digest=candidate.artifact_digest)
                 attempt = self._record_approval(
                     self._attempt(candidate, "complete", "succeeded", "RUNTIME_ATTESTED"), approval_digest
                 )
@@ -885,7 +900,7 @@ class ReleaseEngine:
                 self.adapter.attest(restored, state["current"]["releaseSha"], candidate.health_targets)
                 self.adapter.persist(restored)
                 generation = expected + 1
-                current = self._authority(restored, state["current"]["releasePath"], generation)
+                current = self._authority(restored, state["current"]["releasePath"], generation, artifact_digest=state["current"].get("artifactDigest"))
                 attempt = self._record_approval(
                     self._attempt(candidate, "failed", "failed", "ACTIVATION_FAILED"), approval_digest
                 )
@@ -908,6 +923,7 @@ class ReleaseEngine:
                 compose_health_targets(request.contract, request.policy), context["releaseContract"],
                 context["environmentPolicy"], self._digest(request.policy["build"]),
                 self._digest({"runtime": request.policy["runtime"], "network": request.policy["network"], "secrets": request.policy["secrets"]}),
+                target.get("artifactDigest") or self._artifact_digest(Path(target["releasePath"]), request.contract),
             )
             current_handle = self.adapter.resolve_persisted(state["current"]["handle"])
             target_handle = self.adapter.resolve_persisted(target["handle"])
@@ -928,7 +944,7 @@ class ReleaseEngine:
                 self.adapter.attest(restored_target, target["releaseSha"], candidate.health_targets)
                 machine.send("TARGET_RUNTIME_ATTESTED", "TARGET_RUNTIME_ATTESTED")
                 generation = state["generation"] + 1
-                current = self._authority(restored_target, target["releasePath"], generation)
+                current = self._authority(restored_target, target["releasePath"], generation, artifact_digest=target.get("artifactDigest"))
                 final = self._base_record(
                     request, generation, "managed", self._attempt(candidate, "complete", "succeeded", "ROLLBACK_ATTESTED"),
                     current=current, previous=state["current"]
@@ -947,7 +963,7 @@ class ReleaseEngine:
                 self.adapter.attest(restored, state["current"]["releaseSha"], candidate.health_targets)
                 self.adapter.persist(restored)
                 generation = state["generation"] + 1
-                current = self._authority(restored, state["current"]["releasePath"], generation)
+                current = self._authority(restored, state["current"]["releasePath"], generation, artifact_digest=state["current"].get("artifactDigest"))
                 failed = self._base_record(
                     request, generation, "failed", self._attempt(candidate, "failed", "failed", "ROLLBACK_FAILED"), current=current
                 )
@@ -1043,13 +1059,14 @@ class ReleaseEngine:
                 self.adapter.attest(restored, authority["releaseSha"], targets)
             self.adapter.persist(restored)
             generation = state["generation"] + 1
-            restored_authority = self._authority(restored, authority["releasePath"], generation)
+            restored_authority = self._authority(restored, authority["releasePath"], generation, artifact_digest=authority.get("artifactDigest"))
             context = self._canonical_context(request)
             candidate = Candidate(
                 Path(authority["releasePath"]), state["attempt"]["targetSha"], state["attempt"]["attemptId"],
                 state["attempt"]["sequence"], (), targets, context["releaseContract"],
                 context["environmentPolicy"], self._digest(request.policy["build"]),
                 self._digest({"runtime": request.policy["runtime"], "network": request.policy["network"], "secrets": request.policy["secrets"]}),
+                authority.get("artifactDigest") or self._artifact_digest(Path(authority["releasePath"]), request.contract),
             )
             slot = "current" if "current" in state else "legacy"
             if slot == "legacy":

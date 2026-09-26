@@ -154,6 +154,7 @@
         "releaseSha": { "$ref": "#/$defs/sha" },
         "releasePath": { "type": "string", "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[A-Za-z0-9._@+/-]+$" },
         "restorable": { "const": true },
+        "artifactDigest": { "$ref": "#/$defs/digest" },
         "handle": { "$ref": "https://quanyu.ai/schemas/process-handle/v1alpha1" },
         "attestation": { "$ref": "#/$defs/attestation" }
       }

@@ -371,6 +371,10 @@ class FakeProcessAdapter:
         self.runtime.events.append("attest")
         return {"internal": health_targets[0], "public": health_targets[1], "result": "pass"}
 
+    def observe_preflight(self, handle: AdapterHandle, expected_sha: str, health_targets: tuple[str, str]) -> dict[str, Any]:
+        self.attest(handle, expected_sha, health_targets)
+        return {"releaseSha": expected_sha, "processStartId": handle.record["identity"]["processStartId"], "health": [{"target": target, "statusClass": 2} for target in health_targets]}
+
     def restore(self, handle: AdapterHandle) -> AdapterHandle:
         self.assert_handle(handle)
         if self.runtime.fail_restore:
