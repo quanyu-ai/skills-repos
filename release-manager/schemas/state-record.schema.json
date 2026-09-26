@@ -38,6 +38,7 @@
         "targetSha": { "$ref": "#/$defs/sha" },
         "releaseContractDigest": { "$ref": "#/$defs/digest" },
         "environmentPolicyDigest": { "$ref": "#/$defs/digest" },
+        "artifactDigest": { "$ref": "#/$defs/digest" },
         "phase": {
           "enum": ["requested", "building", "candidate-ready", "waiting-db-gate", "activating", "attesting", "committing", "restoring", "complete", "failed", "recovery-required"]
         },
@@ -154,6 +155,7 @@
         "releaseSha": { "$ref": "#/$defs/sha" },
         "releasePath": { "type": "string", "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[A-Za-z0-9._@+/-]+$" },
         "restorable": { "const": true },
+        "artifactDigest": { "$ref": "#/$defs/digest" },
         "handle": { "$ref": "https://quanyu.ai/schemas/process-handle/v1alpha1" },
         "attestation": { "$ref": "#/$defs/attestation" }
       }

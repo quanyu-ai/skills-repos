@@ -27,8 +27,8 @@ function call(method, ...args) {
   });
 }
 
-function connect() {
-  return new Promise((resolve, reject) => pm2.connect((error) => error ? reject(error) : resolve()));
+function connect(noDaemon = false) {
+  return new Promise((resolve, reject) => pm2.connect(noDaemon, (error) => error ? reject(error) : resolve()));
 }
 
 function disconnect() {
@@ -266,9 +266,11 @@ async function main() {
   if (request.action === "bootstrap-daemon") {
     return { daemon: await bootstrapDaemon(request.restart === true) };
   }
-  await connect();
+  // Inventory is the Operator read path. noDaemon=true guarantees a vanished
+  // daemon is never recreated by a supposedly read-only call.
+  await connect(request.action === "inventory");
   try {
-    if (request.action === "inventory") return { records: await inventory() };
+    if (request.action === "inventory") return { records: await inventory(), daemon: daemonAttestation() };
     if (request.action === "start" || request.action === "test-start") {
       return { record: await startExplicit(request.app) };
     }

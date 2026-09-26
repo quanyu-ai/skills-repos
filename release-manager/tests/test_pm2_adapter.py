@@ -663,12 +663,16 @@ class PM2AdapterIntegrationTest(unittest.TestCase):
         candidate_root = workspace / "attempts" / f"2-{attempt_id}" / SHA_B
         candidate_root.mkdir(parents=True)
         shutil.copy2(ROOT / "tests/fixtures/disposable-http-service.cjs", candidate_root / "disposable-http-service.cjs")
+        required_artifact = candidate_root / contract["artifact"]["required"][0]
+        required_artifact.parent.mkdir(parents=True)
+        required_artifact.write_text("candidate artifact\n", encoding="utf-8")
         pending = copy.deepcopy(managed)
         pending.update({"generation": 2, "updatedAt": "2026-09-25T00:00:00Z", "status": "candidate-ready"})
         pending["attempt"] = {
             "attemptId": attempt_id, "sequence": 2, "targetSha": SHA_B,
             "releaseContractDigest": configuration_digests["releaseContract"],
             "environmentPolicyDigest": configuration_digests["environmentPolicy"],
+            "artifactDigest": engine._artifact_digest(candidate_root, contract),
             "phase": "candidate-ready", "outcome": "pending",
             "events": [{"sequence": 1, "at": "2026-09-25T00:00:00Z", "type": "CANDIDATE_READY"}],
         }
