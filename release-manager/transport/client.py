@@ -16,7 +16,7 @@ HOST = "8.138.118.28"
 IDENTITY = Path("/Users/Cloud/.ssh/deploy_local")
 KNOWN_HOSTS = Path("/Users/Cloud/.ssh/release_demo_known_hosts")
 USER = "release-runner"
-OPERATOR_SHA = "e0ccf99ddc3b33d881d8942ae86602d7c96883e8"
+AUTHORITY = Path("/Users/Cloud/.ssh/release_demo_authority.json")
 
 
 def _safe_file(path: Path, mode: int) -> None:
@@ -36,7 +36,21 @@ def ssh_argv(identity: Path = IDENTITY, known_hosts: Path = KNOWN_HOSTS) -> list
             f"{USER}@{HOST}", "release-runner"]
 
 
-def invoke(request: dict[str, str]) -> dict[str, Any]:
+def _authority(path: Path = AUTHORITY) -> dict[str, str]:
+    _safe_file(path, 0o600)
+    value = json.loads(path.read_bytes())
+    required = {"schemaVersion", "canonicalSha", "installTreeDigest", "gatewayDigest", "operatorEntrypointDigest"}
+    if (not isinstance(value, dict) or set(value) != required
+            or value["schemaVersion"] != "quanyu.ai/managed-release-client-authority/v1"
+            or not SHA.fullmatch(value["canonicalSha"])
+            or any(not isinstance(value[name], str) or not value[name].startswith("sha256:") or len(value[name]) != 71
+                   for name in ("installTreeDigest", "gatewayDigest", "operatorEntrypointDigest"))):
+        raise RuntimeError("managed transport authority is invalid")
+    return value
+
+
+def invoke(request: dict[str, str], authority_path: Path = AUTHORITY) -> dict[str, Any]:
+    authority = _authority(authority_path)
     canonical = json.dumps(_request(json.dumps(request).encode()), sort_keys=True, separators=(",", ":")).encode()
     completed = subprocess.run(ssh_argv(), input=canonical, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                check=False, timeout=330, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
@@ -46,7 +60,7 @@ def invoke(request: dict[str, str]) -> dict[str, Any]:
     expected_digest = f"sha256:{hashlib.sha256(canonical).hexdigest()}"
     if (completed.returncode != 0 or set(value) != {"schemaVersion", "requestDigest", "operatorSha", "mode", "exitCode", "result"}
             or value["schemaVersion"] != "quanyu.ai/managed-release-transport-evidence/v1"
-            or value["requestDigest"] != expected_digest or value["operatorSha"] != OPERATOR_SHA
+            or value["requestDigest"] != expected_digest or value["operatorSha"] != authority["canonicalSha"]
             or value["mode"] != request["mode"] or value["exitCode"] != 0 or not isinstance(value["result"], dict)):
         raise RuntimeError("managed transport evidence did not match the request authority")
     return value

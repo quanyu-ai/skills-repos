@@ -19,6 +19,7 @@ import gateway
 
 class TransportTest(unittest.TestCase):
     SHA = "a" * 40
+    OPERATOR_SHA = "1" * 40
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -42,14 +43,14 @@ class TransportTest(unittest.TestCase):
         digest = hashlib.sha256(self.operator.read_bytes()).hexdigest()
         tree_digest = gateway._tree_digest(self.install_root, os.geteuid())
         self.manifest.write_text(json.dumps({"schemaVersion": "quanyu.ai/release-manager-install/v1",
-            "sourceSha": "e0ccf99ddc3b33d881d8942ae86602d7c96883e8",
+            "sourceSha": self.OPERATOR_SHA,
             "installTreeDigest": f"sha256:{tree_digest}",
             "commandDigests": {mode: f"sha256:{digest}" for mode in gateway.MODES},
             "deployAuthority": "release-manager/engine/core.py:ReleaseEngine"}))
         self.manifest.chmod(0o600)
         self.registry.write_text(json.dumps({"schemaVersion": "quanyu.ai/release-transport-registry/v1", "bindings": [{
             "environment": "demo", "application": "smart-college", "repository": "quanyu-ai/proj-code-smart-college",
-            "operatorSha": "e0ccf99ddc3b33d881d8942ae86602d7c96883e8", "allowDeploy": False,
+            "operatorSha": self.OPERATOR_SHA, "allowDeploy": False,
             "operatorManifest": str(self.manifest),
             "installRoot": str(self.install_root),
             "commands": {"preflight": [str(self.operator), "preflight-status"],
@@ -139,11 +140,16 @@ class TransportTest(unittest.TestCase):
         identity.write_text("not-a-real-key"); hosts.write_text("not-a-real-host-key")
         identity.chmod(0o600); hosts.chmod(0o600)
         request = {"environment": "demo", "application": "smart-college", "sha": self.SHA, "mode": "preflight"}
+        authority = root / "authority.json"
+        authority.write_text(json.dumps({"schemaVersion": "quanyu.ai/managed-release-client-authority/v1",
+            "canonicalSha": self.OPERATOR_SHA, "installTreeDigest": "sha256:" + "2" * 64,
+            "gatewayDigest": "sha256:" + "3" * 64, "operatorEntrypointDigest": "sha256:" + "4" * 64}))
+        authority.chmod(0o600)
         bad = type("R", (), {"stdout": json.dumps({"schemaVersion": "quanyu.ai/managed-release-transport-evidence/v1",
-            "requestDigest": "sha256:" + "0" * 64, "operatorSha": client.OPERATOR_SHA, "mode": "preflight",
+            "requestDigest": "sha256:" + "0" * 64, "operatorSha": self.OPERATOR_SHA, "mode": "preflight",
             "exitCode": 0, "result": {}}).encode(), "returncode": 0})()
         with patch("client.ssh_argv", return_value=["/usr/bin/ssh"]), patch("client.subprocess.run", return_value=bad), self.assertRaises(RuntimeError):
-            client.invoke(request)
+            client.invoke(request, authority)
 
 
 if __name__ == "__main__":
