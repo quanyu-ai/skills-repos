@@ -38,6 +38,7 @@
         "targetSha": { "$ref": "#/$defs/sha" },
         "releaseContractDigest": { "$ref": "#/$defs/digest" },
         "environmentPolicyDigest": { "$ref": "#/$defs/digest" },
+        "artifactDigest": { "$ref": "#/$defs/digest" },
         "phase": {
           "enum": ["requested", "building", "candidate-ready", "waiting-db-gate", "activating", "attesting", "committing", "restoring", "complete", "failed", "recovery-required"]
         },

@@ -254,6 +254,7 @@ class ReleaseEngine:
             "targetSha": candidate.sha,
             "releaseContractDigest": candidate.release_contract_digest,
             "environmentPolicyDigest": candidate.environment_policy_digest,
+            "artifactDigest": candidate.artifact_digest,
             "phase": phase,
             "outcome": outcome,
             "events": [{"sequence": 1, "at": self.now(), "type": event}],
@@ -442,7 +443,7 @@ class ReleaseEngine:
                 "runtime": request.policy["runtime"],
                 "network": request.policy["network"],
                 "secrets": request.policy["secrets"],
-            }), self._artifact_digest(candidate_root, request.contract),
+            }), attempt.get("artifactDigest") or self._artifact_digest(candidate_root, request.contract),
         )
         if (
             candidate.release_contract_digest != context["releaseContract"]
