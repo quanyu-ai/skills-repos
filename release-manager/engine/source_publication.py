@@ -92,7 +92,7 @@ def _safe_repository(path: Path, trusted_uids: tuple[int, ...]) -> Path:
 def _run(argv: list[str], *, env: dict[str, str], input_bytes: bytes | None = None,
          timeout: int = 120) -> subprocess.CompletedProcess[bytes]:
     try:
-        return subprocess.run(argv, input=input_bytes, stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
+        return subprocess.run(argv, input=input_bytes, stdin=None if input_bytes is not None else subprocess.DEVNULL,
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
                               timeout=timeout, env=env)
     except (OSError, subprocess.SubprocessError) as exc:

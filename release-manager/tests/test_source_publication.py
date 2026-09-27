@@ -50,6 +50,13 @@ class SourcePublicationTest(unittest.TestCase):
                 publication.publish(self.binding, *values)
             run.assert_not_called()
 
+    def test_fixed_git_stdin_uses_subprocess_input_pipe(self) -> None:
+        completed = type("Completed", (), {"returncode": 0, "stdout": b""})()
+        with patch.object(publication.subprocess, "run", return_value=completed) as run:
+            publication._run(["/usr/bin/git", "update-ref", "--stdin"], env={}, input_bytes=b"start\nabort\n")
+        self.assertEqual(b"start\nabort\n", run.call_args.kwargs["input"])
+        self.assertIsNone(run.call_args.kwargs["stdin"])
+
     def test_existing_exact_ref_is_idempotent_and_state_is_unchanged(self) -> None:
         calls = []
         def ref(_mirror, name, _env):
