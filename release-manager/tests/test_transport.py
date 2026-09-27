@@ -45,6 +45,7 @@ class TransportTest(unittest.TestCase):
         self.manifest.write_text(json.dumps({"schemaVersion": "quanyu.ai/release-manager-install/v1",
             "sourceSha": self.OPERATOR_SHA,
             "installTreeDigest": f"sha256:{tree_digest}",
+            "gatewayDigest": "sha256:" + "5" * 64,
             "commandDigests": {mode: f"sha256:{digest}" for mode in gateway.MODES},
             "deployAuthority": "release-manager/engine/core.py:ReleaseEngine"}))
         self.manifest.chmod(0o600)

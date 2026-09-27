@@ -58,9 +58,13 @@ def invoke(request: dict[str, str], authority_path: Path = AUTHORITY) -> dict[st
     if not isinstance(value, dict):
         raise RuntimeError("transport returned invalid evidence")
     expected_digest = f"sha256:{hashlib.sha256(canonical).hexdigest()}"
-    if (completed.returncode != 0 or set(value) != {"schemaVersion", "requestDigest", "operatorSha", "mode", "exitCode", "result"}
+    if (completed.returncode != 0 or set(value) != {"schemaVersion", "requestDigest", "operatorSha",
+            "installTreeDigest", "gatewayDigest", "operatorEntrypointDigest", "mode", "exitCode", "result"}
             or value["schemaVersion"] != "quanyu.ai/managed-release-transport-evidence/v1"
             or value["requestDigest"] != expected_digest or value["operatorSha"] != authority["canonicalSha"]
+            or value["installTreeDigest"] != authority["installTreeDigest"]
+            or value["gatewayDigest"] != authority["gatewayDigest"]
+            or value["operatorEntrypointDigest"] != authority["operatorEntrypointDigest"]
             or value["mode"] != request["mode"] or value["exitCode"] != 0 or not isinstance(value["result"], dict)):
         raise RuntimeError("managed transport evidence did not match the request authority")
     return value

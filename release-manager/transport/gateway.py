@@ -114,7 +114,7 @@ def _tree_digest(root: Path, owner_uid: int) -> str:
     return digest.hexdigest()
 
 
-def _binding(registry: dict[str, Any], request: dict[str, str], registry_owner_uid: int) -> tuple[dict[str, Any], int]:
+def _binding(registry: dict[str, Any], request: dict[str, str], registry_owner_uid: int) -> tuple[dict[str, Any], int, dict[str, Any]]:
     if set(registry) != {"schemaVersion", "bindings"} or registry["schemaVersion"] != "quanyu.ai/release-transport-registry/v1":
         raise GatewayError("registry schema is invalid")
     bindings = registry["bindings"]
@@ -129,7 +129,7 @@ def _binding(registry: dict[str, Any], request: dict[str, str], registry_owner_u
     if not SHA.fullmatch(str(item["operatorSha"])) or not isinstance(item["allowDeploy"], bool):
         raise GatewayError("binding authority is invalid")
     manifest = _safe_json(Path(item["operatorManifest"]), (registry_owner_uid,))
-    if (set(manifest) != {"schemaVersion", "sourceSha", "installTreeDigest", "commandDigests", "deployAuthority"}
+    if (set(manifest) != {"schemaVersion", "sourceSha", "installTreeDigest", "gatewayDigest", "commandDigests", "deployAuthority"}
             or manifest["schemaVersion"] != "quanyu.ai/release-manager-install/v1"
             or manifest["sourceSha"] != item["operatorSha"]
             or manifest["deployAuthority"] != "release-manager/engine/core.py:ReleaseEngine"
@@ -158,7 +158,7 @@ def _binding(registry: dict[str, Any], request: dict[str, str], registry_owner_u
     if request["mode"] == "deploy" and not item["allowDeploy"]:
         os.close(fd)
         raise GatewayError("deploy is not enabled by host authority")
-    return item, fd
+    return item, fd, manifest
 
 
 def _request(raw: bytes) -> dict[str, str]:
@@ -226,7 +226,7 @@ def _validate_evidence_schema(mode: str, value: Any, install_root: Path, owner_u
 def invoke(raw: bytes, registry_path: Path = REGISTRY, *, trusted_owner_uid: int = 0) -> dict[str, Any]:
     request = _request(raw)
     registry = _safe_json(registry_path, (trusted_owner_uid,))
-    binding, executable_fd = _binding(registry, request, trusted_owner_uid)
+    binding, executable_fd, manifest = _binding(registry, request, trusted_owner_uid)
     proc_executable = f"/proc/self/fd/{executable_fd}"
     command = [proc_executable, *binding["commands"][request["mode"]][1:],
                "--environment-id", request["environment"], "--service-id", request["application"],
@@ -248,7 +248,10 @@ def invoke(raw: bytes, registry_path: Path = REGISTRY, *, trusted_owner_uid: int
         raise GatewayError("operator returned forbidden sensitive output")
     digest = hashlib.sha256(json.dumps(request, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return {"schemaVersion": "quanyu.ai/managed-release-transport-evidence/v1", "requestDigest": f"sha256:{digest}",
-            "operatorSha": binding["operatorSha"], "mode": request["mode"], "exitCode": completed.returncode,
+            "operatorSha": binding["operatorSha"], "installTreeDigest": manifest["installTreeDigest"],
+            "gatewayDigest": manifest["gatewayDigest"],
+            "operatorEntrypointDigest": manifest["commandDigests"][request["mode"]],
+            "mode": request["mode"], "exitCode": completed.returncode,
             "result": result}
 
 
