@@ -106,6 +106,7 @@ class SourcePublicationTest(unittest.TestCase):
         self.assertIn(publication.CANONICAL_URL, rendered)
         self.assertIn("+" + publication.EXPECTED_SHA + ":" + publication.TEMP_REF, rendered)
         self.assertIn("+" + publication.TEMP_REF + ":" + publication.TEMP_REF, rendered)
+        self.assertNotIn("--depth=1", rendered)
         ssh_env = publication._git_env(self.binding)
         self.assertIn("BatchMode=yes", ssh_env["GIT_SSH_COMMAND"])
         self.assertIn("StrictHostKeyChecking=yes", ssh_env["GIT_SSH_COMMAND"])

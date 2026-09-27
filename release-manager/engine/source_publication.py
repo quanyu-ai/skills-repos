@@ -185,7 +185,7 @@ def publish(binding: SourcePublicationBinding, environment_id: str, service_id: 
                 if init.returncode != 0:
                     raise SourcePublicationError("publication quarantine initialization failed")
                 fetched = _run(["/usr/bin/git", "-c", "credential.helper=", "-C", str(quarantine),
-                                "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--depth=1",
+                                "fetch", "--quiet", "--no-tags", "--no-write-fetch-head",
                                 CANONICAL_URL, f"+{EXPECTED_SHA}:{TEMP_REF}"], env=env, timeout=240)
                 if fetched.returncode != 0:
                     raise SourcePublicationError("canonical GitHub provenance could not be fetched")
