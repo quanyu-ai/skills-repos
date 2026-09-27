@@ -81,12 +81,13 @@ class SubprocessLifecycleRunner:
                  trusted_owner_uids: tuple[int, ...]) -> None:
         self.trusted_path = trusted_path
         if set(toolchain) != {"packageManager", "nodeExecutable", "corepackProgram", "corepackHome",
-                             "prismaGenerateDatabaseUrl", "prismaGenerateTurboGlobalEnv"}:
+                             "toolchainBin", "prismaGenerateDatabaseUrl", "prismaGenerateTurboGlobalEnv"}:
             raise ToolchainError("registered package manager toolchain is invalid")
         self.package_manager = toolchain["packageManager"]
         self.node = self._safe_program(Path(toolchain["nodeExecutable"]), trusted_owner_uids)
         self.corepack = self._safe_program(Path(toolchain["corepackProgram"]), trusted_owner_uids)
         self.corepack_home = self._safe_directory(Path(toolchain["corepackHome"]), trusted_owner_uids)
+        self.toolchain_bin = self._safe_directory(Path(toolchain["toolchainBin"]), trusted_owner_uids)
         if toolchain["prismaGenerateDatabaseUrl"] != self.PRISMA_GENERATE_DATABASE_URL:
             raise ToolchainError("registered Prisma generation environment is invalid")
         if toolchain["prismaGenerateTurboGlobalEnv"] != "DATABASE_URL":
@@ -129,7 +130,7 @@ class SubprocessLifecycleRunner:
 
     def _run(self, root: Path, argv: list[str], env: dict[str, str]) -> None:
         clean = dict(env)
-        clean["PATH"] = ":".join(self.trusted_path)
+        clean["PATH"] = ":".join((self.toolchain_bin, *self.trusted_path))
         clean["LANG"] = "C.UTF-8"
         clean["COREPACK_HOME"] = self.corepack_home
         try:

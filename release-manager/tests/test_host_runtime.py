@@ -108,6 +108,7 @@ class HostRuntimeTest(unittest.TestCase):
     def test_lifecycle_runner_uses_corepack_without_a_shell(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
+                     "toolchainBin": str(self.root),
                      "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
                      "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
         runner = SubprocessLifecycleRunner(("/usr/bin", "/bin"), toolchain, (0, os.geteuid()))
@@ -124,6 +125,7 @@ class HostRuntimeTest(unittest.TestCase):
                          run.call_args_list[2].args[0])
         self.assertNotIn("shell", run.call_args_list[0].kwargs)
         self.assertEqual(str(self.root), run.call_args_list[0].kwargs["env"]["COREPACK_HOME"])
+        self.assertEqual(f"{self.root}:/usr/bin:/bin", run.call_args_list[0].kwargs["env"]["PATH"])
         self.assertNotIn("DATABASE_URL", run.call_args_list[0].kwargs["env"])
         self.assertEqual(self.PRISMA_GENERATE_DATABASE_URL,
                          run.call_args_list[1].kwargs["env"]["DATABASE_URL"])
@@ -132,6 +134,7 @@ class HostRuntimeTest(unittest.TestCase):
     def test_unregistered_package_manager_and_unsafe_program_fail_closed(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
+                     "toolchainBin": str(self.root),
                      "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
                      "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
         runner = SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
@@ -147,6 +150,7 @@ class HostRuntimeTest(unittest.TestCase):
     def test_unregistered_prisma_generation_environment_fails_closed(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
+                     "toolchainBin": str(self.root),
                      "prismaGenerateDatabaseUrl": "postgresql://database.internal/production",
                      "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
         with self.assertRaises(ToolchainError):
@@ -155,6 +159,7 @@ class HostRuntimeTest(unittest.TestCase):
     def test_unregistered_prisma_turbo_forwarding_fails_closed(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
+                     "toolchainBin": str(self.root),
                      "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
                      "prismaGenerateTurboGlobalEnv": "DATABASE_URL,SECRET"}
         with self.assertRaises(ToolchainError):
