@@ -55,8 +55,9 @@ def _authority(path: Path = AUTHORITY) -> dict[str, str]:
 def invoke(request: dict[str, str], authority_path: Path = AUTHORITY) -> dict[str, Any]:
     authority = _authority(authority_path)
     canonical = json.dumps(_request(json.dumps(request).encode()), sort_keys=True, separators=(",", ":")).encode()
+    timeout = 600 if request["mode"] == "source-publication" else 330
     completed = subprocess.run(ssh_argv(), input=canonical, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                               check=False, timeout=330, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
+                               check=False, timeout=timeout, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
     value = json.loads(completed.stdout)
     if not isinstance(value, dict):
         raise RuntimeError("transport returned invalid evidence")
