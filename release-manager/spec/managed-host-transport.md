@@ -22,13 +22,18 @@ The corresponding `authorized_keys` entry must be installed by a trusted host
 administrator with all of these restrictions:
 
 ```text
-restrict,command="/usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /usr/bin/python3 -I -B /opt/quanyu/release-manager/current/transport/gateway.py",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding <PUBLIC-KEY-INSTALLED-OUT-OF-BAND>
+restrict,command="/usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /opt/quanyu/release-manager/runtime/python3.12 -I -B /opt/quanyu/release-manager/current/transport/gateway.py",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding <PUBLIC-KEY-INSTALLED-OUT-OF-BAND>
 ```
 
 The `release-runner` home and Python user-site must not be writable by the
-service identity. The absolute isolated interpreter command above is part of
-the contract; invoking the gateway through its `/usr/bin/env python3` shebang
-is not an accepted host installation.
+service identity. `/opt/quanyu/release-manager/runtime/python3.12` must be a
+root-owned, non-symlink Python 3.12 executable whose parent chain is not
+group/other-writable. The absolute isolated interpreter command above is part
+of the contract; invoking the gateway through its `/usr/bin/env python3`
+shebang is not an accepted host installation. The canonical operator
+entrypoint uses the same absolute interpreter in its shebang and is installed
+executable so the gateway can open, hash and execute one measured file
+descriptor.
 
 The pre-Transport Operator SHA
 `e0ccf99ddc3b33d881d8942ae86602d7c96883e8` is historical base evidence only

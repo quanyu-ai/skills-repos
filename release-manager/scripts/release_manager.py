@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/quanyu/release-manager/runtime/python3.12
 """Host-bound Release Manager operator. This command intentionally has no path or shell options."""
 from __future__ import annotations
 
