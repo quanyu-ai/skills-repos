@@ -152,6 +152,21 @@ class TransportTest(unittest.TestCase):
         with patch("client.ssh_argv", return_value=["/usr/bin/ssh"]), patch("client.subprocess.run", return_value=bad), self.assertRaises(RuntimeError):
             client.invoke(request, authority)
 
+    def test_client_authority_rejects_pre_transport_sha_and_non_hex_digest(self):
+        root = Path(self.temp.name).resolve()
+        authority = root / "authority.json"
+        value = {"schemaVersion": "quanyu.ai/managed-release-client-authority/v1",
+                 "canonicalSha": client.PRE_TRANSPORT_SHA, "installTreeDigest": "sha256:" + "2" * 64,
+                 "gatewayDigest": "sha256:" + "3" * 64, "operatorEntrypointDigest": "sha256:" + "4" * 64}
+        authority.write_text(json.dumps(value)); authority.chmod(0o600)
+        with self.assertRaises(RuntimeError):
+            client._authority(authority)
+        value["canonicalSha"] = self.OPERATOR_SHA
+        value["gatewayDigest"] = "sha256:" + "z" * 64
+        authority.write_text(json.dumps(value))
+        with self.assertRaises(RuntimeError):
+            client._authority(authority)
+
 
 if __name__ == "__main__":
     unittest.main()

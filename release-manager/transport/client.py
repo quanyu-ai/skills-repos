@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -17,6 +18,7 @@ IDENTITY = Path("/Users/Cloud/.ssh/deploy_local")
 KNOWN_HOSTS = Path("/Users/Cloud/.ssh/release_demo_known_hosts")
 USER = "release-runner"
 AUTHORITY = Path("/Users/Cloud/.ssh/release_demo_authority.json")
+PRE_TRANSPORT_SHA = "e0ccf99ddc3b33d881d8942ae86602d7c96883e8"
 
 
 def _safe_file(path: Path, mode: int) -> None:
@@ -43,7 +45,8 @@ def _authority(path: Path = AUTHORITY) -> dict[str, str]:
     if (not isinstance(value, dict) or set(value) != required
             or value["schemaVersion"] != "quanyu.ai/managed-release-client-authority/v1"
             or not SHA.fullmatch(value["canonicalSha"])
-            or any(not isinstance(value[name], str) or not value[name].startswith("sha256:") or len(value[name]) != 71
+            or value["canonicalSha"] == PRE_TRANSPORT_SHA
+            or any(not isinstance(value[name], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value[name])
                    for name in ("installTreeDigest", "gatewayDigest", "operatorEntrypointDigest"))):
         raise RuntimeError("managed transport authority is invalid")
     return value
