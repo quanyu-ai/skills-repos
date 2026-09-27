@@ -361,6 +361,66 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(previous, result.state["previous"])
         self.assertEqual(attempt, result.state["attempt"])
 
+    def test_artifact_authority_migration_backfills_both_slots_without_process_mutation(self) -> None:
+        self.adopt_a()
+        engine_b, *_ = self.components(SHA_B)
+        state = engine_b.activate(self.request(SHA_B))
+        for slot in ("current", "previous"):
+            state[slot].pop("artifactDigest")
+        store = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock")
+        store.state_file.write_text(json.dumps(state), encoding="utf-8")
+        store.state_file.chmod(0o640)
+        engine, _, _, adapter, store = self.components(SHA_B)
+        event_count = len(adapter.runtime.events)
+
+        result = engine.migrate_managed_artifact_authority(
+            self.request(SHA_B), expected_generation=state["generation"]
+        )
+
+        self.assertEqual("migrated", result.status)
+        self.assertEqual(state["generation"] + 1, result.state["generation"])
+        self.assertRegex(result.state["current"]["artifactDigest"], r"^sha256:[a-f0-9]{64}$")
+        self.assertRegex(result.state["previous"]["artifactDigest"], r"^sha256:[a-f0-9]{64}$")
+        self.assertEqual(state["attempt"], result.state["attempt"])
+        self.assertEqual(["resolve-persisted", "attest"], adapter.runtime.events[event_count:])
+        self.assertNotIn("persist", adapter.runtime.events[event_count:])
+        self.assertNotIn("stop", adapter.runtime.events[event_count:])
+        self.assertNotIn("start", adapter.runtime.events[event_count:])
+        receipt = result.receipt
+        self.assertIsNotNone(receipt)
+        assert receipt is not None
+        payload = copy.deepcopy(receipt)
+        digest = payload.pop("receiptDigest")
+        self.assertEqual(engine._digest(payload), digest)
+        self.assertEqual(result.state, store.load())
+        self.assertEqual(0o640, store.state_file.stat().st_mode & 0o777)
+
+        second = engine.migrate_managed_artifact_authority(
+            self.request(SHA_B), expected_generation=result.state["generation"]
+        )
+        self.assertEqual("migration-not-required", second.status)
+        self.assertIsNone(second.receipt)
+        self.assertEqual(result.state, second.state)
+
+    def test_artifact_authority_migration_rejects_mismatch_and_stale_generation(self) -> None:
+        self.adopt_a()
+        engine_b, *_ = self.components(SHA_B)
+        state = engine_b.activate(self.request(SHA_B))
+        state["current"]["artifactDigest"] = "sha256:" + "0" * 64
+        store = AtomicStateStore(self.root / "state/state.json", self.root / "state/state.lock")
+        store.state_file.write_text(json.dumps(state), encoding="utf-8")
+        engine, _, _, _, _ = self.components(SHA_B)
+        with self.assertRaisesRegex(StateError, "recorded artifact digest"):
+            engine.migrate_managed_artifact_authority(
+                self.request(SHA_B), expected_generation=state["generation"]
+            )
+        state["current"].pop("artifactDigest")
+        store.state_file.write_text(json.dumps(state), encoding="utf-8")
+        with self.assertRaisesRegex(StateError, "stale artifact migration generation"):
+            engine.migrate_managed_artifact_authority(
+                self.request(SHA_B), expected_generation=state["generation"] - 1
+            )
+
     def test_reconciliation_atomic_fault_preserves_old_valid_state(self) -> None:
         state, *_ = self.adopt_a()
         self.simulate_host_restart(state)

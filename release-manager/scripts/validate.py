@@ -344,6 +344,34 @@ def validate_state_semantics(data: dict[str, Any]) -> None:
                 or data["attempt"]["events"][-1].get("evidenceDigest") != receipt["receiptDigest"]
             ):
                 raise ValidationError(f"$.recoveries[{index}]: recovered authority binding mismatch")
+    migrations = data.get("artifactAuthorityMigrations", [])
+    migration_generations = [item["newGeneration"] for item in migrations]
+    if migration_generations != sorted(set(migration_generations)):
+        raise ValidationError("$.artifactAuthorityMigrations: generations must be strictly increasing")
+    for index, receipt in enumerate(migrations):
+        if receipt["newGeneration"] != receipt["priorGeneration"] + 1:
+            raise ValidationError(f"$.artifactAuthorityMigrations[{index}]: generation must increase exactly once")
+        if receipt["newGeneration"] > data["generation"]:
+            raise ValidationError(f"$.artifactAuthorityMigrations[{index}]: generation exceeds state generation")
+        payload = dict(receipt)
+        actual_digest = payload.pop("receiptDigest")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        if actual_digest != "sha256:" + hashlib.sha256(encoded).hexdigest():
+            raise ValidationError(f"$.artifactAuthorityMigrations[{index}]: receipt digest mismatch")
+        if receipt["newGeneration"] == data["generation"]:
+            current, previous = data.get("current"), data.get("previous")
+            if (
+                not current or not previous
+                or current["generation"] != receipt["newGeneration"]
+                or current["releaseSha"] != receipt["currentReleaseSha"]
+                or current.get("artifactDigest") != receipt["currentArtifactDigest"]
+                or previous["releaseSha"] != receipt["previousReleaseSha"]
+                or previous.get("artifactDigest") != receipt["previousArtifactDigest"]
+            ):
+                raise ValidationError(f"$.artifactAuthorityMigrations[{index}]: authority binding mismatch")
+            handle_payload = json.dumps(current["handle"], sort_keys=True, separators=(",", ":")).encode()
+            if receipt["currentHandleDigest"] != "sha256:" + hashlib.sha256(handle_payload).hexdigest():
+                raise ValidationError(f"$.artifactAuthorityMigrations[{index}]: current handle binding mismatch")
 
 
 def validate_transition_trace(data: dict[str, Any]) -> None:

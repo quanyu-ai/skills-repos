@@ -28,6 +28,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/interruptedActivationRecoveryReceipt" }
     },
+    "artifactAuthorityMigrations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifactAuthorityMigrationReceipt" }
+    },
     "attempt": {
       "type": "object",
       "additionalProperties": false,
@@ -143,6 +147,26 @@
         },
         "healthEvidenceDigest": { "$ref": "#/$defs/digest" },
         "recoveredAt": { "$ref": "#/$defs/timestamp" },
+        "receiptDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "artifactAuthorityMigrationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "kind", "reason", "priorGeneration", "newGeneration", "currentReleaseSha", "currentArtifactDigest", "previousReleaseSha", "previousArtifactDigest", "currentHandleDigest", "healthEvidenceDigest", "migratedAt", "receiptDigest"],
+      "properties": {
+        "apiVersion": { "const": "quanyu.ai/artifact-authority-migration-receipt/v1alpha1" },
+        "kind": { "const": "ArtifactAuthorityMigrationReceipt" },
+        "reason": { "const": "missing-artifact-digest" },
+        "priorGeneration": { "type": "integer", "minimum": 1 },
+        "newGeneration": { "type": "integer", "minimum": 2 },
+        "currentReleaseSha": { "$ref": "#/$defs/sha" },
+        "currentArtifactDigest": { "$ref": "#/$defs/digest" },
+        "previousReleaseSha": { "$ref": "#/$defs/sha" },
+        "previousArtifactDigest": { "$ref": "#/$defs/digest" },
+        "currentHandleDigest": { "$ref": "#/$defs/digest" },
+        "healthEvidenceDigest": { "$ref": "#/$defs/digest" },
+        "migratedAt": { "$ref": "#/$defs/timestamp" },
         "receiptDigest": { "$ref": "#/$defs/digest" }
       }
     },

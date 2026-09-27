@@ -51,6 +51,10 @@ class AtomicStateStore:
             raise GenerationConflict("new record generation must increase exactly once")
         validate_state_record(record)
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        mode = 0o600
+        if self.state_file.exists():
+            existing_mode = self.state_file.stat().st_mode & 0o777
+            mode |= existing_mode & 0o040
         payload = json.dumps(record, indent=2, sort_keys=True) + "\n"
         fd, temporary = tempfile.mkstemp(prefix=".state-", suffix=".json", dir=self.state_file.parent)
         try:
@@ -58,7 +62,7 @@ class AtomicStateStore:
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
+            os.chmod(temporary, mode)
             self.fault("after-temp-fsync")
             os.replace(temporary, self.state_file)
             self.fault("after-replace")
