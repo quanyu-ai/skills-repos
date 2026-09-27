@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -12,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from engine.pm2_adapter import PM2ProcessAdapter  # noqa: E402
+from engine import AtomicStateStore, ReleaseEngine, ReleaseRequest  # noqa: E402
+from engine.host_runtime import GitSourceProvider, SubprocessLifecycleRunner  # noqa: E402
 from engine.preflight import OperatorBinding, PreflightError, PreflightStatusOperator, _read_json  # noqa: E402
 from engine.source_publication import SourcePublicationBinding, publish  # noqa: E402
 
@@ -49,6 +52,28 @@ def _load_operator(environment_id: str, service_id: str) -> PreflightStatusOpera
     return PreflightStatusOperator(binding, adapter)
 
 
+def _deploy(environment_id: str, service_id: str, repository: str, target_sha: str) -> dict[str, object]:
+    operator = _load_operator(environment_id, service_id)
+    binding = operator.binding
+    if binding.repository != repository:
+        raise PreflightError("repository authority mismatch")
+    policy, _ = _read_json(binding.policy_file, binding.trusted_owner_uids)
+    contract, _ = _read_json(binding.contract_file, binding.trusted_owner_uids)
+    trusted_path = ("/usr/local/bin", "/usr/bin", "/bin")
+    engine = ReleaseEngine(
+        GitSourceProvider(binding.source_mirror, binding.repository, binding.trusted_owner_uids),
+        SubprocessLifecycleRunner(trusted_path), operator.adapter,
+        AtomicStateStore(binding.state_file, binding.lock_file),
+        Path(policy["storage"]["releaseRoot"]), trusted_path,
+    )
+    state = engine.activate(ReleaseRequest(binding.repository, target_sha, contract, policy, {}))
+    transition = hashlib.sha256(json.dumps(state["attempt"], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"schemaVersion": "quanyu.ai/release-manager-deploy-result/v1", "decision": "DEPLOYED",
+            "attemptId": state["attempt"]["attemptId"], "releaseSha": state["current"]["releaseSha"],
+            "artifactDigest": state["current"]["artifactDigest"], "stateGeneration": state["generation"],
+            "transitionDigest": f"sha256:{transition}"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="release-manager")
     subcommands = parser.add_subparsers(dest="operation", required=True)
@@ -57,6 +82,11 @@ def main() -> int:
     command.add_argument("--service-id", required=True)
     command.add_argument("--expected-repository", required=True)
     command.add_argument("--expected-candidate-sha")
+    deploy = subcommands.add_parser("deploy")
+    deploy.add_argument("--environment-id", required=True)
+    deploy.add_argument("--service-id", required=True)
+    deploy.add_argument("--expected-repository", required=True)
+    deploy.add_argument("--expected-candidate-sha", required=True)
     publication = subcommands.add_parser("source-publication")
     publication.add_argument("--environment-id", required=True)
     publication.add_argument("--service-id", required=True)
@@ -64,7 +94,9 @@ def main() -> int:
     publication.add_argument("--expected-candidate-sha", required=True)
     args = parser.parse_args()
     try:
-        if args.operation == "source-publication":
+        if args.operation == "deploy":
+            result = _deploy(args.environment_id, args.service_id, args.expected_repository, args.expected_candidate_sha)
+        elif args.operation == "source-publication":
             item, _, publication_config = _load_binding(args.environment_id, args.service_id)
             result = publish(SourcePublicationBinding(item.environment_id, item.service_id, item.repository,
                 item.source_mirror, item.state_file, item.lock_file, item.trusted_owner_uids,
@@ -74,7 +106,13 @@ def main() -> int:
             operator = _load_operator(args.environment_id, args.service_id)
             result = operator.observe(args.environment_id, args.service_id, args.expected_repository, args.expected_candidate_sha)
     except Exception:
-        if args.operation == "source-publication":
+        if args.operation == "deploy":
+            transition = hashlib.sha256(b"DEPLOY_AUTHORITY_UNPROVEN").hexdigest()
+            error = {"schemaVersion": "quanyu.ai/release-manager-deploy-result/v1", "decision": "FAIL_CLOSED",
+                     "attemptId": "fail-closed", "releaseSha": getattr(args, "expected_candidate_sha", "0" * 40),
+                     "artifactDigest": "sha256:" + "0" * 64, "stateGeneration": 1,
+                     "transitionDigest": f"sha256:{transition}"}
+        elif args.operation == "source-publication":
             error = {"schemaVersion": "quanyu.ai/managed-source-publication-error/v1", "decision": "FAIL_CLOSED", "code": "SOURCE_PUBLICATION_AUTHORITY_UNPROVEN"}
         else:
             error = {"schemaVersion": "quanyu.ai/release-manager-preflight-error/v1", "decision": "FAIL_CLOSED", "code": "PREFLIGHT_AUTHORITY_UNPROVEN"}
