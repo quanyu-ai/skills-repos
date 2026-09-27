@@ -156,7 +156,7 @@ class SubprocessLifecycleRunner:
             argv = [self.node, self.corepack, package_manager, "run", action["packageScript"]]
             if action["packageScript"] == "db:generate":
                 action_env["DATABASE_URL"] = self.prisma_generate_database_url
-                argv.append("--global-env=DATABASE_URL")
+                argv.extend(["--", "--global-env=DATABASE_URL"])
         else:
             raw = list(action["argv"])
             executable = raw[0]
