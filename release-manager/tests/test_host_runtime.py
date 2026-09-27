@@ -118,7 +118,7 @@ class HostRuntimeTest(unittest.TestCase):
         self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "install", "--frozen-lockfile"],
                          run.call_args_list[0].args[0])
         self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "db:generate",
-                          "--global-env=DATABASE_URL"],
+                          "--", "--global-env=DATABASE_URL"],
                          run.call_args_list[1].args[0])
         self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "build"],
                          run.call_args_list[2].args[0])

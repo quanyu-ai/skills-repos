@@ -85,7 +85,8 @@ synthetic `DATABASE_URL` accepted for the typed `db:generate` prepare action:
 an unauthenticated loopback port 1 URL that cannot reach the runtime database.
 The runner injects it only for Prisma client generation, never for install,
 build, verify, or runtime. That action remains in Turbo strict environment mode
-and receives the fixed `--global-env=DATABASE_URL` argument, so only this one
+and receives the fixed `--global-env=DATABASE_URL` argument after the package
+manager's `--` argument boundary, so only this one
 synthetic value crosses Turbo's task boundary; arbitrary ambient variables stay
 filtered. Repository identity, policy,
 contract, State Store, lock, release root, PM2 adapter and secret source remain
