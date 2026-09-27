@@ -234,7 +234,7 @@ class PreflightStatusOperator:
         if candidate_sha is not None:
             mirror = _directory(binding.source_mirror, binding.trusted_owner_uids)
             try:
-                completed = subprocess.run(["git", "-C", str(mirror), "cat-file", "-e", f"{candidate_sha}^{{commit}}"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False, env={"PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"})
+                completed = subprocess.run(["git", "-c", f"safe.directory={mirror}", "-C", str(mirror), "cat-file", "-e", f"{candidate_sha}^{{commit}}"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False, env={"PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"})
             except (OSError, subprocess.TimeoutExpired) as error:
                 raise PreflightError("candidate source lookup failed closed") from error
             candidate["reachable"] = completed.returncode == 0

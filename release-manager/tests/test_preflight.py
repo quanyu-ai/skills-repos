@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 import importlib.util
+from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -111,6 +112,17 @@ class PreflightHarness(unittest.TestCase):
         schema = json.loads((ROOT / "schemas/preflight-status.schema.json").read_text())
         validator.validate_schema(without, schema)
         validator.validate_schema(with_candidate, schema)
+
+    def test_candidate_lookup_scopes_safe_directory_to_verified_mirror(self) -> None:
+        completed = type("Completed", (), {"returncode": 0})()
+        with patch("engine.preflight.subprocess.run", return_value=completed) as run:
+            result = self.observe(self.candidate)
+        self.assertTrue(result["candidate"]["reachable"])
+        self.assertEqual(
+            ["git", "-c", f"safe.directory={self.mirror.resolve()}", "-C", str(self.mirror.resolve()),
+             "cat-file", "-e", f"{self.candidate}^{{commit}}"],
+            run.call_args.args[0],
+        )
 
     def test_stale_and_tampered_state_fail_closed(self) -> None:
         for mutate, message in ((lambda s: s.__setitem__("updatedAt", "2026-09-20T00:00:00Z"), "stale"), (lambda s: s.__setitem__("environmentPolicyDigest", "sha256:" + "0" * 64), "digest")):
