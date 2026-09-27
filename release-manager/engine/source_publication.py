@@ -148,10 +148,11 @@ def _ref(repository: Path, name: str, env: dict[str, str]) -> str | None:
 def _attest_commit(repository: Path, ref: str, env: dict[str, str]) -> None:
     sha = _git(repository, ["rev-parse", "--verify", f"{ref}^{{commit}}"], env).decode()
     tree = _git(repository, ["show", "-s", "--format=%T", sha], env).decode()
-    parent = _git(repository, ["show", "-s", "--format=%P", sha], env).decode()
+    raw_commit = _git(repository, ["cat-file", "-p", sha], env).decode()
+    parents = [line.removeprefix("parent ") for line in raw_commit.splitlines() if line.startswith("parent ")]
     subject = _git(repository, ["show", "-s", "--format=%s", sha], env).decode()
     committed_at = _git(repository, ["show", "-s", "--format=%ct", sha], env).decode()
-    if (sha != EXPECTED_SHA or tree != EXPECTED_TREE or parent != EXPECTED_PARENT
+    if (sha != EXPECTED_SHA or tree != EXPECTED_TREE or parents != [EXPECTED_PARENT]
             or subject != EXPECTED_SUBJECT or committed_at != EXPECTED_COMMITTER_EPOCH):
         raise SourcePublicationError("canonical GitHub PR provenance does not match frozen authority")
 
