@@ -108,7 +108,8 @@ class HostRuntimeTest(unittest.TestCase):
     def test_lifecycle_runner_uses_corepack_without_a_shell(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
-                     "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL}
+                     "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
+                     "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
         runner = SubprocessLifecycleRunner(("/usr/bin", "/bin"), toolchain, (0, os.geteuid()))
         with patch("engine.host_runtime.subprocess.run") as run:
             runner.frozen_install(self.root, "pnpm@9.15.4", {"HOME": str(self.root)})
@@ -116,7 +117,8 @@ class HostRuntimeTest(unittest.TestCase):
             runner.run_action(self.root, {"packageScript": "build"}, {"HOME": str(self.root)})
         self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "install", "--frozen-lockfile"],
                          run.call_args_list[0].args[0])
-        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "db:generate"],
+        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "db:generate",
+                          "--global-env=DATABASE_URL"],
                          run.call_args_list[1].args[0])
         self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "build"],
                          run.call_args_list[2].args[0])
@@ -130,7 +132,8 @@ class HostRuntimeTest(unittest.TestCase):
     def test_unregistered_package_manager_and_unsafe_program_fail_closed(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
-                     "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL}
+                     "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
+                     "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
         runner = SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
         with self.assertRaises(ToolchainError):
             runner.frozen_install(self.root, "pnpm@9.15.0", {})
@@ -144,7 +147,16 @@ class HostRuntimeTest(unittest.TestCase):
     def test_unregistered_prisma_generation_environment_fails_closed(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
-                     "prismaGenerateDatabaseUrl": "postgresql://database.internal/production"}
+                     "prismaGenerateDatabaseUrl": "postgresql://database.internal/production",
+                     "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
+        with self.assertRaises(ToolchainError):
+            SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
+
+    def test_unregistered_prisma_turbo_forwarding_fails_closed(self) -> None:
+        toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
+                     "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
+                     "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
+                     "prismaGenerateTurboGlobalEnv": "DATABASE_URL,SECRET"}
         with self.assertRaises(ToolchainError):
             SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
 
