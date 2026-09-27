@@ -110,7 +110,7 @@ class HostRuntimeTest(unittest.TestCase):
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
                      "toolchainBin": str(self.root),
                      "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
-                     "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
+                     "prismaGeneratePackageFilter": "@smart-college/db"}
         runner = SubprocessLifecycleRunner(("/usr/bin", "/bin"), toolchain, (0, os.geteuid()))
         with patch("engine.host_runtime.subprocess.run") as run:
             runner.frozen_install(self.root, "pnpm@9.15.4", {"HOME": str(self.root)})
@@ -118,8 +118,8 @@ class HostRuntimeTest(unittest.TestCase):
             runner.run_action(self.root, {"packageScript": "build"}, {"HOME": str(self.root)})
         self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "install", "--frozen-lockfile"],
                          run.call_args_list[0].args[0])
-        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "db:generate",
-                          "--", "--global-env=DATABASE_URL"],
+        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "--filter",
+                          "@smart-college/db", "run", "db:generate"],
                          run.call_args_list[1].args[0])
         self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "build"],
                          run.call_args_list[2].args[0])
@@ -136,7 +136,7 @@ class HostRuntimeTest(unittest.TestCase):
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
                      "toolchainBin": str(self.root),
                      "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
-                     "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
+                     "prismaGeneratePackageFilter": "@smart-college/db"}
         runner = SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
         with self.assertRaises(ToolchainError):
             runner.frozen_install(self.root, "pnpm@9.15.0", {})
@@ -152,16 +152,16 @@ class HostRuntimeTest(unittest.TestCase):
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
                      "toolchainBin": str(self.root),
                      "prismaGenerateDatabaseUrl": "postgresql://database.internal/production",
-                     "prismaGenerateTurboGlobalEnv": "DATABASE_URL"}
+                     "prismaGeneratePackageFilter": "@smart-college/db"}
         with self.assertRaises(ToolchainError):
             SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
 
-    def test_unregistered_prisma_turbo_forwarding_fails_closed(self) -> None:
+    def test_unregistered_prisma_workspace_filter_fails_closed(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
                      "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
                      "toolchainBin": str(self.root),
                      "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL,
-                     "prismaGenerateTurboGlobalEnv": "DATABASE_URL,SECRET"}
+                     "prismaGeneratePackageFilter": "@smart-college/api"}
         with self.assertRaises(ToolchainError):
             SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
 

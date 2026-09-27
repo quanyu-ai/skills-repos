@@ -81,7 +81,7 @@ class SubprocessLifecycleRunner:
                  trusted_owner_uids: tuple[int, ...]) -> None:
         self.trusted_path = trusted_path
         if set(toolchain) != {"packageManager", "nodeExecutable", "corepackProgram", "corepackHome",
-                             "toolchainBin", "prismaGenerateDatabaseUrl", "prismaGenerateTurboGlobalEnv"}:
+                             "toolchainBin", "prismaGenerateDatabaseUrl", "prismaGeneratePackageFilter"}:
             raise ToolchainError("registered package manager toolchain is invalid")
         self.package_manager = toolchain["packageManager"]
         self.node = self._safe_program(Path(toolchain["nodeExecutable"]), trusted_owner_uids)
@@ -90,8 +90,8 @@ class SubprocessLifecycleRunner:
         self.toolchain_bin = self._safe_directory(Path(toolchain["toolchainBin"]), trusted_owner_uids)
         if toolchain["prismaGenerateDatabaseUrl"] != self.PRISMA_GENERATE_DATABASE_URL:
             raise ToolchainError("registered Prisma generation environment is invalid")
-        if toolchain["prismaGenerateTurboGlobalEnv"] != "DATABASE_URL":
-            raise ToolchainError("registered Prisma Turbo environment forwarding is invalid")
+        if toolchain["prismaGeneratePackageFilter"] != "@smart-college/db":
+            raise ToolchainError("registered Prisma workspace filter is invalid")
         self.prisma_generate_database_url = toolchain["prismaGenerateDatabaseUrl"]
         self._package_managers: dict[Path, str] = {}
 
@@ -154,10 +154,12 @@ class SubprocessLifecycleRunner:
             package_manager = self._package_managers.get(root.resolve())
             if not package_manager:
                 raise ToolchainError("package script lacks an attested package manager")
-            argv = [self.node, self.corepack, package_manager, "run", action["packageScript"]]
             if action["packageScript"] == "db:generate":
                 action_env["DATABASE_URL"] = self.prisma_generate_database_url
-                argv.extend(["--", "--global-env=DATABASE_URL"])
+                argv = [self.node, self.corepack, package_manager, "--filter", "@smart-college/db",
+                        "run", action["packageScript"]]
+            else:
+                argv = [self.node, self.corepack, package_manager, "run", action["packageScript"]]
         else:
             raw = list(action["argv"])
             executable = raw[0]
