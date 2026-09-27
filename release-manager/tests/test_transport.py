@@ -32,7 +32,7 @@ class TransportTest(unittest.TestCase):
         (self.install_root / "scripts").mkdir(mode=0o700)
         validator = self.install_root / "scripts" / "validate.py"
         shutil.copy2(ROOT / "scripts" / "validate.py", validator)
-        validator.chmod(0o700)
+        validator.chmod(0o600)
         (self.install_root / "schemas").mkdir(mode=0o700)
         for name in ("preflight-error.schema.json", "preflight-status.schema.json"):
             target = self.install_root / "schemas" / name

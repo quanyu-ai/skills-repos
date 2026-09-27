@@ -63,10 +63,11 @@ def _safe_json(path: Path, trusted_uids: tuple[int, ...] = (0,)) -> dict[str, An
     return value
 
 
-def _open_program(path: Path, owner_uid: int) -> tuple[int, str]:
+def _open_program(path: Path, owner_uid: int, *, require_executable: bool = True) -> tuple[int, str]:
     info = path.lstat()
     if (not path.is_absolute() or path.resolve(strict=True) != path or not stat.S_ISREG(info.st_mode)
-            or info.st_uid != owner_uid or info.st_mode & 0o022 or not info.st_mode & 0o100):
+            or info.st_uid != owner_uid or info.st_mode & 0o022
+            or (require_executable and not info.st_mode & 0o100)):
         raise GatewayError("registered executable metadata is unsafe")
     parent = path.parent
     while parent != parent.parent:
@@ -206,7 +207,7 @@ def _validate_evidence_schema(mode: str, value: Any, install_root: Path, owner_u
         schema_name = "deploy-result.schema.json"
     validator_path = install_root / "scripts" / "validate.py"
     schema_path = install_root / "schemas" / schema_name
-    validator_fd, _ = _open_program(validator_path, owner_uid)
+    validator_fd, _ = _open_program(validator_path, owner_uid, require_executable=False)
     source = b""
     while True:
         chunk = os.read(validator_fd, 65536)
