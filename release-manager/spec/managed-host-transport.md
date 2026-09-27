@@ -88,11 +88,10 @@ The registry also binds the sole
 synthetic `DATABASE_URL` accepted for the typed `db:generate` prepare action:
 an unauthenticated loopback port 1 URL that cannot reach the runtime database.
 The runner injects it only for Prisma client generation, never for install,
-build, verify, or runtime. That action remains in Turbo strict environment mode
-and receives the fixed `--global-env=DATABASE_URL` argument after the package
-manager's `--` argument boundary, so only this one
-synthetic value crosses Turbo's task boundary; arbitrary ambient variables stay
-filtered. Repository identity, policy,
+build, verify, or runtime. The registry also binds the exact
+`@smart-college/db` workspace filter; the runner invokes that workspace's typed
+`db:generate` script directly, so the synthetic value reaches Prisma without
+passing through Turbo or widening the environment of other tasks. Repository identity, policy,
 contract, State Store, lock, release root, PM2 adapter and secret source remain
 host-registry or policy bound. Any source, toolchain, build, runtime or adapter
 failure returns a redacted schema-valid `FAIL_CLOSED` deploy result.
