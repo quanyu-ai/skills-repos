@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import re
 import shutil
-import stat
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from .errors import SourceAttestationError, ToolchainError
+from .source_publication import SourcePublicationError, _safe_repository
 
 
 class GitWorkspace:
@@ -49,16 +49,17 @@ class GitSourceProvider:
     def acquire(self, source: str, sha: str, destination: Path) -> GitWorkspace:
         if source != self.repository or not re.fullmatch(r"[0-9a-f]{40}", sha):
             raise SourceAttestationError("source authority mismatch")
-        metadata = self.mirror.lstat()
-        mirror = self.mirror.resolve(strict=True)
-        if (stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode)
-                or metadata.st_uid not in self.trusted_owner_uids or metadata.st_mode & 0o022
-                or not mirror.is_dir() or destination.exists()):
+        try:
+            mirror = _safe_repository(self.mirror, self.trusted_owner_uids)
+        except SourcePublicationError as error:
+            raise SourceAttestationError("source mirror layout is unsafe") from error
+        if destination.exists():
             raise SourceAttestationError("source mirror or destination is unsafe")
         environment = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "GIT_CONFIG_NOSYSTEM": "1",
                        "GIT_CONFIG_GLOBAL": "/dev/null"}
         try:
-            subprocess.run([self.git, "--git-dir", str(mirror), "cat-file", "-e", f"{sha}^{{commit}}"],
+            subprocess.run([self.git, "-c", f"safe.directory={mirror}", "-C", str(mirror),
+                            "cat-file", "-e", f"{sha}^{{commit}}"],
                            check=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL, env=environment)
             subprocess.run([self.git, "clone", "--no-checkout", "--shared", "--", str(mirror), str(destination)],
