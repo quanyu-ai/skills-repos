@@ -73,6 +73,16 @@ administrator removes the authority while installing the next measured
 registry; until then it remains replayable only for the same exact scope and
 SHA, never for an arbitrary candidate.
 
+The registered `deploy` operation enters `ReleaseEngine.activate`; it does not
+reimplement release transitions in the transport. Its host runtime acquires
+the exact commit only from the registered local mirror, checks out a detached
+worktree without a shell, and runs frozen install and typed lifecycle actions
+through fixed argv subprocesses. Package scripts use the contract's exact
+`packageManager` version through `corepack`. Repository identity, policy,
+contract, State Store, lock, release root, PM2 adapter and secret source remain
+host-registry or policy bound. Any source, toolchain, build, runtime or adapter
+failure returns a redacted schema-valid `FAIL_CLOSED` deploy result.
+
 `source-publication` is a one-commit infrastructure repair, not a generic
 fetch surface. It is frozen to `smart-college-demo` / `smart-college-web`, the
 registered `quanyu-ai/proj-code-smart-college` mirror, merged PR #29, commit
