@@ -22,7 +22,7 @@ The corresponding `authorized_keys` entry must be installed by a trusted host
 administrator with all of these restrictions:
 
 ```text
-restrict,command="/usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /opt/quanyu/release-manager/runtime/python3.12 -I -B /opt/quanyu/release-manager/current/transport/gateway.py",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding <PUBLIC-KEY-INSTALLED-OUT-OF-BAND>
+restrict,command="/usr/bin/sudo -n -u openclaw -- /usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /opt/quanyu/release-manager/runtime/python3.12 -I -B /opt/quanyu/release-manager/current/transport/gateway.py",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding <PUBLIC-KEY-INSTALLED-OUT-OF-BAND>
 ```
 
 The `release-runner` home and Python user-site must not be writable by the
@@ -34,6 +34,15 @@ shebang is not an accepted host installation. The canonical operator
 entrypoint uses the same absolute interpreter in its shebang and is installed
 executable so the gateway can open, hash and execute one measured file
 descriptor.
+
+The service identity cannot safely inspect the separately owned managed
+process through Linux `/proc`. A root-owned `0440` sudoers fragment must allow
+`release-runner` to run as `openclaw` only the exact `/usr/bin/env -i ...`
+gateway vector shown above, with `NOPASSWD`; no wildcard, shell, alternate
+argument, interpreter, environment or command is allowed. The forced command
+must include `sudo -n` so a policy mismatch fails closed without a password
+prompt. The gateway still selects only root-owned measured operator vectors,
+and host authority keeps deploy disabled independently.
 
 The pre-Transport Operator SHA
 `e0ccf99ddc3b33d881d8942ae86602d7c96883e8` is historical base evidence only
