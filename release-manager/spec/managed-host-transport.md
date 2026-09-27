@@ -47,6 +47,10 @@ digest and per-entrypoint digests, and to three absolute command vectors.
 The gateway opens and hashes the entrypoint once, then executes that same file
 descriptor on Linux; registries, manifests, the entire install tree and their
 parent chain must be root-owned and non-writable by group/other. Commands are
+executed only from owner-executable files. The schema validator is opened and
+hashed under the same root-owner and no-write checks, but remains a non-executable
+data/code file. Root-owned registries and manifests contain no secrets and must
+be readable, but never writable, by the service identity. Commands are
 executed without a shell. `preflight` and `attest` map
 to the canonical read-only operator. `deploy` is disabled until its registered
 vector points to the canonical ReleaseEngine writer and `allowDeploy` is
