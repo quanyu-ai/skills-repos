@@ -57,9 +57,10 @@ class SourcePublicationTest(unittest.TestCase):
             return publication.EXPECTED_SHA
         def git(_mirror, args, _env, **_kwargs):
             calls.append(args)
-            values = {"--format=%T": publication.EXPECTED_TREE, "--format=%P": publication.EXPECTED_PARENT,
+            values = {"--format=%T": publication.EXPECTED_TREE,
                       "--format=%s": publication.EXPECTED_SUBJECT, "--format=%ct": publication.EXPECTED_COMMITTER_EPOCH}
             if args[0] == "rev-parse": return publication.EXPECTED_SHA.encode()
+            if args[0] == "cat-file": return f"tree {publication.EXPECTED_TREE}\nparent {publication.EXPECTED_PARENT}\n".encode()
             return values[args[2]].encode()
         with patch.object(publication, "_ref", side_effect=ref), patch.object(publication, "_git", side_effect=git), patch.object(publication, "_run") as run:
             result = publication.publish(self.binding, publication.ENVIRONMENT, publication.APPLICATION,
@@ -89,8 +90,8 @@ class SourcePublicationTest(unittest.TestCase):
                 return publication.EXPECTED_SHA.encode()
             if args[:3] == ["show", "-s", "--format=%T"]:
                 return publication.EXPECTED_TREE.encode()
-            if args[:3] == ["show", "-s", "--format=%P"]:
-                return publication.EXPECTED_PARENT.encode()
+            if args[:2] == ["cat-file", "-p"]:
+                return f"tree {publication.EXPECTED_TREE}\nparent {publication.EXPECTED_PARENT}\n".encode()
             if args[:3] == ["show", "-s", "--format=%s"]:
                 return publication.EXPECTED_SUBJECT.encode()
             if args[:3] == ["show", "-s", "--format=%ct"]:
@@ -128,6 +129,16 @@ class SourcePublicationTest(unittest.TestCase):
             publication.publish(self.binding, publication.ENVIRONMENT, publication.APPLICATION,
                                 publication.REPOSITORY, publication.EXPECTED_SHA)
         run.assert_not_called()
+
+    def test_shallow_commit_parent_is_read_from_raw_commit_object(self) -> None:
+        env = publication._git_env(self.binding)
+        def git(_repository, args, _env, **_kwargs):
+            if args[0] == "rev-parse": return publication.EXPECTED_SHA.encode()
+            if args[0] == "cat-file": return f"tree {publication.EXPECTED_TREE}\nparent {publication.EXPECTED_PARENT}\n".encode()
+            return {"--format=%T": publication.EXPECTED_TREE, "--format=%s": publication.EXPECTED_SUBJECT,
+                    "--format=%ct": publication.EXPECTED_COMMITTER_EPOCH}[args[2]].encode()
+        with patch.object(publication, "_git", side_effect=git):
+            publication._attest_commit(self.mirror, publication.TEMP_REF, env)
 
 
 if __name__ == "__main__":
