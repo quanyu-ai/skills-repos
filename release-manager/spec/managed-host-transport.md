@@ -13,6 +13,10 @@ known-hosts file `/Users/Cloud/.ssh/release_demo_known_hosts`. Both files must
 be regular, non-symlink, caller-owned files with mode `0600`. SSH is invoked in
 batch mode with strict host-key checking, identities-only, no TTY and all
 forwarding cleared. It always requests the literal command `release-runner`.
+The client also requires `/Users/Cloud/.ssh/release_demo_authority.json` at
+mode `0600`, containing the post-merge canonical SHA, complete install-tree
+digest, gateway digest and canonical operator entrypoint digest from durable
+capability evidence.
 
 The corresponding `authorized_keys` entry must be installed by a trusted host
 administrator with all of these restrictions:
@@ -26,10 +30,14 @@ service identity. The absolute isolated interpreter command above is part of
 the contract; invoking the gateway through its `/usr/bin/env python3` shebang
 is not an accepted host installation.
 
+The pre-Transport Operator SHA
+`e0ccf99ddc3b33d881d8942ae86602d7c96883e8` is historical base evidence only
+and must never be installed or attested as the Managed Host Transport version.
+
 The host transport registry is
 `/etc/quanyu/release-manager/transport-registry.v1.json`. It binds the one Demo
-environment/application pair to an installation manifest containing exact
-source SHA `e0ccf99ddc3b33d881d8942ae86602d7c96883e8`, a complete installation-tree
+environment/application pair to an installation manifest containing the exact
+post-merge Transport-capable source SHA from durable evidence, a complete installation-tree
 digest and per-entrypoint digests, and to three absolute command vectors.
 The gateway opens and hashes the entrypoint once, then executes that same file
 descriptor on Linux; registries, manifests, the entire install tree and their
