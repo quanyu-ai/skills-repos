@@ -28,6 +28,7 @@ READ_ONLY_KEYS = {"schemaVersion", "operator", "version", "buildDigest", "observ
                   "evidenceDigest", "candidate", "provided", "sha", "reachable", "mutationProof",
                   "stateBeforeDigest", "stateAfterDigest", "unchanged", "code"}
 DEPLOY_KEYS = {"schemaVersion", "decision", "attemptId", "releaseSha", "artifactDigest", "stateGeneration", "transitionDigest"}
+DEPLOY_AUTHORITY_KEYS = {"schemaVersion", "approvalId", "environment", "application", "repository", "sha"}
 
 
 class GatewayError(RuntimeError):
@@ -125,9 +126,9 @@ def _binding(registry: dict[str, Any], request: dict[str, str], registry_owner_u
     if len(matches) != 1:
         raise GatewayError("authority binding is not unique")
     item = matches[0]
-    if set(item) != {"environment", "application", "repository", "operatorSha", "operatorManifest", "installRoot", "allowDeploy", "commands"}:
+    if set(item) != {"environment", "application", "repository", "operatorSha", "operatorManifest", "installRoot", "deployAuthority", "commands"}:
         raise GatewayError("binding schema is invalid")
-    if not SHA.fullmatch(str(item["operatorSha"])) or not isinstance(item["allowDeploy"], bool):
+    if not SHA.fullmatch(str(item["operatorSha"])):
         raise GatewayError("binding authority is invalid")
     manifest = _safe_json(Path(item["operatorManifest"]), (registry_owner_uid,))
     if (set(manifest) != {"schemaVersion", "sourceSha", "installTreeDigest", "gatewayDigest", "commandDigests", "deployAuthority"}
@@ -156,9 +157,21 @@ def _binding(registry: dict[str, Any], request: dict[str, str], registry_owner_u
     if manifest["commandDigests"][request["mode"]] != f"sha256:{digest}":
         os.close(fd)
         raise GatewayError("registered command digest does not match installation manifest")
-    if request["mode"] == "deploy" and not item["allowDeploy"]:
-        os.close(fd)
-        raise GatewayError("deploy is not enabled by host authority")
+    if request["mode"] == "deploy":
+        authority = item["deployAuthority"]
+        expected = {
+            "schemaVersion": "quanyu.ai/exact-deploy-authority/v1",
+            "environment": item["environment"],
+            "application": item["application"],
+            "repository": item["repository"],
+            "sha": request["sha"],
+        }
+        if (not isinstance(authority, dict) or set(authority) != DEPLOY_AUTHORITY_KEYS
+                or not isinstance(authority.get("approvalId"), str)
+                or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", authority["approvalId"])
+                or any(authority.get(key) != value for key, value in expected.items())):
+            os.close(fd)
+            raise GatewayError("exact deploy authority is not proven")
     return item, fd, manifest
 
 

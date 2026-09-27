@@ -35,6 +35,7 @@ class TransportTest(unittest.TestCase):
         validator.chmod(0o600)
         (self.install_root / "schemas").mkdir(mode=0o700)
         for name in ("preflight-error.schema.json", "preflight-status.schema.json",
+                     "deploy-result.schema.json",
                      "source-publication-error.schema.json", "source-publication-receipt.schema.json"):
             target = self.install_root / "schemas" / name
             shutil.copy2(ROOT / "schemas" / name, target)
@@ -52,7 +53,7 @@ class TransportTest(unittest.TestCase):
         self.manifest.chmod(0o600)
         self.registry.write_text(json.dumps({"schemaVersion": "quanyu.ai/release-transport-registry/v1", "bindings": [{
             "environment": "demo", "application": "smart-college", "repository": "quanyu-ai/proj-code-smart-college",
-            "operatorSha": self.OPERATOR_SHA, "allowDeploy": False,
+            "operatorSha": self.OPERATOR_SHA, "deployAuthority": None,
             "operatorManifest": str(self.manifest),
             "installRoot": str(self.install_root),
             "commands": {"preflight": [str(self.operator), "preflight-status"],
@@ -97,6 +98,51 @@ class TransportTest(unittest.TestCase):
     def test_deploy_cannot_run_when_host_registry_disables_it(self):
         with patch("gateway.subprocess.run") as run:
             with self.assertRaises(gateway.GatewayError):
+                self.invoke(self.request(mode="deploy"))
+            run.assert_not_called()
+
+    def test_deploy_authority_is_exactly_bound_and_reaches_only_canonical_writer(self):
+        document = json.loads(self.registry.read_text())
+        binding = document["bindings"][0]
+        binding["deployAuthority"] = {
+            "schemaVersion": "quanyu.ai/exact-deploy-authority/v1",
+            "approvalId": "owner:DEMO-401-G3:06c5d26c",
+            "environment": binding["environment"],
+            "application": binding["application"],
+            "repository": binding["repository"],
+            "sha": self.SHA,
+        }
+        self.registry.write_text(json.dumps(document))
+        deployed = type("R", (), {"stdout": json.dumps({
+            "schemaVersion": "quanyu.ai/release-manager-deploy-result/v1",
+            "decision": "DEPLOYED", "attemptId": "attempt-1", "releaseSha": self.SHA,
+            "artifactDigest": "sha256:" + "2" * 64, "stateGeneration": 8,
+            "transitionDigest": "sha256:" + "3" * 64,
+        }).encode(), "returncode": 0})()
+        with patch("gateway.subprocess.run", return_value=deployed) as run:
+            result = self.invoke(self.request(mode="deploy"))
+        self.assertEqual("deploy", result["mode"])
+        argv = run.call_args.args[0]
+        self.assertEqual("deploy", argv[1])
+        self.assertIn(self.SHA, argv)
+
+        with patch("gateway.subprocess.run") as run:
+            with self.assertRaises(gateway.GatewayError):
+                self.invoke(self.request(mode="deploy", sha="b" * 40))
+            run.assert_not_called()
+
+    def test_generic_or_caller_controlled_deploy_authority_fails_closed(self):
+        document = json.loads(self.registry.read_text())
+        binding = document["bindings"][0]
+        for authority in (True, {"sha": self.SHA}, {
+            "schemaVersion": "quanyu.ai/exact-deploy-authority/v1",
+            "approvalId": "owner:approval", "environment": binding["environment"],
+            "application": binding["application"], "repository": binding["repository"],
+            "sha": "b" * 40, "allowAnySha": True,
+        }):
+            binding["deployAuthority"] = authority
+            self.registry.write_text(json.dumps(document))
+            with patch("gateway.subprocess.run") as run, self.assertRaises(gateway.GatewayError):
                 self.invoke(self.request(mode="deploy"))
             run.assert_not_called()
 
