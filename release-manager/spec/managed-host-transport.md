@@ -78,7 +78,9 @@ reimplement release transitions in the transport. Its host runtime acquires
 the exact commit only from the registered local mirror, checks out a detached
 worktree without a shell, and runs frozen install and typed lifecycle actions
 through fixed argv subprocesses. Package scripts use the contract's exact
-`packageManager` version through `corepack`. Repository identity, policy,
+`packageManager` version through a registry-bound absolute Node executable,
+Corepack program and Corepack cache directory. The runner never searches PATH
+for this toolchain and never invokes a shell. Repository identity, policy,
 contract, State Store, lock, release root, PM2 adapter and secret source remain
 host-registry or policy bound. Any source, toolchain, build, runtime or adapter
 failure returns a redacted schema-valid `FAIL_CLOSED` deploy result.

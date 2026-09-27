@@ -29,6 +29,12 @@ class HostRuntimeTest(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.source), "commit", "-q", "-m", "fixture"], check=True)
         self.sha = subprocess.run(["git", "-C", str(self.source), "rev-parse", "HEAD"],
                                   check=True, capture_output=True, text=True).stdout.strip()
+        self.corepack = self.root / "corepack.js"
+        self.corepack.write_text("// fixture\n")
+        self.corepack.chmod(0o700)
+        self.node = self.root / "node"
+        self.node.write_text("fixture\n")
+        self.node.chmod(0o700)
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -98,20 +104,31 @@ class HostRuntimeTest(unittest.TestCase):
                 provider.acquire("owner/repo", self.sha, self.root / f"rejected-{index}")
 
     def test_lifecycle_runner_uses_corepack_without_a_shell(self) -> None:
-        runner = SubprocessLifecycleRunner(("/usr/bin", "/bin"))
-        with patch("engine.host_runtime.shutil.which", return_value="/usr/bin/corepack"), \
-                patch("engine.host_runtime.subprocess.run") as run:
+        toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
+                     "corepackProgram": str(self.corepack), "corepackHome": str(self.root)}
+        runner = SubprocessLifecycleRunner(("/usr/bin", "/bin"), toolchain, (0, os.geteuid()))
+        with patch("engine.host_runtime.subprocess.run") as run:
             runner.frozen_install(self.root, "pnpm@9.15.4", {"HOME": str(self.root)})
             runner.run_action(self.root, {"packageScript": "build"}, {"HOME": str(self.root)})
-        self.assertEqual(["/usr/bin/corepack", "pnpm@9.15.4", "install", "--frozen-lockfile"],
+        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "install", "--frozen-lockfile"],
                          run.call_args_list[0].args[0])
-        self.assertEqual(["/usr/bin/corepack", "pnpm@9.15.4", "run", "build"],
+        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "build"],
                          run.call_args_list[1].args[0])
         self.assertNotIn("shell", run.call_args_list[0].kwargs)
+        self.assertEqual(str(self.root), run.call_args_list[0].kwargs["env"]["COREPACK_HOME"])
 
-    def test_unavailable_package_manager_fails_closed(self) -> None:
-        with patch("engine.host_runtime.shutil.which", return_value=None), self.assertRaises(ToolchainError):
-            SubprocessLifecycleRunner(("/usr/bin",)).frozen_install(self.root, "pnpm@9.15.4", {})
+    def test_unregistered_package_manager_and_unsafe_program_fail_closed(self) -> None:
+        toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
+                     "corepackProgram": str(self.corepack), "corepackHome": str(self.root)}
+        runner = SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
+        with self.assertRaises(ToolchainError):
+            runner.frozen_install(self.root, "pnpm@9.15.0", {})
+        unsafe = self.root / "unsafe-corepack"
+        unsafe.write_text("fixture\n")
+        unsafe.chmod(0o722)
+        toolchain["corepackProgram"] = str(unsafe)
+        with self.assertRaises(ToolchainError):
+            SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
 
 
 if __name__ == "__main__":
