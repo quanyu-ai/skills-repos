@@ -230,6 +230,28 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
             os.unlink(temporary)
 
 
+def _safe_state_json(path: Path, trusted_owner_uid: int) -> dict[str, Any]:
+    before = path.lstat()
+    if (not path.is_absolute() or stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode)
+            or before.st_uid not in {trusted_owner_uid, os.geteuid()} or before.st_mode & 0o022):
+        raise GatewayError("deploy state metadata is unsafe")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as handle:
+        current = os.fstat(handle.fileno())
+        if (current.st_dev, current.st_ino, current.st_uid, current.st_mode) != (
+                before.st_dev, before.st_ino, before.st_uid, before.st_mode):
+            raise GatewayError("deploy state identity changed")
+        raw = handle.read(1024 * 1024 + 1)
+    after = path.lstat()
+    if len(raw) > 1024 * 1024 or (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_size) != (
+            after.st_dev, after.st_ino, after.st_mtime_ns, after.st_size):
+        raise GatewayError("deploy state drifted during read")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise GatewayError("deploy state must be an object")
+    return value
+
+
 def _consumption(authority: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     return {"schemaVersion": "quanyu.ai/exact-deploy-consumption/v1", "approvalId": authority["approvalId"],
             "environment": authority["environment"], "application": authority["application"],
@@ -243,7 +265,7 @@ def _unlock(fd: int | None) -> None:
 
 
 def _recover_committed(authority: dict[str, Any], trusted_owner_uid: int) -> dict[str, Any] | None:
-    state = _safe_json(Path(authority["stateFile"]), (trusted_owner_uid, os.geteuid()))
+    state = _safe_state_json(Path(authority["stateFile"]), trusted_owner_uid)
     attempt = state.get("attempt", {})
     current = state.get("current", {})
     if state.get("generation", 0) <= authority["issuedStateGeneration"]:
