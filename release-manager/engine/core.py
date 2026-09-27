@@ -69,6 +69,13 @@ class ManagedReconciliationResult:
     receipt: dict[str, Any] | None
 
 
+@dataclass(frozen=True)
+class ArtifactAuthorityMigrationResult:
+    status: str
+    state: dict[str, Any]
+    receipt: dict[str, Any] | None
+
+
 class ReleaseEngine:
     def __init__(
         self,
@@ -683,6 +690,94 @@ class ReleaseEngine:
             committed = self.store.commit(state["generation"], reconciled)
             machine.send("STATE_COMMITTED", "RECONCILED")
             return ManagedReconciliationResult("reconciled", committed, receipt)
+
+    def migrate_managed_artifact_authority(
+        self, request: ReleaseRequest, *, expected_generation: int
+    ) -> ArtifactAuthorityMigrationResult:
+        """Backfill artifact digests without deployment or process mutation."""
+        self._validate_request(request)
+        with self.store.locked():
+            state = self.store.load()
+            if not state or state.get("status") != "managed" or "current" not in state or "previous" not in state:
+                raise StateError("artifact authority migration requires managed current and previous authorities")
+            if state["generation"] != expected_generation:
+                raise StateError(
+                    f"stale artifact migration generation: expected {expected_generation}, found {state['generation']}"
+                )
+            expected = self._managed_reconciliation_context(request, state)
+            context = self._canonical_context(request)
+            digests: dict[str, str] = {}
+            for slot in ("current", "previous"):
+                authority = state[slot]
+                handle = authority["handle"]
+                if (
+                    authority.get("restorable") is not True
+                    or handle.get("releaseSha") != authority.get("releaseSha")
+                    or authority.get("attestation", {}).get("sourceSha") != authority.get("releaseSha")
+                    or authority.get("attestation", {}).get("runtimeSha") != authority.get("releaseSha")
+                ):
+                    raise StateError(f"{slot} artifact authority identity is invalid")
+                self._assert_handle_context(handle, context)
+                release = Path(authority["releasePath"]).resolve(strict=True)
+                runtime = handle["runtime"]
+                executable = Path(runtime["executable"]).resolve(strict=True)
+                cwd = Path(runtime["cwd"]).resolve(strict=True)
+                if (
+                    not executable.is_relative_to(release)
+                    or not cwd.is_relative_to(release)
+                    or handle.get("invocationFingerprint")
+                    != invocation_fingerprint(str(executable), runtime["args"], str(cwd))
+                ):
+                    raise StateError(f"{slot} artifact authority runtime is invalid")
+                digest = self._artifact_digest(release, request.contract)
+                if authority.get("artifactDigest") not in (None, digest):
+                    raise StateError(f"{slot} recorded artifact digest does not match immutable release")
+                digests[slot] = digest
+
+            live = self.adapter.resolve_persisted(state["current"]["handle"])
+            self.adapter.assert_handle(live)
+            if (
+                live.record["identity"] != state["current"]["handle"]["identity"]
+                or live.record["runtime"] != expected["runtime"]
+                or live.record["releaseSha"] != expected["releaseSha"]
+                or live.record.get("configurationDigests") != expected["configurationDigests"]
+            ):
+                raise ProcessError("live current authority differs from persisted artifact migration authority")
+            health = self.adapter.attest(
+                live, expected["releaseSha"], compose_health_targets(request.contract, request.policy)
+            )
+            if all(state[slot].get("artifactDigest") == digests[slot] for slot in ("current", "previous")):
+                return ArtifactAuthorityMigrationResult("migration-not-required", copy.deepcopy(state), None)
+
+            generation = state["generation"] + 1
+            current = self._authority(
+                live, state["current"]["releasePath"], generation, health, digests["current"]
+            )
+            previous = copy.deepcopy(state["previous"])
+            previous["artifactDigest"] = digests["previous"]
+            receipt_payload = {
+                "apiVersion": "quanyu.ai/artifact-authority-migration-receipt/v1alpha1",
+                "kind": "ArtifactAuthorityMigrationReceipt",
+                "reason": "missing-artifact-digest",
+                "priorGeneration": state["generation"],
+                "newGeneration": generation,
+                "currentReleaseSha": current["releaseSha"],
+                "currentArtifactDigest": digests["current"],
+                "previousReleaseSha": previous["releaseSha"],
+                "previousArtifactDigest": digests["previous"],
+                "currentHandleDigest": self._digest(current["handle"]),
+                "healthEvidenceDigest": self._digest(health),
+                "migratedAt": self.now(),
+            }
+            receipt = {**receipt_payload, "receiptDigest": self._digest(receipt_payload)}
+            migrated = copy.deepcopy(state)
+            migrated["generation"] = generation
+            migrated["updatedAt"] = self.now()
+            migrated["current"] = current
+            migrated["previous"] = previous
+            migrated.setdefault("artifactAuthorityMigrations", []).append(receipt)
+            committed = self.store.commit(state["generation"], migrated)
+            return ArtifactAuthorityMigrationResult("migrated", committed, receipt)
 
     def _approval_digest(self, receipt: MigrationApprovalReceipt) -> str:
         return self._digest(receipt.__dict__)

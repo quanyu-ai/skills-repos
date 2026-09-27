@@ -1,6 +1,6 @@
 """ENV-1b core release engine. Production process adapters are intentionally absent."""
 
-from .core import Candidate, ManagedReconciliationResult, MigrationApprovalReceipt, MigrationGateRequired, ReleaseEngine, ReleaseRequest
+from .core import ArtifactAuthorityMigrationResult, Candidate, ManagedReconciliationResult, MigrationApprovalReceipt, MigrationGateRequired, ReleaseEngine, ReleaseRequest
 from .fake_adapter import FakeProcessAdapter, FakeProcessRuntime
 from .pm2_adapter import PM2ProcessAdapter
 from .ports import AdapterHandle, FakeLifecycleRunner, FakeSourceProvider
@@ -10,6 +10,7 @@ from .legacy_restore import LoadedLegacyRestoreDescriptor, load_legacy_restore_d
 __all__ = [
     "AdapterHandle",
     "AtomicStateStore",
+    "ArtifactAuthorityMigrationResult",
     "Candidate",
     "FakeLifecycleRunner",
     "FakeProcessAdapter",
