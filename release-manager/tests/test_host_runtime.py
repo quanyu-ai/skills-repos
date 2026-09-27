@@ -16,6 +16,8 @@ from engine.host_runtime import GitSourceProvider, SubprocessLifecycleRunner
 
 
 class HostRuntimeTest(unittest.TestCase):
+    PRISMA_GENERATE_DATABASE_URL = "postgresql://127.0.0.1:1/release_manager_build?connect_timeout=1"
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
@@ -105,21 +107,30 @@ class HostRuntimeTest(unittest.TestCase):
 
     def test_lifecycle_runner_uses_corepack_without_a_shell(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
-                     "corepackProgram": str(self.corepack), "corepackHome": str(self.root)}
+                     "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
+                     "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL}
         runner = SubprocessLifecycleRunner(("/usr/bin", "/bin"), toolchain, (0, os.geteuid()))
         with patch("engine.host_runtime.subprocess.run") as run:
             runner.frozen_install(self.root, "pnpm@9.15.4", {"HOME": str(self.root)})
+            runner.run_action(self.root, {"packageScript": "db:generate"}, {"HOME": str(self.root)})
             runner.run_action(self.root, {"packageScript": "build"}, {"HOME": str(self.root)})
         self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "install", "--frozen-lockfile"],
                          run.call_args_list[0].args[0])
-        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "build"],
+        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "db:generate"],
                          run.call_args_list[1].args[0])
+        self.assertEqual([str(self.node), str(self.corepack), "pnpm@9.15.4", "run", "build"],
+                         run.call_args_list[2].args[0])
         self.assertNotIn("shell", run.call_args_list[0].kwargs)
         self.assertEqual(str(self.root), run.call_args_list[0].kwargs["env"]["COREPACK_HOME"])
+        self.assertNotIn("DATABASE_URL", run.call_args_list[0].kwargs["env"])
+        self.assertEqual(self.PRISMA_GENERATE_DATABASE_URL,
+                         run.call_args_list[1].kwargs["env"]["DATABASE_URL"])
+        self.assertNotIn("DATABASE_URL", run.call_args_list[2].kwargs["env"])
 
     def test_unregistered_package_manager_and_unsafe_program_fail_closed(self) -> None:
         toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
-                     "corepackProgram": str(self.corepack), "corepackHome": str(self.root)}
+                     "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
+                     "prismaGenerateDatabaseUrl": self.PRISMA_GENERATE_DATABASE_URL}
         runner = SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
         with self.assertRaises(ToolchainError):
             runner.frozen_install(self.root, "pnpm@9.15.0", {})
@@ -127,6 +138,13 @@ class HostRuntimeTest(unittest.TestCase):
         unsafe.write_text("fixture\n")
         unsafe.chmod(0o722)
         toolchain["corepackProgram"] = str(unsafe)
+        with self.assertRaises(ToolchainError):
+            SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
+
+    def test_unregistered_prisma_generation_environment_fails_closed(self) -> None:
+        toolchain = {"packageManager": "pnpm@9.15.4", "nodeExecutable": str(self.node),
+                     "corepackProgram": str(self.corepack), "corepackHome": str(self.root),
+                     "prismaGenerateDatabaseUrl": "postgresql://database.internal/production"}
         with self.assertRaises(ToolchainError):
             SubprocessLifecycleRunner(("/usr/bin",), toolchain, (0, os.geteuid()))
 

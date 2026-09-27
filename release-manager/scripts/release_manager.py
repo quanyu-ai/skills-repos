@@ -23,7 +23,8 @@ REGISTRY = Path("/etc/quanyu/release-manager/operator-registry.v1.json")
 ALLOWED_ENTRY_KEYS = {"environmentId", "serviceId", "repository", "policyFile", "contractFile", "stateFile", "lockFile", "sourceMirror", "maxStateAgeSeconds", "trustedOwnerUids", "pm2", "sourcePublication", "toolchain"}
 ALLOWED_PM2_KEYS = {"home", "nodeModules", "instanceId", "stableName", "serviceUid"}
 ALLOWED_PUBLICATION_KEYS = {"identityFile", "knownHostsFile"}
-ALLOWED_TOOLCHAIN_KEYS = {"packageManager", "nodeExecutable", "corepackProgram", "corepackHome"}
+ALLOWED_TOOLCHAIN_KEYS = {"packageManager", "nodeExecutable", "corepackProgram", "corepackHome",
+                          "prismaGenerateDatabaseUrl"}
 
 
 def _load_binding(environment_id: str, service_id: str) -> tuple[OperatorBinding, dict[str, object], dict[str, object], dict[str, str]]:
