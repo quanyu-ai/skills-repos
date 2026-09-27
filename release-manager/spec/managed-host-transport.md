@@ -61,9 +61,17 @@ hashed under the same root-owner and no-write checks, but remains a non-executab
 data/code file. Root-owned registries and manifests contain no secrets and must
 be readable, but never writable, by the service identity. Commands are
 executed without a shell. `preflight` and `attest` map
-to the canonical read-only operator. `deploy` is disabled until its registered
-vector points to the canonical ReleaseEngine writer and `allowDeploy` is
-separately enabled; this bootstrap task must leave it disabled.
+to the canonical read-only operator. `deploy` is disabled unless its registered
+vector points to the canonical ReleaseEngine writer and the root-owned binding
+contains an `exact-deploy-authority/v1` object. That authority binds one Owner
+approval identifier to the registered environment, application, repository and
+one lowercase 40-character SHA. A boolean switch, missing field, additional
+field, scope mismatch or requested-SHA mismatch fails before the operator is
+executed. The caller envelope has no approval or authority field and therefore
+cannot widen or replace this binding. After the approved deployment, the host
+administrator removes the authority while installing the next measured
+registry; until then it remains replayable only for the same exact scope and
+SHA, never for an arbitrary candidate.
 
 `source-publication` is a one-commit infrastructure repair, not a generic
 fetch surface. It is frozen to `smart-college-demo` / `smart-college-web`, the
