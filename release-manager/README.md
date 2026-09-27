@@ -13,6 +13,7 @@ ENV-1b-a defines the experimental `v1alpha1` contracts. ENV-1b-b adds the contra
 - `tests/test_engine.py`: restart/recovery, crash-boundary, migration-gate, lifecycle, attestation, and restore tests.
 - `pm2-adapter/`: pinned PM2 programmatic bridge, explicit-process isolated harness, and adapter operational boundary.
 - `tests/test_pm2_adapter.py`: Linux `/proc`, external-secret, exact mutation/absence, health, persistence, restart and restore integration tests.
+- `engine/source_publication.py`: one-commit, GitHub-provenance-bound publication into the already registered source mirror; it exposes no caller-controlled path, remote, ref, credential, or argv.
 - `scripts/release_manager.py preflight-status`: host-bound, fail-closed, strictly read-only Control Tower operator; see `spec/preflight-status.md`.
 - `transport/`: forced-command managed-host gateway and fixed Demo client; see `spec/managed-host-transport.md`. It delegates to registered canonical operator commands and is not a second engine.
 

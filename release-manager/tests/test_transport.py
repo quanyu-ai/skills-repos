@@ -34,7 +34,8 @@ class TransportTest(unittest.TestCase):
         shutil.copy2(ROOT / "scripts" / "validate.py", validator)
         validator.chmod(0o600)
         (self.install_root / "schemas").mkdir(mode=0o700)
-        for name in ("preflight-error.schema.json", "preflight-status.schema.json"):
+        for name in ("preflight-error.schema.json", "preflight-status.schema.json",
+                     "source-publication-error.schema.json", "source-publication-receipt.schema.json"):
             target = self.install_root / "schemas" / name
             shutil.copy2(ROOT / "schemas" / name, target)
             target.chmod(0o600)
@@ -56,7 +57,8 @@ class TransportTest(unittest.TestCase):
             "installRoot": str(self.install_root),
             "commands": {"preflight": [str(self.operator), "preflight-status"],
                          "attest": [str(self.operator), "preflight-status"],
-                         "deploy": [str(self.operator), "deploy"]}}]}))
+                         "deploy": [str(self.operator), "deploy"],
+                         "source-publication": [str(self.operator), "source-publication"]}}]}))
         self.registry.chmod(0o600)
 
     def tearDown(self):

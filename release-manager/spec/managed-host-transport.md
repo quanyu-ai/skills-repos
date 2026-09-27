@@ -3,7 +3,7 @@
 This transport is a forced-command gateway to the existing canonical
 `ReleaseEngine`; it is not a second release engine. The caller can submit only
 `environment`, `application`, a 40-character lower-case Git SHA, and
-`mode=preflight|deploy|attest`. Policy, State Store, lock, PM2, UID, secret
+`mode=preflight|deploy|attest|source-publication`. Policy, State Store, lock, PM2, UID, secret
 source and rollback authority are resolved solely from root-owned host
 registries. Unknown fields and non-unique bindings fail closed.
 
@@ -64,6 +64,25 @@ executed without a shell. `preflight` and `attest` map
 to the canonical read-only operator. `deploy` is disabled until its registered
 vector points to the canonical ReleaseEngine writer and `allowDeploy` is
 separately enabled; this bootstrap task must leave it disabled.
+
+`source-publication` is a one-commit infrastructure repair, not a generic
+fetch surface. It is frozen to `smart-college-demo` / `smart-college-web`, the
+registered `quanyu-ai/proj-code-smart-college` mirror, merged PR #29, commit
+`06c5d26c54b3dbce528766eb3fcf44b72432efbf` and tree
+`abe957be9dcf979e420eab018a2720ffd636177c`. The operator first verifies the
+frozen GitHub PR evidence (repository identity, base `main`, merged state/time,
+merge commit, parent, tree and subject), then fetches only the frozen commit
+from the fixed canonical Git SSH URL. The root-owned operator registry supplies
+the only accepted identity and known-hosts paths; the identity must be an
+operator-owned `0400` regular file and known-hosts a trusted-owner `0444`
+regular file. Git and SSH run non-interactively with a fixed command, strict
+host-key checking, identities-only, no TTY, no forwarding, no proxy and no
+caller override. The operator verifies the commit object in a temporary bare quarantine,
+imports it into the existing mirror under a temporary ref, and atomically
+creates an immutable publication ref while deleting the temporary ref. It
+never checks out a worktree, invokes deployment, writes State Store, or calls
+PM2, a database, or a secret provider. Its receipt proves State Store
+immutability and whether the exact publication was already present.
 
 The gateway discards operator stderr, requires JSON stdout, and returns only a
 versioned evidence envelope, request digest, installed operator SHA, mode,

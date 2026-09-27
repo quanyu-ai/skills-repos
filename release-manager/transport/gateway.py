@@ -15,7 +15,7 @@ from typing import Any
 REGISTRY = Path("/etc/quanyu/release-manager/transport-registry.v1.json")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REQUEST_KEYS = {"environment", "application", "sha", "mode"}
-MODES = {"preflight", "deploy", "attest"}
+MODES = {"preflight", "deploy", "attest", "source-publication"}
 SENSITIVE_KEYS = {"password", "token", "privatekey", "secret", "secretvalue", "clientsecret",
                   "apikey", "authorization", "accesstoken", "databaseurl", "connectionstring"}
 READ_ONLY_KEYS = {"schemaVersion", "operator", "version", "buildDigest", "observedAt", "decision", "scope",
@@ -145,7 +145,7 @@ def _binding(registry: dict[str, Any], request: dict[str, str], registry_owner_u
     if (not isinstance(command, list) or not command or any(not isinstance(part, str) or not part for part in command)
             or any("/" in part or part.startswith("-") for part in command[1:])):
         raise GatewayError("registered command is invalid")
-    expected_operation = "deploy" if request["mode"] == "deploy" else "preflight-status"
+    expected_operation = {"deploy": "deploy", "source-publication": "source-publication"}.get(request["mode"], "preflight-status")
     if command[1:] != [expected_operation]:
         raise GatewayError("mode is not bound to the canonical operation")
     executable = Path(command[0])
@@ -201,10 +201,17 @@ def _validate_evidence_schema(mode: str, value: Any, install_root: Path, owner_u
             schema_name = "preflight-status.schema.json"
         else:
             raise GatewayError("operator returned an unsupported read-only schema")
-    else:
+    elif mode == "deploy":
         if version != "quanyu.ai/release-manager-deploy-result/v1":
             raise GatewayError("operator returned an unsupported deploy schema")
         schema_name = "deploy-result.schema.json"
+    else:
+        if version == "quanyu.ai/managed-source-publication-error/v1":
+            schema_name = "source-publication-error.schema.json"
+        elif version == "quanyu.ai/managed-source-publication-receipt/v1":
+            schema_name = "source-publication-receipt.schema.json"
+        else:
+            raise GatewayError("operator returned an unsupported publication schema")
     validator_path = install_root / "scripts" / "validate.py"
     schema_path = install_root / "schemas" / schema_name
     validator_fd, _ = _open_program(validator_path, owner_uid, require_executable=False)
