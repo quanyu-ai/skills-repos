@@ -65,13 +65,18 @@ to the canonical read-only operator. `deploy` is disabled unless its registered
 vector points to the canonical ReleaseEngine writer and the root-owned binding
 contains an `exact-deploy-authority/v1` object. That authority binds one Owner
 approval identifier to the registered environment, application, repository and
-one lowercase 40-character SHA. A boolean switch, missing field, additional
+one lowercase 40-character SHA, the State Store generation at issuance, and
+fixed consumption receipt and lock paths. A boolean switch, missing field, additional
 field, scope mismatch or requested-SHA mismatch fails before the operator is
 executed. The caller envelope has no approval or authority field and therefore
-cannot widen or replace this binding. After the approved deployment, the host
-administrator removes the authority while installing the next measured
-registry; until then it remains replayable only for the same exact scope and
-SHA, never for an arbitrary candidate.
+cannot widen or replace this binding. Deploy requests serialize on the bound
+consumption lock. A successful exact deployment atomically writes and fsyncs an
+immutable consumption receipt before `DEPLOYED` is returned; subsequent calls
+fail before operator execution. If the gateway crashes after the State Store
+commit but before the receipt, a retry proves the exact successful attempt and
+generation against the issuance boundary, writes the receipt, and returns the
+existing result without re-running activation. Pre-mutation failures do not
+consume the approval. A mismatched or generalized request always fails closed.
 
 The registered `deploy` operation enters `ReleaseEngine.activate`; it does not
 reimplement release transitions in the transport. Its host runtime acquires
