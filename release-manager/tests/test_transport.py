@@ -98,6 +98,12 @@ class TransportTest(unittest.TestCase):
                 self.invoke(self.request(mode="deploy"))
             run.assert_not_called()
 
+    def test_canonical_operator_is_executable_and_uses_pinned_host_python(self):
+        operator = ROOT / "scripts" / "release_manager.py"
+        self.assertTrue(operator.stat().st_mode & stat.S_IXUSR)
+        self.assertEqual("#!/opt/quanyu/release-manager/runtime/python3.12",
+                         operator.read_text().splitlines()[0])
+
     def test_repeated_read_only_calls_are_reproducible_and_audited(self):
         result = type("R", (), {"stdout": b'{"schemaVersion":"quanyu.ai/release-manager-preflight-error/v1","decision":"FAIL_CLOSED","code":"TEST"}', "returncode": 0})()
         with patch("gateway.subprocess.run", return_value=result):
