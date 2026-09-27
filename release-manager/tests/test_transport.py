@@ -148,6 +148,17 @@ class TransportTest(unittest.TestCase):
         self.assertEqual(9, result["result"]["stateGeneration"])
         self.assertTrue(self.consumption.is_file())
 
+    def test_post_commit_retry_rejects_unsafe_state_file(self):
+        document = json.loads(self.registry.read_text())
+        binding = document["bindings"][0]
+        binding["deployAuthority"] = self.authority(binding)
+        self.registry.write_text(json.dumps(document))
+        self.state.write_text("{}")
+        self.state.chmod(0o622)
+        with patch("gateway.subprocess.run") as run, self.assertRaises(gateway.GatewayError):
+            self.invoke(self.request(mode="deploy"))
+        run.assert_not_called()
+
     def test_deploy_authority_is_exactly_bound_and_reaches_only_canonical_writer(self):
         document = json.loads(self.registry.read_text())
         binding = document["bindings"][0]
