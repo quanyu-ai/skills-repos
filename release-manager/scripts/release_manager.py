@@ -24,7 +24,7 @@ ALLOWED_ENTRY_KEYS = {"environmentId", "serviceId", "repository", "policyFile", 
 ALLOWED_PM2_KEYS = {"home", "nodeModules", "instanceId", "stableName", "serviceUid"}
 ALLOWED_PUBLICATION_KEYS = {"identityFile", "knownHostsFile"}
 ALLOWED_TOOLCHAIN_KEYS = {"packageManager", "nodeExecutable", "corepackProgram", "corepackHome",
-                          "prismaGenerateDatabaseUrl", "prismaGenerateTurboGlobalEnv"}
+                          "toolchainBin", "prismaGenerateDatabaseUrl", "prismaGenerateTurboGlobalEnv"}
 
 
 def _load_binding(environment_id: str, service_id: str) -> tuple[OperatorBinding, dict[str, object], dict[str, object], dict[str, str]]:

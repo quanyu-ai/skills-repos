@@ -79,8 +79,12 @@ the exact commit only from the registered local mirror, checks out a detached
 worktree without a shell, and runs frozen install and typed lifecycle actions
 through fixed argv subprocesses. Package scripts use the contract's exact
 `packageManager` version through a registry-bound absolute Node executable,
-Corepack program and Corepack cache directory. The runner never searches PATH
-for this toolchain and never invokes a shell. The registry also binds the sole
+Corepack program, Corepack cache directory and toolchain binary directory. The
+runner invokes the top-level toolchain by absolute paths and prepends only the
+validated toolchain directory to the sanitized child PATH, allowing workspace
+task shims to resolve the same Node and Corepack. Raw lifecycle executable
+resolution retains the narrower trusted PATH. The runner never invokes a shell.
+The registry also binds the sole
 synthetic `DATABASE_URL` accepted for the typed `db:generate` prepare action:
 an unauthenticated loopback port 1 URL that cannot reach the runtime database.
 The runner injects it only for Prisma client generation, never for install,
