@@ -42,6 +42,9 @@ class TransportTest(unittest.TestCase):
             target.chmod(0o600)
         self.registry = root / "registry.json"
         self.manifest = root / "manifest.json"
+        self.state = root / "state.json"
+        self.consumption = root / "deploy-consumption.json"
+        self.consumption_lock = root / "deploy-consumption.lock"
         digest = hashlib.sha256(self.operator.read_bytes()).hexdigest()
         tree_digest = gateway._tree_digest(self.install_root, os.geteuid())
         self.manifest.write_text(json.dumps({"schemaVersion": "quanyu.ai/release-manager-install/v1",
@@ -73,6 +76,14 @@ class TransportTest(unittest.TestCase):
     def invoke(self, raw):
         return gateway.invoke(raw, self.registry, trusted_owner_uid=os.geteuid())
 
+    def authority(self, binding, sha=None):
+        return {"schemaVersion": "quanyu.ai/exact-deploy-authority/v1",
+                "approvalId": "owner:DEMO-401-G3:06c5d26c", "environment": binding["environment"],
+                "application": binding["application"], "repository": binding["repository"],
+                "sha": sha or self.SHA, "issuedStateGeneration": 7, "stateFile": str(self.state),
+                "consumptionFile": str(self.consumption),
+                "consumptionLockFile": str(self.consumption_lock)}
+
     def test_unknown_environment_application_and_short_sha_fail(self):
         for raw in (self.request(environment="prod"), self.request(application="other"), self.request(sha="abc")):
             with self.assertRaises(gateway.GatewayError):
@@ -100,18 +111,47 @@ class TransportTest(unittest.TestCase):
             with self.assertRaises(gateway.GatewayError):
                 self.invoke(self.request(mode="deploy"))
             run.assert_not_called()
+        with patch("gateway.subprocess.run") as run:
+            with self.assertRaises(gateway.GatewayError):
+                self.invoke(self.request(mode="deploy", sha="b" * 40))
+            run.assert_not_called()
+
+    def test_failed_pre_mutation_deploy_preserves_unconsumed_authority(self):
+        document = json.loads(self.registry.read_text())
+        binding = document["bindings"][0]
+        binding["deployAuthority"] = self.authority(binding)
+        self.registry.write_text(json.dumps(document))
+        failed = type("R", (), {"stdout": json.dumps({
+            "schemaVersion": "quanyu.ai/release-manager-deploy-result/v1", "decision": "FAIL_CLOSED",
+            "attemptId": "fail-closed", "releaseSha": self.SHA, "artifactDigest": "sha256:" + "0" * 64,
+            "stateGeneration": 1, "transitionDigest": "sha256:" + "1" * 64,
+        }).encode(), "returncode": 2})()
+        with patch("gateway.subprocess.run", return_value=failed):
+            result = self.invoke(self.request(mode="deploy"))
+        self.assertEqual(2, result["exitCode"])
+        self.assertFalse(self.consumption.exists())
+
+    def test_post_commit_retry_consumes_without_operator_reexecution(self):
+        document = json.loads(self.registry.read_text())
+        binding = document["bindings"][0]
+        binding["deployAuthority"] = self.authority(binding)
+        self.registry.write_text(json.dumps(document))
+        attempt = {"attemptId": "attempt-recovered", "targetSha": self.SHA,
+                   "phase": "complete", "outcome": "succeeded"}
+        self.state.write_text(json.dumps({"generation": 9, "status": "managed", "attempt": attempt,
+            "current": {"releaseSha": self.SHA, "artifactDigest": "sha256:" + "2" * 64}}))
+        self.state.chmod(0o600)
+        with patch("gateway.subprocess.run") as run:
+            result = self.invoke(self.request(mode="deploy"))
+        run.assert_not_called()
+        self.assertEqual("DEPLOYED", result["result"]["decision"])
+        self.assertEqual(9, result["result"]["stateGeneration"])
+        self.assertTrue(self.consumption.is_file())
 
     def test_deploy_authority_is_exactly_bound_and_reaches_only_canonical_writer(self):
         document = json.loads(self.registry.read_text())
         binding = document["bindings"][0]
-        binding["deployAuthority"] = {
-            "schemaVersion": "quanyu.ai/exact-deploy-authority/v1",
-            "approvalId": "owner:DEMO-401-G3:06c5d26c",
-            "environment": binding["environment"],
-            "application": binding["application"],
-            "repository": binding["repository"],
-            "sha": self.SHA,
-        }
+        binding["deployAuthority"] = self.authority(binding)
         self.registry.write_text(json.dumps(document))
         deployed = type("R", (), {"stdout": json.dumps({
             "schemaVersion": "quanyu.ai/release-manager-deploy-result/v1",
@@ -125,21 +165,19 @@ class TransportTest(unittest.TestCase):
         argv = run.call_args.args[0]
         self.assertEqual("deploy", argv[1])
         self.assertIn(self.SHA, argv)
+        self.assertTrue(self.consumption.is_file())
 
         with patch("gateway.subprocess.run") as run:
             with self.assertRaises(gateway.GatewayError):
-                self.invoke(self.request(mode="deploy", sha="b" * 40))
+                self.invoke(self.request(mode="deploy"))
             run.assert_not_called()
 
     def test_generic_or_caller_controlled_deploy_authority_fails_closed(self):
         document = json.loads(self.registry.read_text())
         binding = document["bindings"][0]
-        for authority in (True, {"sha": self.SHA}, {
-            "schemaVersion": "quanyu.ai/exact-deploy-authority/v1",
-            "approvalId": "owner:approval", "environment": binding["environment"],
-            "application": binding["application"], "repository": binding["repository"],
-            "sha": "b" * 40, "allowAnySha": True,
-        }):
+        widened = self.authority(binding, "b" * 40)
+        widened["allowAnySha"] = True
+        for authority in (True, {"sha": self.SHA}, widened):
             binding["deployAuthority"] = authority
             self.registry.write_text(json.dumps(document))
             with patch("gateway.subprocess.run") as run, self.assertRaises(gateway.GatewayError):

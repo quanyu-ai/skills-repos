@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import json
 import os
 import re
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +30,8 @@ READ_ONLY_KEYS = {"schemaVersion", "operator", "version", "buildDigest", "observ
                   "evidenceDigest", "candidate", "provided", "sha", "reachable", "mutationProof",
                   "stateBeforeDigest", "stateAfterDigest", "unchanged", "code"}
 DEPLOY_KEYS = {"schemaVersion", "decision", "attemptId", "releaseSha", "artifactDigest", "stateGeneration", "transitionDigest"}
-DEPLOY_AUTHORITY_KEYS = {"schemaVersion", "approvalId", "environment", "application", "repository", "sha"}
+DEPLOY_AUTHORITY_KEYS = {"schemaVersion", "approvalId", "environment", "application", "repository", "sha",
+                         "issuedStateGeneration", "stateFile", "consumptionFile", "consumptionLockFile"}
 
 
 class GatewayError(RuntimeError):
@@ -169,6 +172,10 @@ def _binding(registry: dict[str, Any], request: dict[str, str], registry_owner_u
         if (not isinstance(authority, dict) or set(authority) != DEPLOY_AUTHORITY_KEYS
                 or not isinstance(authority.get("approvalId"), str)
                 or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", authority["approvalId"])
+                or not isinstance(authority.get("issuedStateGeneration"), int)
+                or authority["issuedStateGeneration"] < 1
+                or any(not isinstance(authority.get(key), str) or not authority[key]
+                       for key in ("stateFile", "consumptionFile", "consumptionLockFile"))
                 or any(authority.get(key) != value for key, value in expected.items())):
             os.close(fd)
             raise GatewayError("exact deploy authority is not proven")
@@ -188,6 +195,68 @@ def _request(raw: bytes) -> dict[str, str]:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", value["application"]):
         raise GatewayError("application is invalid")
     return value
+
+
+def _authority_path(value: str, trusted_owner_uid: int) -> Path:
+    path = Path(value)
+    try:
+        parent = path.parent.resolve(strict=True)
+        metadata = parent.lstat()
+    except OSError as exc:
+        raise GatewayError("deploy authority path is unavailable") from exc
+    if (not path.is_absolute() or parent != path.parent or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid not in {trusted_owner_uid, os.geteuid()} or metadata.st_mode & 0o022):
+        raise GatewayError("deploy authority path metadata is unsafe")
+    return path
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    fd, temporary = tempfile.mkstemp(prefix=".deploy-consumption-", suffix=".json", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _consumption(authority: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    return {"schemaVersion": "quanyu.ai/exact-deploy-consumption/v1", "approvalId": authority["approvalId"],
+            "environment": authority["environment"], "application": authority["application"],
+            "repository": authority["repository"], "sha": authority["sha"], "result": result}
+
+
+def _unlock(fd: int | None) -> None:
+    if fd is not None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _recover_committed(authority: dict[str, Any], trusted_owner_uid: int) -> dict[str, Any] | None:
+    state = _safe_json(Path(authority["stateFile"]), (trusted_owner_uid, os.geteuid()))
+    attempt = state.get("attempt", {})
+    current = state.get("current", {})
+    if state.get("generation", 0) <= authority["issuedStateGeneration"]:
+        return None
+    if (state.get("status") != "managed" or current.get("releaseSha") != authority["sha"]
+            or attempt.get("targetSha") != authority["sha"] or attempt.get("phase") != "complete"
+            or attempt.get("outcome") != "succeeded"):
+        raise GatewayError("post-authority state does not prove the exact deployment")
+    transition = hashlib.sha256(json.dumps(attempt, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"schemaVersion": "quanyu.ai/release-manager-deploy-result/v1", "decision": "DEPLOYED",
+            "attemptId": attempt["attemptId"], "releaseSha": current["releaseSha"],
+            "artifactDigest": current["artifactDigest"], "stateGeneration": state["generation"],
+            "transitionDigest": f"sha256:{transition}"}
 
 
 def _contains_secret(value: Any) -> bool:
@@ -248,6 +317,42 @@ def invoke(raw: bytes, registry_path: Path = REGISTRY, *, trusted_owner_uid: int
     request = _request(raw)
     registry = _safe_json(registry_path, (trusted_owner_uid,))
     binding, executable_fd, manifest = _binding(registry, request, trusted_owner_uid)
+    authority_lock_fd = None
+    consumption_file = None
+    authority = binding.get("deployAuthority")
+    if request["mode"] == "deploy":
+        consumption_file = _authority_path(authority["consumptionFile"], trusted_owner_uid)
+        lock_file = _authority_path(authority["consumptionLockFile"], trusted_owner_uid)
+        _authority_path(authority["stateFile"], trusted_owner_uid)
+        authority_lock_fd = os.open(lock_file, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        os.fchmod(authority_lock_fd, 0o600)
+        fcntl.flock(authority_lock_fd, fcntl.LOCK_EX)
+        if consumption_file.exists():
+            os.close(executable_fd)
+            _unlock(authority_lock_fd)
+            raise GatewayError("exact deploy authority is already consumed")
+        if Path(authority["stateFile"]).exists():
+            try:
+                recovered = _recover_committed(authority, trusted_owner_uid)
+            except Exception:
+                os.close(executable_fd)
+                _unlock(authority_lock_fd)
+                raise
+            if recovered is not None:
+                try:
+                    _atomic_json(consumption_file, _consumption(authority, recovered))
+                except Exception:
+                    os.close(executable_fd)
+                    _unlock(authority_lock_fd)
+                    raise
+                os.close(executable_fd)
+                _unlock(authority_lock_fd)
+                digest = hashlib.sha256(json.dumps(request, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                return {"schemaVersion": "quanyu.ai/managed-release-transport-evidence/v1",
+                        "requestDigest": f"sha256:{digest}", "operatorSha": binding["operatorSha"],
+                        "installTreeDigest": manifest["installTreeDigest"], "gatewayDigest": manifest["gatewayDigest"],
+                        "operatorEntrypointDigest": manifest["commandDigests"][request["mode"]],
+                        "mode": request["mode"], "exitCode": 0, "result": recovered}
     proc_executable = f"/proc/self/fd/{executable_fd}"
     command = [proc_executable, *binding["commands"][request["mode"]][1:],
                "--environment-id", request["environment"], "--service-id", request["application"],
@@ -258,22 +363,36 @@ def invoke(raw: bytes, registry_path: Path = REGISTRY, *, trusted_owner_uid: int
                                    check=False, timeout=300,
                                    env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8",
                                         "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": ""})
+    except Exception:
+        _unlock(authority_lock_fd)
+        raise
     finally:
         os.close(executable_fd)
     try:
         result = json.loads(completed.stdout)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        _unlock(authority_lock_fd)
         raise GatewayError("operator returned invalid evidence") from exc
-    _validate_evidence_schema(request["mode"], result, Path(binding["installRoot"]), trusted_owner_uid)
-    if _contains_secret(result):
-        raise GatewayError("operator returned forbidden sensitive output")
+    try:
+        _validate_evidence_schema(request["mode"], result, Path(binding["installRoot"]), trusted_owner_uid)
+        if _contains_secret(result):
+            raise GatewayError("operator returned forbidden sensitive output")
+        if request["mode"] == "deploy" and completed.returncode == 0:
+            if (result.get("decision") != "DEPLOYED" or result.get("releaseSha") != authority["sha"]
+                    or result.get("stateGeneration", 0) <= authority["issuedStateGeneration"]):
+                raise GatewayError("deploy success does not prove authority consumption")
+            _atomic_json(consumption_file, _consumption(authority, result))
+    except Exception:
+        _unlock(authority_lock_fd)
+        raise
     digest = hashlib.sha256(json.dumps(request, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return {"schemaVersion": "quanyu.ai/managed-release-transport-evidence/v1", "requestDigest": f"sha256:{digest}",
-            "operatorSha": binding["operatorSha"], "installTreeDigest": manifest["installTreeDigest"],
-            "gatewayDigest": manifest["gatewayDigest"],
-            "operatorEntrypointDigest": manifest["commandDigests"][request["mode"]],
-            "mode": request["mode"], "exitCode": completed.returncode,
-            "result": result}
+    evidence = {"schemaVersion": "quanyu.ai/managed-release-transport-evidence/v1", "requestDigest": f"sha256:{digest}",
+                "operatorSha": binding["operatorSha"], "installTreeDigest": manifest["installTreeDigest"],
+                "gatewayDigest": manifest["gatewayDigest"],
+                "operatorEntrypointDigest": manifest["commandDigests"][request["mode"]],
+                "mode": request["mode"], "exitCode": completed.returncode, "result": result}
+    _unlock(authority_lock_fd)
+    return evidence
 
 
 def main() -> int:
