@@ -39,7 +39,7 @@ case "$TYPE" in
 4. `git add . && git commit -m "feat: ..." && git push`
 
 ### 环境信息
-- 数据库：<连接串>
+- 数据库：<环境名称与已授权连接入口>
 - 端口：<port>
 - 容器：<container>
 
