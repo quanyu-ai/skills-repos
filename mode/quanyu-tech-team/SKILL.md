@@ -33,7 +33,7 @@ description: 权舆科技团队协作模式。适用于有调度者+多Agent的�
 
 详见 `knowledge-repos/guides/task-dispatch-mechanism.md` 第二章「任务类型清单」，此处不重复定义。
 
-**核心规则：预估超过5分钟 → 必须拆分。**
+按 `implementation-planning` 拆成能分别交付和验证的切片。并行前核对写入范围和共享资源，指定责任方与交接点。完成时按 `delivery-verification` 核对实际结果。
 
 ## 任务台账
 
