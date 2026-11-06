@@ -190,7 +190,7 @@ bash {{SKILL_DIR}}/scripts/generate-index.sh <project>
 
 - 首次安装引导：`setup.md`
 - 自检脚本说明：`doctor.md`
-- 完整设计：`README.md`
+- 通用流程：[技能入口](../SKILL.md)
 - 配置 schema：`config/schema.md`
 - 品牌配置：`config/brand.json`
 - 项目注册：`config/projects.json`
@@ -205,3 +205,7 @@ bash {{SKILL_DIR}}/scripts/generate-index.sh <project>
 - **Phase 4**：highfi 风格（品牌色 + 真实数据 + 完整视觉）
 - **Phase 5**：interactive 风格（Tab/Modal/Chart 完整交互 + 弹窗联动）
 - **Phase 6**：与 deploy-app skill 集成（一键 static 部署到 demo）
+
+## 版本归档
+
+有版本基线需求时，从技能目录使用 `scripts/archive.sh <project> <version>` 保存快照。使用 `scripts/diff-version.sh <project> <v1> <v2>` 比较。项目确认正式版本时，按原流程使用 `scripts/promote.sh <project> <new-version>`。局部变更沿用项目原版本记录。

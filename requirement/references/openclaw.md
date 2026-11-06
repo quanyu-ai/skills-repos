@@ -179,7 +179,7 @@ docs-repos/<project>/
 ## 🔗 详细文档
 
 - 首次安装引导：`setup.md`
-- 完整设计：`README.md`
+- 通用流程：[技能入口](../SKILL.md)
 - 字段 schema：`config/schema.md`
 - 模板：`templates/req-template.md`
 
@@ -191,3 +191,7 @@ docs-repos/<project>/
 - **Phase 2**：状态流转脚本（`promote-req.sh`）+ 校验脚本（lint frontmatter）
 - **Phase 3**：与原型设计 skill 联动，自动注入 `related_files.prototype`
 - **Phase 4**：跨项目搜索 + 全局 dashboard
+
+## 版本归档
+
+有版本基线需求时，从技能目录使用 `scripts/archive.sh <project> <version>` 保存快照。需求原始文档可在项目授权下通过 `--source-doc <docx>` 随快照保留。使用 `scripts/diff-version.sh <project> <v1> <v2>` 比较。项目确认正式版本时，按原流程使用 `scripts/promote.sh <project> <new-version>`。局部变更沿用项目原版本记录。
