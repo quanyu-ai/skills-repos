@@ -1,0 +1,31 @@
+{
+  "name": "quanyu-engineering",
+  "version": "1.0.0",
+  "description": "14项通用软件工程技能；按任务选用，并沿各项目现有规则和交付入口执行。",
+  "author": {
+    "name": "Quanyu AI"
+  },
+  "repository": "https://github.com/quanyu-ai/skills-repos",
+  "skills": [
+    "./planning",
+    "./project-mgmt",
+    "./requirement",
+    "./solution-design",
+    "./prototype-design",
+    "./prototype-review",
+    "./implementation-planning",
+    "./role/quanyu-tech-developer",
+    "./role/quanyu-tech-reviewer",
+    "./role/quanyu-tech-tester",
+    "./mode/quanyu-tech-solo",
+    "./engineering-debugging",
+    "./regression-testing",
+    "./delivery-verification"
+  ],
+  "interface": {
+    "displayName": "权舆工程技能",
+    "shortDescription": "需求、方案、原型、开发、测试、评审与交付；支持项目专属规则。",
+    "developerName": "Quanyu AI",
+    "category": "Productivity"
+  }
+}
