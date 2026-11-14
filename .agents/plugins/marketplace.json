@@ -1,0 +1,20 @@
+{
+  "name": "quanyu-skills",
+  "interface": {
+    "displayName": "权舆共享技能"
+  },
+  "plugins": [
+    {
+      "name": "quanyu-engineering",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
