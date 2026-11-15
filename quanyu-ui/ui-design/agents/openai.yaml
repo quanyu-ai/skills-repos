@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI视觉设计"
+  short_description: "按项目风格组织文字层级、布局密度、表面与组件，形成可审阅方案。"
+  default_prompt: "使用 $ui-design，依据当前项目任务与既有风格设计或精修受影响页面，提供可审阅方案。"

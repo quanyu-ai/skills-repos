@@ -1,0 +1,20 @@
+{
+  "name": "quanyu-ui",
+  "version": "1.0.0",
+  "description": "跨项目 UI 规范维护、视觉设计与实际界面复核；支持项目专属规范和组件扩展。",
+  "author": {
+    "name": "Quanyu AI"
+  },
+  "repository": "https://github.com/quanyu-ai/skills-repos",
+  "skills": [
+    "./ui-standards",
+    "./ui-design",
+    "./ui-review"
+  ],
+  "interface": {
+    "displayName": "权舆UI设计与评审",
+    "shortDescription": "按项目风格维护规范、设计界面、复核实际呈现。",
+    "developerName": "Quanyu AI",
+    "category": "Productivity"
+  }
+}

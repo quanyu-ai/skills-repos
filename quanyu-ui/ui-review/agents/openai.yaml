@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI实际界面复核"
+  short_description: "对实际页面及相关子面和浮层做视觉诊断，保留问题证据并定向复验。"
+  default_prompt: "使用 $ui-review，复核当前候选的受影响页面、子页与浮层，记录实际发现和未测边界。"

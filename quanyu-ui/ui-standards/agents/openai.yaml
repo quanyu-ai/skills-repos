@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI规范维护"
+  short_description: "将共性问题整理为可持续执行的UI规则、详细正反例和接入要求。"
+  default_prompt: "使用 $ui-standards，沿当前项目规范补齐本次发现的共性问题、正反例和可观察通过条件。"
