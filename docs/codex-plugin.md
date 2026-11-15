@@ -59,3 +59,9 @@ codex plugin list --marketplace quanyu-skills --json
 项目通过现有 `AGENTS.md`、设计规范索引或专属技能提供品牌、组件、目标端和业务边界；无需固定扩展文件名。无项目扩展时采用当前需求、已确认设计及可用组件，明确影响任务的假设。按需参考[项目扩展示例](../quanyu-ui/project-extension-examples/smart-college-ui-quality.md)，不自动给其他项目套用该示例。
 
 工程插件继续负责业务交互原型与流程复核，UI 插件负责规范与实际视觉质量；两者可独立使用，不强制串行或安装另一个插件。插件不新增 MCP、hooks、业务权限或发布门禁。合并、安装、技能发现和实际消费分别核验；不强制重启在途会话或修改其他项目。
+
+### 可选设计语言（UI 1.1.0）
+
+`ui-design`按需加载[语言入口](../quanyu-ui/ui-design/references/design-languages/index.md)，提供沉稳商务、科技纵深、浅色空间三个参考。`ui-review`检查选中语言的材质/密度约束，`ui-standards`维护项目采用和组件映射。没有新增第四个自动技能、MCP、hooks、字体依赖或全局主题；已有项目不随插件升级换肤。
+
+项目在原规范中记录所选语言与本项目依据，具体Token和业务规则仍以项目权威为准。三种参考不带示例业务、记录ID、端口、Figma文件或通过状态。源码版本、PR合并、安装版本、技能发现与实际任务使用分别核验；不为加载更新重启在途任务。
