@@ -41,3 +41,21 @@ python3 scripts/adopt-engineering-plugin.py --plugin-root /actual/installed/plug
 ## 验证
 
 manifest 的14个目录为发布清单：目录必须存在、技能名唯一、引用不离开仓库。实际 Codex 插件安装和技能发现才证明已加载，文件存在不等于生效。共享源不放项目业务规则或秘密。
+
+## 独立 UI 插件
+
+`quanyu-ui@quanyu-skills` 使用 `quanyu-ui/.codex-plugin/plugin.json`，按任务提供三个技能：
+
+- `ui-standards`：维护规范、正反例和组件接入要求。
+- `ui-design`：设计页面视觉层级、布局、密度与状态呈现。
+- `ui-review`：观看并操作实际界面，记录问题和定向复验。
+
+```sh
+codex plugin marketplace upgrade quanyu-skills
+codex plugin add quanyu-ui@quanyu-skills
+codex plugin list --marketplace quanyu-skills --json
+```
+
+项目通过现有 `AGENTS.md`、设计规范索引或专属技能提供品牌、组件、目标端和业务边界；无需固定扩展文件名。无项目扩展时采用当前需求、已确认设计及可用组件，明确影响任务的假设。按需参考[项目扩展示例](../quanyu-ui/project-extension-examples/smart-college-ui-quality.md)，不自动给其他项目套用该示例。
+
+工程插件继续负责业务交互原型与流程复核，UI 插件负责规范与实际视觉质量；两者可独立使用，不强制串行或安装另一个插件。插件不新增 MCP、hooks、业务权限或发布门禁。合并、安装、技能发现和实际消费分别核验；不强制重启在途会话或修改其他项目。
