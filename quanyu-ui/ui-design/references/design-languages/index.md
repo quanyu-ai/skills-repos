@@ -7,6 +7,11 @@
 | [沉稳商务 / Calm Enterprise](calm-enterprise.md) | 中性表面、清晰网格、克制强调 | 日常办理、密集表格、复杂表单 |
 | [科技纵深 / Tech Depth](tech-depth.md) | 深色分层、统一光源、聚焦式强调 | 技术运营、执行监控、需要沉浸感的工作面 |
 | [浅色空间 / Spatial Light](spatial-light.md) | 柔和环境、悬浮导航、稳定正文表面 | 需要精致感又重视日常阅读的工作台 |
+| [光场空间 / Lightfield Space](lightfield-space.md) | 定向柔光、多色低饱和环境、实色连续工作面 | 空间感较强的综合工作台与对象详情 |
+| [电影柔光 / Cinematic Softlight](cinematic-softlight.md) | 蓝灰远景、琥珀侧光、暗环境与亮工作面 | 氛围鲜明的工作台与成果阅读 |
+| [银蓝精工 / Silver Blue Precision](silver-blue-precision.md) | 冷白银灰、细亮边、稳定网格与较紧几何 | 精密现代的管理系统与密集工作 |
+
+三种空间扩展的布局与CSS接入见[工作区结构](workspace-layouts.md)，同内容效果可打开[离线交互示例](../../assets/design-language-demo/index.html)，无需安装依赖。语言标识与起步CSS随包提供；它们不是组件库或业务模板。
 
 只读取选中的语言文件；比较多稿时按比较范围读取。它们不是互斥的业务模型，也不分别授权操作。A/B/C等编号属于具体项目；先查该项目映射，不根据字母推断含义。选定一种语言后，可有紧凑/常规密度，但不要在相邻模块任意混用不同材质体系。
 
