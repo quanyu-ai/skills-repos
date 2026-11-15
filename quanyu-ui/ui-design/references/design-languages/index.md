@@ -7,7 +7,6 @@
 | [沉稳商务 / Calm Enterprise](calm-enterprise.md) | 中性表面、清晰网格、克制强调 | 日常办理、密集表格、复杂表单 |
 | [科技纵深 / Tech Depth](tech-depth.md) | 深色分层、统一光源、聚焦式强调 | 技术运营、执行监控、需要沉浸感的工作面 |
 | [浅色空间 / Spatial Light](spatial-light.md) | 柔和环境、悬浮导航、稳定正文表面 | 需要精致感又重视日常阅读的工作台 |
-
 | [光场空间 / Lightfield Space](lightfield-space.md) | 定向柔光、多色低饱和环境、实色连续工作面 | 空间感较强的综合工作台与对象详情 |
 | [电影柔光 / Cinematic Softlight](cinematic-softlight.md) | 蓝灰远景、琥珀侧光、暗环境与亮工作面 | 氛围鲜明的工作台与成果阅读 |
 | [银蓝精工 / Silver Blue Precision](silver-blue-precision.md) | 冷白银灰、细亮边、稳定网格与较紧几何 | 精密现代的管理系统与密集工作 |
