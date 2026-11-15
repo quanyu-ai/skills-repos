@@ -1,7 +1,7 @@
 {
   "name": "quanyu-ui",
-  "version": "1.0.0",
-  "description": "跨项目 UI 规范维护、视觉设计与实际界面复核；支持项目专属规范和组件扩展。",
+  "version": "1.1.0",
+  "description": "跨项目 UI 规范、视觉设计与界面复核；提供可选设计语言，尊重项目风格与业务规则。",
   "author": {
     "name": "Quanyu AI"
   },
