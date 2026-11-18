@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,25 +26,58 @@ def main():
     args = parser.parse_args()
     plugin = args.plugin_root.resolve(strict=True)
     manifest = json.loads((plugin / '.codex-plugin/plugin.json').read_text())
-    assert manifest['name'] == 'quanyu-engineering'
+    assert manifest['name'] in {'quanyu-engineering', 'quanyu-software-engineering'}
     skill_paths = {}
     for entry in manifest['skills']:
         source = (plugin / entry).resolve(strict=True)
         assert source.is_relative_to(plugin) and (source / 'SKILL.md').is_file()
+        assert source.name not in skill_paths, 'Duplicate skill name: ' + source.name
         skill_paths[source.name] = source.relative_to(plugin)
-    assert len(skill_paths) == 14
+    assert skill_paths, 'Empty skill manifest'
     status = json.loads(subprocess.check_output(
         ['codex', 'plugin', 'list', '--marketplace', 'quanyu-skills', '--json'], text=True))
-    assert any(p['pluginId'] == 'quanyu-engineering@quanyu-skills'
+    assert any(p['pluginId'] == manifest['name'] + '@quanyu-skills'
                and p['enabled'] and p['version'] == manifest['version']
                for p in status['installed']), 'Install and enable this plugin version first'
     codex_dir = Path.home() / '.codex'
-    alias = codex_dir / 'shared-skills/quanyu-engineering'
-    alias.parent.mkdir(parents=True, exist_ok=True)
-    assert not alias.exists() or alias.is_symlink(), 'Do not replace an ordinary directory'
-    pending = alias.with_name(alias.name + '.quanyu-tmp')
-    pending.symlink_to(plugin, target_is_directory=True)
-    os.replace(pending, alias)
+    config = codex_dir / 'config.toml'
+    if manifest['name'] == 'quanyu-software-engineering':
+        # Rename without removing the old cache used by in-flight references.
+        original_config = config.read_text() if config.exists() else ''
+        parsed = tomllib.loads(original_config)
+        legacy_id = 'quanyu-engineering@quanyu-skills'
+        if parsed.get('plugins', {}).get(legacy_id, {}).get('enabled') is not False:
+            section = '[plugins."' + legacy_id + '"]'
+            match = re.search(r'(?m)^' + re.escape(section) + r'\s*$', original_config)
+            if match:
+                stop = re.search(r'(?m)^\[', original_config[match.end():])
+                end = match.end() + stop.start() if stop else len(original_config)
+                body = original_config[match.end():end]
+                if re.search(r'(?m)^enabled\s*=', body):
+                    body = re.sub(r'(?m)^enabled\s*=.*$', 'enabled = false', body, count=1)
+                else:
+                    body = '\nenabled = false\n' + body
+                updated_config = original_config[:match.end()] + body + original_config[end:]
+            else:
+                updated_config = original_config.rstrip() + '\n\n' + section + '\nenabled = false\n'
+            assert tomllib.loads(updated_config)['plugins'][legacy_id]['enabled'] is False
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+            backup = codex_dir / 'backups' / ('software-engineering-rename-' + stamp + '.toml')
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            backup.write_text(original_config)
+            backup.chmod(0o600)
+            atomic_write(config, updated_config)
+    alias_names = ['quanyu-engineering']
+    if manifest['name'] == 'quanyu-software-engineering':
+        alias_names.append('quanyu-software-engineering')
+    for alias_name in alias_names:
+        alias = codex_dir / 'shared-skills' / alias_name
+        alias.parent.mkdir(parents=True, exist_ok=True)
+        assert not alias.exists() or alias.is_symlink(), 'Do not replace an ordinary directory'
+        pending = alias.with_name(alias.name + '.quanyu-tmp')
+        pending.symlink_to(plugin, target_is_directory=True)
+        os.replace(pending, alias)
+    alias = codex_dir / 'shared-skills' / manifest['name']
     if not args.project:
         print(json.dumps({'sharedSource': str(alias), 'version': manifest['version']}))
         return
@@ -98,7 +132,7 @@ def main():
             '---\nname: ' + name + '\ndescription: 共享插件技能的旧路径兼容入口；不独立启用。\n---\n\n'
             + marker + '\n\n此路径只为既有引用保留。执行本技能前读取共享插件原文：\n\n'
             + '[' + name + '](' + str(source / 'SKILL.md') + ')\n\n'
-            + '使用 quanyu-engineering:' + name + '；项目专属规则仍读取当前项目 AGENTS.md。\n')
+            + '使用 ' + manifest['name'] + ':' + name + '；项目专属规则仍读取当前项目 AGENTS.md。\n')
         for child in source.iterdir():
             if child.name != 'SKILL.md' and not (old / child.name).exists():
                 (old / child.name).symlink_to(child, target_is_directory=child.is_dir())

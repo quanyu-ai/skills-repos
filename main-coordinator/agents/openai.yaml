@@ -1,0 +1,4 @@
+interface:
+  display_name: "主调度"
+  short_description: "发现授权目标中的停顿与交接断点，协调原负责人推进实际交付并复用有效证据"
+  default_prompt: "用 $main-coordinator 核对当前项目完整授权目标，处理真实阻塞并确认下一阶段实际接续。"
