@@ -144,7 +144,7 @@ fi
 # 8. 防呆约束（不 sessions_yield / 完成后回报）
 echo "[8/10] 防呆约束（不 sessions_yield + 完成后回报）..."
 miss_constraint=()
-if ! echo "$CONTENT" | grep -E "(不\s*sessions_yield|sessions_yield.*禁用|禁用.*sessions_yield|不要.*yield)" -q; then
+if ! echo "$CONTENT" | grep -E "(不\s*sessions_yield|不准\s*sessions_yield|不要\s*sessions_yield|sessions_yield.*禁用|禁用.*sessions_yield|不要.*yield)" -q; then
     miss_constraint+=("不 sessions_yield")
 fi
 if ! echo "$CONTENT" | grep -E "(完成后回报|完成后必含|回报真实|回报：|回报清单)" -q; then
@@ -212,6 +212,61 @@ else
     show="${missing_paths[*]:0:5}"
     warn=$((warn+1))
     echo -e "  ${YELLOW}⚠️  WARN${NC}  ${#missing_paths[@]} 条路径不存在（示例：$show）"
+fi
+
+# 11. 部署任务规范化检查（2026-05-28 龙哥: 防止手撚 pm2/ssh 准则违反）
+#     触发背景：上次救援子 agent 任务里手撚 `ssh deploy@... pm2 start`，跳过 doctor.sh，
+#           全量 build 把 3.5GB 服务器打 OOM 重启。本检查防同类事件。
+logecho " "
+echo "[11/11] 部署任务规范化检查..."
+IS_DEPLOY_TASK="false"
+if echo "$CONTENT" | grep -E "(部署|deploy|pnpm\s+build|next\s+build|pm2\s+(start|reload|restart|delete)|\.next |\.next、|\.next。|\.next」|deploy\.sh|deploy-app)" -iq; then
+    IS_DEPLOY_TASK="true"
+fi
+if [ "$IS_DEPLOY_TASK" = "true" ]; then
+    dep_fail=()
+
+    # 11.1 必需调用 deploy.sh（禁手撚 pm2/ssh）
+    if ! echo "$CONTENT" | grep -E "skills/deploy-app/scripts/deploy\.sh" -q; then
+        dep_fail+=("未调用 deploy-app skill【必须: bash skills/deploy-app/scripts/deploy.sh <env> <app>】")
+    fi
+
+    # 11.2 检查是否裸手撚 pm2/ssh deploy@ 动作（红线 #1）
+    # 提取不含禁用清单的部分检查：使用 awk 跳过含“绝对禁止”、“不准”、“❌”、“不允许” 的行
+    _CONTENT_NO_BLACKLIST=$(echo "$CONTENT" | awk '
+        /绝对禁止|禁止手撚|不准手撚|不准.*pm2|不准.*ssh|不要手撚|不允许.*pm2|不允许.*ssh|❌.*手撚/ {in_blk=1; next}
+        /^$/ {in_blk=0}
+        /^---/ {in_blk=0}
+        /^##/ {in_blk=0}
+        in_blk==0 {print}
+    ')
+    if echo "$_CONTENT_NO_BLACKLIST" | grep -E "(^|[^a-zA-Z_-])(ssh\s+deploy@|pm2\s+(start|delete|reload|restart|stop)\s+[^|&;]*[a-zA-Z0-9])" -q; then
+        dep_fail+=("手撚 pm2/ssh deploy@ 动作【违反 deploy-app SKILL.md 红线 #1：禁止手撚 pm2/scp/ssh/docker run/rsync】")
+    fi
+
+    # 11.3 部署任务必须包含 doctor.sh 预检（红线 #2）
+    if ! echo "$CONTENT" | grep -E "doctor\.sh" -q; then
+        dep_fail+=("未包含 doctor.sh 预检【违反 deploy-app SKILL.md 红线 #2：禁止跳过 doctor.sh】建议加：bash skills/deploy-app/scripts/doctor.sh）")
+    fi
+
+    # 11.4 低内存机器提示（仅 WARN）
+    _MEM_TOTAL=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+    _MEM_BUDGET=$(awk '/MemAvailable/ {a=int($2/1024)} /SwapFree/ {s=int($2/1024)} END {print a+s}' /proc/meminfo 2>/dev/null || echo 0)
+    if [ "$_MEM_TOTAL" -lt 4000 ] && ! echo "$CONTENT" | grep -E "(--skip-build|skip.build|复用.*\.next|不重建)" -q; then
+        warn=$((warn+1))
+        echo -e "  ${YELLOW}⚠️  WARN${NC}  低内存机器（total=${_MEM_TOTAL}MB budget=${_MEM_BUDGET}MB）全量 build 有 OOM 风险。建议任务加 --skip-build 或明说原因。"
+    fi
+
+    if [ ${#dep_fail[@]} -eq 0 ]; then
+        echo -e "  ${GREEN}✅ PASS${NC}  部署任务规范检查通过"
+    else
+        fail=$((fail+1))
+        for _m in "${dep_fail[@]}"; do
+            echo -e "  ${RED}❌ FAIL${NC}  $_m"
+        done
+    fi
+else
+    echo -e "  ${GREEN}✅ N/A${NC}  非部署任务，跳过本检查"
 fi
 
 echo "---------------------------------------"

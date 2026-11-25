@@ -202,7 +202,7 @@ print_help() {
   $0 <env>                              健康检查模式（默认）
   $0 <env> --app <key> --mode probe     三态探测模式（被 deploy.sh 调）
 
-环境: proto | test | demo | prod
+环境: proto | test | demo | prod | dev
 
 probe 模式 stdout 返回:
   missing               数据库不存在
@@ -221,7 +221,7 @@ while [[ $# -gt 0 ]]; do
         --mode)    MODE="$2"; shift 2 ;;
         --via-ssh) VIA_SSH="$2"; shift 2 ;;
         --ssh-key) SSH_KEY_VIA="$2"; shift 2 ;;
-        proto|test|demo|prod) ENV="$1"; shift ;;
+        proto|test|demo|prod|dev) ENV="$1"; shift ;;
         *) echo "无效参数: $1" >&2; print_help; exit 1 ;;
     esac
 done

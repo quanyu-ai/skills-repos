@@ -13,7 +13,7 @@
   window.__VS_BASE__ = m ? (m[1] + '/') : '/';
 
   // 2. 拉取 versions.json
-  var metaUrl = window.__VS_BASE__ + 'meta/versions.json';
+  var metaUrl = '/meta/versions.json';
   fetch(metaUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
     if(!data || !data.versions) return;
     var sel = document.getElementById('version-select');
@@ -24,9 +24,10 @@
     // 按版本号倒序
     var versions = data.versions.slice().sort(function(a,b){ return (a.version<b.version)?1:-1; });
     versions.forEach(function(v){
+      if(v.is_current) return;
       var opt = document.createElement('option');
       opt.value = v.version;
-      opt.textContent = '历史版本 ' + v.version;
+      opt.textContent = v.label ? v.label : ('历史版本 ' + v.version);
       sel.appendChild(opt);
     });
     sel.value = curVer;

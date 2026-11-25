@@ -94,7 +94,11 @@ if echo "$CONTENT" | grep -E "(生成|创建|新建|写).*\.(html|md|json|tsx|ts
 fi
 
 # ⚠️ 警告：涉及修改 skills/ 目录下的脚本文件（违反 AGENTS.md 第1条铁律）
-if echo "$CONTENT" | grep -E "skills/[a-z0-9-]+/scripts/.*\.(sh|ts|js|tsx)" -q; then
+# 区分修改 vs 调用：
+#   - 修改关键词：修改/编辑/重写/补/增加/删除/更新/edit/write + skills 路径
+#   - 调用关键词：bash/sh/调用/运行/执行 + skills 路径  → 不报警
+if echo "$CONTENT" | grep -E "(修改|编辑|重写|补|增加|删除|更新|改写|edit|write)\s*[^\n]{0,40}skills/[a-z0-9-]+/scripts/.*\.(sh|ts|js|tsx)" -q || \
+   echo "$CONTENT" | grep -E "skills/[a-z0-9-]+/scripts/.*\.(sh|ts|js|tsx)\s*[^\n]{0,20}(修改|编辑|重写|补|增加|删除|更新|改写)" -q; then
     # 检查任务描述中是否明确提到是子Agent来执行
     if echo "$CONTENT" | grep -E "子Agent|sessions_spawn" -q;
     then

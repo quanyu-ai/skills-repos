@@ -15,7 +15,7 @@ metadata: {"openclaw":{"emoji":"📋"}}
 - 主Agent 准备把一个"读大文件→改代码→build→部署"的复合任务外包
 - 任何"我想自己写但应该派出去"的犹豫时刻
 
-## ⛔ 三条红线（违反任一不得派发）
+## ⛔ 四条红线（违反任一不得派发）
 
 1. ⛔ **不允许"读取/参考大文件"指令**
    - 反例："请查看 schema.prisma 然后写一个 seed 脚本"
@@ -27,6 +27,10 @@ metadata: {"openclaw":{"emoji":"📋"}}
 3. ⛔ **必须先登记 `knowledge-repos/management/TASK-TRACKER.json` 再 spawn**
    - 任务 ID：`TASK-YYYYMMDD-NNN`
    - 字段：id / title / type / agent / status=dispatched / estimatedMinutes / timeoutSeconds / createdAt / requester / description
+
+4. 🎨 **智院前端任务必须限定用 design-system 控件**
+   - 任务描述中必须写：「禁止 import @radix-ui/* / @headlessui/react / @/components/ui/*，统一用 @/components/design-system」
+   - 映射参考：`code-repos/smart-college/apps/web/src/components/design-system/GUIDE.md`
 
 ## 🧰 工具
 
