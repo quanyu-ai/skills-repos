@@ -3,7 +3,7 @@ type: roadmap
 project_id: "<project-id>"
 status: draft           # draft | reviewing | approved
 legacy: false
-owner: 龙哥
+owner: <实际负责人>
 ai_team: [呆呆]
 created: <YYYY-MM-DD>
 updated: <YYYY-MM-DD>
@@ -12,7 +12,7 @@ version: v0.1
 
 # ROADMAP - <项目中文名>
 
-> 状态：**draft（待龙哥审定）**
+> 状态：**draft（待项目决策人审定）**
 > 描述「从今天到一年内，我们打算分几版交付、每版主题是什么、不做什么」。
 > 至少包含 **V1（MVP）/ V2（差异化）/ V3（规模化）** 三档。
 
@@ -86,7 +86,7 @@ version: v0.1
 
 1. **每版只回答 1 个主题**：不要"V2 既要A又要B又要C"，主题杂乱 = 没主题
 2. **必须显式写「不做什么」**：减少未来撕扯、保证 MVP 收敛
-3. **时间窗用「相对周数/月数」**：不写死日期（避免被 deadline 绑架），龙哥按情况调
+3. **时间窗用「相对周数/月数」**：不写死日期（避免被 deadline 绑架），项目决策人按情况调
 4. **路线图变更（增删版本 / 改主题）必须配 ADR**：写到 `knowledge-repos/projects/<id>/decisions.md`
 
 ---

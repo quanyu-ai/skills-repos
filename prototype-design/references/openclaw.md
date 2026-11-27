@@ -9,22 +9,18 @@ bash {{SKILL_DIR}}/scripts/doctor.sh
 ```
 
 - 输出 `READY` → 进入正常流程
-- 输出 `NEED_SETUP: <原因>` → **暂停操作**，先按 `setup.md` 引导完成初始化
+- 输出 `NEED_SETUP: <原因>` → 仅处理本次所需工具的缺项，其他独立工作继续；先按 `setup.md` 引导完成初始化
 
 `{{SKILL_DIR}}` 解析：本 skill 的根目录是
 `/var/lib/openclaw/.openclaw/workspace/skills/prototype-design/`。
 
 ---
 
-## ⛔ 红线（违反 = 任务失败）
+## 原型先服务用户任务
 
-1. ⛔ **禁止单文件巨型 HTML**：所有页面必须拆分到 `modules/<role>/<module>.html`
-2. ⛔ **禁止把所有需求塞一个文件**：一个 HTML 文件最多对应 1-3 条相关 REQ
-3. ⛔ **禁止跳过 requirements-map.json**：原型必须由需求条目驱动，不允许"凭感觉画"
-4. ⛔ **禁止越权写入项目代码**：本 skill 只在 `docs-repos/<project>/prototype/**` 下写文件
-5. ⛔ **禁止改动他人已 done 的原型**：变更必须新建模块文件或走 `revise-module.sh`
-6. ⛔ **wireframe 风格禁用彩色/emoji/阴影**：违反规范要求请走 highfi 风格
-7. ⛔ **禁止只更新正向 map**：每次 `generate.sh` 生成 HTML 后，必须反向回写 `REQ.related_files.prototype`，由脚本内置 assertion 强制。人工补救请走 `sync-back-refs.sh`
+用足以表达真实内容、判断和操作结果的最小交互原型验证方案。页面如何拆分取决于可读性与复用，不限制每个 HTML 的需求条数，不为了通过映射检查拆碎完整任务，也不把生成 HTML 当作验收。
+
+下列目录和正反映射属于本生成器的数据格式。项目采用它时维护已有引用、保护其他人的改动；已有原型或应用可直接修改，不必先建新 task、新模块或重复初始化。风格按项目实际设计约定，不以线框颜色作为业务通过条件。
 
 ---
 
@@ -181,7 +177,7 @@ bash {{SKILL_DIR}}/scripts/generate-index.sh <project>
 | `requirement` skill | 本 skill 的唯一输入源：读取 `docs-repos/<project>/requirements/requirements-map.json` |
 | `deploy-app` skill | 生成的原型走 `deploy-app` 的 static 部署模式（Phase 6 实装） |
 | `knowledge-repos/knowledge/general/prototype-design-spec.md` | 风格规范（黑白灰、无 emoji、极小圆角） |
-| `knowledge-repos/management/TASK-TRACKER.json` | 原型生成任务必须先有 task 记录 |
+| `knowledge-repos/management/TASK-TRACKER.json` | 已有任务记录可引用，不为生成器重复建档 |
 | REQ 条目的 `related_files.prototype` | 生成时由本 skill 反写，关联 REQ ↔ HTML 文件 |
 
 ---

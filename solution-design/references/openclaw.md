@@ -9,20 +9,17 @@ bash {{SKILL_DIR}}/scripts/doctor.sh
 ```
 
 - 输出 `READY` → 进入正常流程
-- 输出 `NEED_SETUP: <原因>` → **暂停操作**，按 `setup.md` 补齐
+- 输出 `NEED_SETUP: <原因>` → 仅处理本次所需工具的缺项，其他独立工作继续；按 `setup.md` 补齐
 
 `{{SKILL_DIR}}` = `/var/lib/openclaw/.openclaw/workspace/skills/solution-design/`
 
 ---
 
-## ⛔ 红线（绝对禁止）
+## 方案与工具约定
 
-1. **禁止跳过 ADR**：任何"为什么这么选"的技术决策必须新增一条 ADR 留档（即使一句话）
-2. **禁止散乱命名**：方案文档必须放进 `docs-repos/<project>/solution/`，不许散落到项目根目录
-3. **禁止与 REQ 脱节**：每个 `modules/<name>/` 必须有 `reqs.json` 列出关联的 REQ-ID
-4. **禁止覆盖现有 solution/**：`init-solution.sh` 检测到目录存在直接 exit 1
-5. **检查生成结果**：脚本生成骨架和草稿，执行者按已确认的需求补全方案；委派按项目规则执行。
-6. **禁止人手维护 solution-map.json**：永远由 `sync-solution-map.sh` 生成
+方案解释如何完成用户任务、真实数据与权限、失败和恢复，以及重要取舍。沿用已有需求和方案；只有需要长期追踪的重要决定才新增 ADR，不把每个选择写成一个审批或独立文件。
+
+下列目录、reqs.json 和自动索引是本适配器格式，不是通用交付门槛。使用生成器时保护已有文件及索引；不使用它时沿项目原方案维护。生成骨架不等于方案成立，补足实际业务内容后按变化风险核对，不固定新增人工审阅人。
 
 ---
 
@@ -49,7 +46,7 @@ bash {{SKILL_DIR}}/scripts/generate-modules.sh <project> --force               #
 策略：
 - `--from-roles`：要求需求标题形如 `学生-学业预警`、`教师-学生指导`，按破折号后的部分聚合
 - 默认：用领域关键词词典（用户/审批/通知/工作台/报表 …）粗匹配
-- 生成结果**必须人工 review**，再补 `apis.json`
+- 生成结果**按本次风险复核**，再补 `apis.json`
 
 ### 场景 3：同步「需求 ↔ 模块 ↔ API ↔ 代码」映射
 

@@ -2,19 +2,11 @@
 
 本文适用于已采用此套脚本和目录约定的项目。运行前确认实际技能根目录、依赖和写入目标。文中的默认路径为该部署方式的路径，命令须指向当前实例。
 
-## ⛔ 红线（违反 = 立即停手 + 在 MEMORY.md 补踩坑）
+## 档案工具与业务交付的边界
 
-1. **禁止跳过编号**：项目 id 必须是 kebab-case（小写字母 + 数字 + `-`），与 `docs-repos/<id>/` 同名
-2. **禁止散落记录**：决策 / 里程碑 / 事故 **必须**走对应脚本写到结构化文件，禁止零散塞到 README 或随手 echo
-3. **禁止直接编辑 `_registry.json`**：维护必须通过 `new-project.sh` / `update-status.sh`，避免破坏索引
-4. **决策 / 事故 / 里程碑必须主动登记，禁止后置反向迁移或关键字自动识别**：
-   - 决策（decision）触发：技术选型 / 架构变更 / 工具替换 / 关键流程拍板 → 当场跑 `add-decision.sh`
-   - 事故（incident）触发：线上故障 / 用户报错 / 部署失败 / 数据问题 → 当场跑 `add-incident.sh`
-   - 里程碑（milestone）触发：阶段性交付 / 重要节点 / 客户验收 → 当场跑 `add-milestone.sh`
-   - **不要事后用脚本从 README / PROJECT-BOARD / Git log 反向扫关键字**，关键字误判率高、上下文丢失、容易污染档案。`migrate-from-board.sh` 是历史一次性工具，已冻结，不再扩充关键字。
-   - 跨项目 / 平台级 / 战略类用 `add-global-milestone.sh` 而不是塞到某个项目里。
-5. **stage 变更 / 字段变更必须带 `--reason "..."`（≥5 字符）**：`update-status.sh` 切阶段、`set-field.sh` 改字段都强制要求理由，缺失或敷衍（如 `--reason a`）直接拒绝。`--force` 跳转更需要解释，reason 仍然必填。
-6. **planning 阶段必须有产物**：`stage=planning` 或要从 `planning` 推进到 `requirement` 时，必须存在 `docs-repos/<id>/planning/PRD.md`（建议同时有 ROADMAP.md）。缺失时 `update-status.sh` 会给出警告并建议跑 `bash skills/planning/scripts/init-planning.sh <id>`。历史项目可用 `init-planning.sh <id> --migrate` 先补空壳。详见 `skills/planning/SKILL.md`。
+只在项目已经采用本档案工具时使用下列编号、路径和脚本；它们不是所有项目的治理要求。已有决定、事故和里程碑记录可直接引用，不重复登记，不为阶段流转补空壳 PRD。由脚本维护的索引继续走原更新入口，避免破坏引用。
+
+状态更新说明真实依据；简短清楚的原因即可，不设字数门槛。缺少某项档案工具只影响该档案操作，不能阻塞独立开发或用户任务，也不要求写入个人 MEMORY.md。
 
 ---
 
@@ -25,7 +17,7 @@ bash {{SKILL_DIR}}/scripts/doctor.sh
 ```
 
 - 输出 `READY` → 进入正常流程
-- 输出 `NEED_SETUP: <原因>` → **暂停操作**，按 `setup.md` 修复
+- 输出 `NEED_SETUP: <原因>` → 仅处理本次所需工具的缺项，其他独立工作继续；按 `setup.md` 修复
 
 `{{SKILL_DIR}}` = `/var/lib/openclaw/.openclaw/workspace/skills/project-mgmt/`
 项目档案落地目录 = `/var/lib/openclaw/.openclaw/workspace/knowledge-repos/projects/<id>/`
@@ -53,7 +45,7 @@ knowledge-repos/projects/
 > - `health`: `green | yellow | red`（默认 `green`）
 > - `metrics`: 状态快照（需求/原型/ADR/部署/commits 30d），由 `sync-metrics.sh` 写入
 > - `roi`: 效率统计（tasks_total / tasks_completed / estimated_minutes / actual_minutes / saved_minutes / save_ratio / commits_count / deploys_count / last_calculated_at），由 `sync-roi.sh` 写入；与 metrics 并存，metrics 看现状、roi 看效率
-> - 三者通过 `set-field.sh` 修改（强制 reason），不要手改 json。
+> - 三者通过 `set-field.sh` 修改（保留变更依据），不要手改 json。
 
 ---
 
@@ -95,7 +87,7 @@ bash {{SKILL_DIR}}/scripts/new-project.sh <id> \
 bash {{SKILL_DIR}}/scripts/update-status.sh <id> <new-stage> --reason "..." [--force]
 ```
 - 跑状态机校验
-- **`--reason` 必填（≥5 字符）**，缺失或敷衍直接拒绝；`--force` 跳转更需要解释
+- **`--reason` 必填**，缺失时说明变更依据；`--force` 跳转更需要解释
 - 写 `profile.json` 的 `stage` + `updated_at`
 - 追加一条到 `milestones.md`：`[YYYY-MM-DD] STAGE-CHANGE: old → new (reason)`
 
@@ -109,7 +101,7 @@ bash {{SKILL_DIR}}/scripts/set-field.sh smart-college risk_level medium --reason
 - 合法 field 白名单：`risk_level | health | priority | next_milestone | tech_stack`
 - 白名单**不含** id / stage / started_at / updated_at / metrics（这些由专属脚本或系统自动维护）
 - 枚举字段会强校验取值（如 `health: green|yellow|red`）
-- `--reason` 必填（≥5 字符），自动追加一条 `FIELD-CHANGE` 到 `milestones.md`
+- `--reason` 必填，自动追加一条 `FIELD-CHANGE` 到 `milestones.md`
 - 改 `priority` 时会同步更新 `_registry.json`
 
 ### 场景 3：追加里程碑

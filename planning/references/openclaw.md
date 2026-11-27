@@ -2,14 +2,11 @@
 
 本文适用于已采用此套脚本和目录约定的项目。运行前确认实际技能根目录、依赖和写入目标。文中的默认路径为该部署方式的路径，命令须指向当前实例。
 
-## ⛔ 红线（违反 = 立即停手 + 在 MEMORY.md 补踩坑）
+## 规划与采用边界
 
-1. **planning 是项目第一个 stage**，**优先于 requirement**：没有 PRD.md 之前禁止把项目推进到 `requirement` 之后的任何阶段
-2. **PRD/ROADMAP/OKR 草稿必须明确标注 `> 状态：draft（待龙哥审定）`**：未经龙哥审定的内容不得在群里、在外部对话里以"已确认"口吻使用
-3. **商业模式 / 关键定位 / 主要用户画像 不许 AI 擅自拍板**：模板里如果出现"商业模式"等关键决策段，必须留 ≥2 个候选项 + 风险说明给龙哥选
-4. **planning 三件套属于 docs-repos**：落到 `docs-repos/<project-id>/planning/`，不允许写到 `code-repos/` 或项目代码目录
-5. **紧急 bug / hotfix 不卡 planning**：bugs/ 通道、临时 incident 通道保留，本 skill 不阻塞 `add-incident.sh` 等紧急流程
-6. **不许直接改 project-mgmt 的 stage 流转架构**：本 skill 只在 `requirement skill` 加"软提醒"和在 profile.json 加 `planning_docs` 字段，不动既有 7 阶段状态机
+先明确用户、问题、实际目标和关键取舍。项目已有有效方案时直接复用，不为进入下阶段补 PRD/ROADMAP/OKR 空壳或重复审批。尚未决定的商业定位明确待定及影响，不强制凑两个选项，也不指定某个个人为通用审批人。
+
+下列目录和字段仅是本适配器生成格式。项目选择此适配器后按其真实输入调用；不用这些脚本也能完成规划。草稿与已确认结论应如实区分，记录在项目原来源。
 
 ---
 
@@ -20,7 +17,7 @@ bash {{SKILL_DIR}}/scripts/validate-planning.sh --doctor
 ```
 
 - 输出 `READY` → 进入正常流程
-- 输出 `NEED_SETUP: <原因>` → **暂停操作**，按 `setup.md` / README 修复
+- 输出 `NEED_SETUP: <原因>` → 仅处理本次所需工具的缺项，其他独立工作继续；按 `setup.md` / README 修复
 
 `{{SKILL_DIR}}` = `/var/lib/openclaw/.openclaw/workspace/skills/planning/`
 落地目录 = `/var/lib/openclaw/.openclaw/workspace/docs-repos/<project-id>/planning/`
@@ -31,8 +28,8 @@ bash {{SKILL_DIR}}/scripts/validate-planning.sh --doctor
 
 ```
 docs-repos/<project-id>/planning/
-├── PRD.md          # 产品需求文档（必填，draft 起步，最终由龙哥审定）
-├── ROADMAP.md      # 版本路线图（必填，draft 起步）
+├── PRD.md          # 产品需求文档（按项目需要，未确认内容标明草稿）
+├── ROADMAP.md      # 版本路线图（需要时维护）
 ├── OKR.md          # 季度 / 阶段目标（可选，建议有）
 └── _archive/       # 历史快照（PRD-v1.md 等，由 archive 流程产出）
 ```
@@ -54,7 +51,7 @@ profile.json 关联字段（由 `sync-to-profile.sh` 写入）：
 
 ---
 
-## 📐 三件套必填字段（精简版，详见 templates/）
+## 生成器模板字段（仅使用该模板时适用）
 
 ### PRD.md 必填字段
 1. **一句话定位**（who + what + how，30 字内）
@@ -62,7 +59,7 @@ profile.json 关联字段（由 `sync-to-profile.sh` 写入）：
 3. **核心价值主张**（差异化命门，与竞品/旧方案对比）
 4. **MVP 范围**（✅ 做什么 + ❌ 明确不做什么）
 5. **成功指标**（≥3 条量化指标，最好带时间窗）
-6. **商业模式 / 商业目标**（候选项 + 默认选项，红线：≥2 候选）
+6. **商业模式 / 商业目标**（已确认依据；仅存在取舍时列相关选项）
 7. **假设与风险**（≥3 条，每条配缓解或验证方式）
 
 ### ROADMAP.md 必填字段
@@ -70,8 +67,8 @@ profile.json 关联字段（由 `sync-to-profile.sh` 写入）：
 - 至少包含 **V1（MVP）/ V2（差异化）/ V3（规模化）** 三档
 
 ### OKR.md 必填字段（可选）
-- O（Objective）+ ≥2 个 KR（Key Result，量化、可验收）
-- 每个 KR 显式标 owner（默认龙哥+呆呆）和时间窗
+- 与当前目标有关的 Objective / Key Result；数量按实际问题决定
+- 每个 KR 显式标 owner（项目实际负责人）和时间窗
 
 ---
 
@@ -98,16 +95,16 @@ bash {{SKILL_DIR}}/scripts/init-planning.sh <project-id> --migrate
 
 - 创建空壳骨架（同场景 1），但 frontmatter 标 `legacy: true`
 - profile.json.planning_docs.legacy=true，dashboard / validate 会给出"未审定"提醒但不报错
-- 后续龙哥按部就班补内容即可
+- 沿项目实际负责人补足影响当前工作的内容
 
-### 场景 3：校验三件套完整性
+### 场景 3：检查已采用的规划文件
 
 ```bash
 bash {{SKILL_DIR}}/scripts/validate-planning.sh <project-id>
 ```
 
-- 检查 PRD.md / ROADMAP.md 必填字段是否缺失（按章节标题扫）
-- 检查 draft 状态、商业模式段是否给出 ≥2 候选项
+- 只检查已存在的模板文件可读且非空；不以标题、选项数量或文件齐套判断规划成立
+- 不以审批标签、选项数量或章节标题替代内容判断
 - 输出彩色报告：✓ pass / ⚠ warning / ✗ error
 - 出错 exit 1，可接 CI
 
@@ -122,7 +119,7 @@ bash {{SKILL_DIR}}/scripts/sync-to-profile.sh <project-id>
 - 内置幂等，多次调用结果一致
 - `init-planning.sh` 末尾会自动调一次
 
-### 场景 5：从 draft 转 approved（龙哥审定后）
+### 场景 5：从 draft 转 approved（项目实际决定确认后）
 
 ```bash
 bash {{SKILL_DIR}}/scripts/sync-to-profile.sh <project-id> --status approved

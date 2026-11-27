@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Keep legacy project paths usable without a second enabled skill source."""
+"""Adopt one current engineering source and retire obsolete project copies."""
 import argparse
 import datetime
-import hashlib
 import json
 import os
 import re
@@ -10,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tomllib
+import zipfile
 
 
 def atomic_write(path, text):
@@ -26,7 +26,7 @@ def main():
     args = parser.parse_args()
     plugin = args.plugin_root.resolve(strict=True)
     manifest = json.loads((plugin / '.codex-plugin/plugin.json').read_text())
-    assert manifest['name'] in {'quanyu-engineering', 'quanyu-software-engineering'}
+    assert manifest['name'] == 'quanyu-software-engineering', 'Use the current plugin, not its retired name'
     skill_paths = {}
     for entry in manifest['skills']:
         source = (plugin / entry).resolve(strict=True)
@@ -42,11 +42,11 @@ def main():
     codex_dir = Path.home() / '.codex'
     config = codex_dir / 'config.toml'
     if manifest['name'] == 'quanyu-software-engineering':
-        # Rename without removing the old cache used by in-flight references.
+        # Keep only the current enabled name; no compatibility source is created.
         original_config = config.read_text() if config.exists() else ''
         parsed = tomllib.loads(original_config)
         legacy_id = 'quanyu-engineering@quanyu-skills'
-        if parsed.get('plugins', {}).get(legacy_id, {}).get('enabled') is not False:
+        if parsed.get('plugins', {}).get(legacy_id, {}).get('enabled') is True:
             section = '[plugins."' + legacy_id + '"]'
             match = re.search(r'(?m)^' + re.escape(section) + r'\s*$', original_config)
             if match:
@@ -61,22 +61,18 @@ def main():
             else:
                 updated_config = original_config.rstrip() + '\n\n' + section + '\nenabled = false\n'
             assert tomllib.loads(updated_config)['plugins'][legacy_id]['enabled'] is False
-            stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-            backup = codex_dir / 'backups' / ('software-engineering-rename-' + stamp + '.toml')
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            backup.write_text(original_config)
-            backup.chmod(0o600)
             atomic_write(config, updated_config)
-    alias_names = ['quanyu-engineering']
-    if manifest['name'] == 'quanyu-software-engineering':
-        alias_names.append('quanyu-software-engineering')
-    for alias_name in alias_names:
-        alias = codex_dir / 'shared-skills' / alias_name
-        alias.parent.mkdir(parents=True, exist_ok=True)
-        assert not alias.exists() or alias.is_symlink(), 'Do not replace an ordinary directory'
-        pending = alias.with_name(alias.name + '.quanyu-tmp')
-        pending.symlink_to(plugin, target_is_directory=True)
-        os.replace(pending, alias)
+    legacy_alias = codex_dir / 'shared-skills/quanyu-engineering'
+    if legacy_alias.is_symlink():
+        legacy_alias.unlink()
+    elif legacy_alias.exists():
+        raise ValueError('Inspect the non-symlink legacy alias before retiring it')
+    alias = codex_dir / 'shared-skills' / manifest['name']
+    alias.parent.mkdir(parents=True, exist_ok=True)
+    assert not alias.exists() or alias.is_symlink(), 'Do not replace an ordinary directory'
+    pending = alias.with_name(alias.name + '.quanyu-tmp')
+    pending.symlink_to(plugin, target_is_directory=True)
+    os.replace(pending, alias)
     alias = codex_dir / 'shared-skills' / manifest['name']
     if not args.project:
         print(json.dumps({'sharedSource': str(alias), 'version': manifest['version']}))
@@ -85,60 +81,50 @@ def main():
     legacy_root = project / '.agents/skills'
     chosen = [(name, relative) for name, relative in skill_paths.items()
               if (legacy_root / name / 'SKILL.md').exists()]
-    if not chosen:
-        print('No legacy copies in this project; plugin already supplies the shared skills')
+    raw_history = project / '.agents/shared-skills-legacy'
+    if not chosen and not raw_history.exists():
+        print('Only the current plugin supplies these shared skills; no copies to retire')
         return
+    targets = []
     for name, _ in chosen:
         path = legacy_root / name
         assert path.is_dir() and not path.is_symlink(), 'Unexpected legacy directory: ' + str(path)
         header = (path / 'SKILL.md').read_text().split('---', 2)
         assert len(header) == 3 and ('name: ' + name) in header[1], str(path)
-    config = codex_dir / 'config.toml'
+        targets.append(path)
+    if raw_history.exists():
+        assert raw_history.is_dir() and not raw_history.is_symlink()
+        targets.append(raw_history)
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+    archive = project / '.agents/archives' / ('retired-engineering-skills-' + stamp + '.zip')
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive, 'x', zipfile.ZIP_DEFLATED) as packed:
+        for target in targets:
+            for child in target.rglob('*'):
+                name = str(child.relative_to(project))
+                if child.is_symlink():
+                    packed.writestr(name + '.symlink', str(child.readlink()))
+                elif child.is_file():
+                    packed.writestr(name, child.read_bytes())
+    with zipfile.ZipFile(archive) as packed:
+        assert packed.testzip() is None, 'Archive verification failed; originals retained'
+        for target in targets:
+            for child in target.rglob('*'):
+                if child.is_file() and not child.is_symlink():
+                    assert packed.read(str(child.relative_to(project))) == child.read_bytes()
     original = config.read_text() if config.exists() else ''
-    identity = hashlib.sha256(str(project).encode()).hexdigest()[:16]
-    begin = '# BEGIN quanyu-engineering legacy paths ' + identity
-    end = '# END quanyu-engineering legacy paths ' + identity
-    updated = original
-    if begin in updated:
-        start = updated.index(begin)
-        stop = updated.index(end, start) + len(end)
-        updated = updated[:start] + updated[stop:]
-    block = '\n' + begin + '\n'
-    for name, _ in chosen:
-        block += '\n[[skills.config]]\npath = ' + json.dumps(
-            str(legacy_root / name / 'SKILL.md'), ensure_ascii=False) + '\nenabled = false\n'
-    updated = updated.rstrip() + '\n' + block + '\n' + end + '\n'
+    retired_paths = {str(legacy_root / name / 'SKILL.md') for name, _ in chosen}
+    def remove_retired(block):
+        value = tomllib.loads(block.group(0))['skills']['config'][0]
+        return '' if value.get('path') in retired_paths else block.group(0)
+    updated = re.sub(r'(?ms)^\[\[skills\.config\]\][^\n]*\n.*?(?=^\[|\Z)', remove_retired, original)
     tomllib.loads(updated)
-    if updated == original and all(
-            '<!-- quanyu-engineering legacy reference; do not edit shared skills here -->'
-            in (legacy_root / name / 'SKILL.md').read_text() for name, _ in chosen):
-        print('Legacy references already adopted; no new backup or project changes')
-        return
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    archive = project / '.agents/shared-skills-legacy' / stamp
-    archive.mkdir(parents=True, exist_ok=False)
-    backup = codex_dir / 'backups' / ('quanyu-engineering-' + stamp + '-' + identity + '.toml')
-    backup.parent.mkdir(parents=True, exist_ok=True)
-    backup.write_text(original)
-    backup.chmod(0o600)
-    for name, relative in chosen:
-        old = legacy_root / name
-        source = alias / relative
-        marker = '<!-- quanyu-engineering legacy reference; do not edit shared skills here -->'
-        if marker not in (old / 'SKILL.md').read_text():
-            shutil.move(str(old), str(archive / name))
-            old.mkdir()
-        (old / 'SKILL.md').write_text(
-            '---\nname: ' + name + '\ndescription: 共享插件技能的旧路径兼容入口；不独立启用。\n---\n\n'
-            + marker + '\n\n此路径只为既有引用保留。执行本技能前读取共享插件原文：\n\n'
-            + '[' + name + '](' + str(source / 'SKILL.md') + ')\n\n'
-            + '使用 ' + manifest['name'] + ':' + name + '；项目专属规则仍读取当前项目 AGENTS.md。\n')
-        for child in source.iterdir():
-            if child.name != 'SKILL.md' and not (old / child.name).exists():
-                (old / child.name).symlink_to(child, target_is_directory=child.is_dir())
-    atomic_write(config, updated)
-    print(json.dumps({'project': str(project), 'legacyPathsDisabled': len(chosen),
-                      'sharedSource': str(alias), 'archive': str(archive)}, ensure_ascii=False))
+    for target in targets:
+        shutil.rmtree(target)
+    if updated != original:
+        atomic_write(config, updated)
+    print(json.dumps({'project': str(project), 'retiredCopies': len(chosen),
+                      'sharedSource': str(alias), 'compressedHistory': str(archive)}, ensure_ascii=False))
 
 
 if __name__ == '__main__':

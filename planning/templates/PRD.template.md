@@ -3,7 +3,7 @@ type: prd
 project_id: "<project-id>"
 status: draft            # draft | reviewing | approved
 legacy: false            # 历史项目首次接入填 true
-owner: 龙哥
+owner: <实际负责人>
 ai_team: [呆呆]
 created: <YYYY-MM-DD>
 updated: <YYYY-MM-DD>
@@ -12,9 +12,9 @@ version: v0.1
 
 # PRD - <项目中文名>
 
-> 状态：**draft（待龙哥审定）**
+> 状态：**draft（待项目决策人审定）**
 > 本文件是「为什么做、做给谁、做到什么程度、不做什么、怎么活下去」的根锚。
-> AI 起草，龙哥审定。审定后通过 `sync-to-profile.sh <id> --status approved` 切状态。
+> AI 起草，项目决策人审定。审定后通过 `sync-to-profile.sh <id> --status approved` 切状态。
 
 ---
 
@@ -124,7 +124,7 @@ version: v0.1
 
 ## 6. 商业模式 / 商业目标
 
-> **红线**：AI 不许擅自拍板。下面必须列 ≥2 个候选项 + 风险，等待龙哥圈选默认项。
+> 记录已确认的商业模式及依据。确有未决取舍时给出相关选项和影响，不凑固定数量；与本任务无关时省略。
 
 ### 候选模式 A：
 - 描述：
@@ -144,7 +144,7 @@ version: v0.1
 - 收入预估：
 - 风险：
 
-### 默认推荐（待龙哥圈选）：
+### 默认推荐（待项目决策人圈选）：
 - [ ] A
 - [ ] B
 - [ ] C

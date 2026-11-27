@@ -9,7 +9,7 @@ bash {{SKILL_DIR}}/scripts/doctor.sh
 ```
 
 - 输出 `READY` → 进入正常流程
-- 输出 `NEED_SETUP: <原因>` → **暂停操作**，先按 `setup.md` 引导完成初始化
+- 输出 `NEED_SETUP: <原因>` → 仅处理本次所需工具的缺项，其他独立工作继续；先按 `setup.md` 引导完成初始化
 
 `{{SKILL_DIR}}` 解析：本 skill 的根目录是
 `/var/lib/openclaw/.openclaw/workspace/skills/requirement/`。
@@ -117,14 +117,11 @@ bash {{SKILL_DIR}}/scripts/lint.sh <project>
 
 ---
 
-## ⛔ 红线（违反 = 任务失败）
+## 需求与自动化格式
 
-1. ⛔ **禁止跳过编号规则**：所有需求必须用 `REQ-YYYYMMDD-NNN` 格式
-2. ⛔ **禁止把需求散文写在群里就算完成**：必须落到 `.md` 条目
-3. ⛔ **禁止改动他人已 approved 的需求**：要变更必须新建 REQ 并标 `depends_on`
-4. ⛔ **禁止越权写入项目代码**：本 skill 只维护 `docs-repos/**` 下的 `.md/.json`
-5. ⛔ **禁止 0 编号**：`NNN` 从 `001` 起，不允许 `000`
-6. ⛔ **禁止手工 sed / 直接编辑 frontmatter 改 status**：必须通过 `scripts/set-status.sh`（脚本会校验状态机、写 history、重建索引并跑 post-check）
+需求写清用户问题、实际结果、业务范围及可验证的通过条件；已有有效需求可直接修订并保留影响依据，不为每次变更新增 REQ。权限和范围仍沿用户授权，技能不限制所有项目只能修改某种后缀或目录。
+
+下列编号、状态字段和索引是本适配器的文件格式；采用它时使用原入口保持引用一致。已有项目记录不必迁入本格式，不靠文件数量、编号齐备或对应 task 存在判断需求完成。
 
 ---
 
@@ -169,7 +166,7 @@ docs-repos/<project>/
 | 系统 | 关系 |
 |------|------|
 | `planning` skill | `new-req.sh` 在创建 REQ 前会检查 `docs-repos/<project>/planning/PRD.md`，未发现时给出软提醒并引导跑 `init-planning.sh`。**不阻塞**，紧急 bug / hotfix 可继续建 REQ。静默软提醒：`REQ_TRIGGER_SKIP_PLANNING_WARN=1` |
-| `knowledge-repos/management/TASK-TRACKER.json` | 实施时 `status=implementing` 的 REQ 必须有对应 task |
+| `knowledge-repos/management/TASK-TRACKER.json` | 需要关联任务时引用已有记录，不重复建档 |
 | 原型设计 skill（未来） | 读取 `requirements-map.json`，按 REQ 生成 wireframe |
 | 开发 skill | 读取 `related_files.code`，按 REQ 关联代码 |
 | 测试 skill | 读取 `acceptance_criteria` 生成测试用例 |

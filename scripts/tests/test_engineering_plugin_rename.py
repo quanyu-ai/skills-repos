@@ -7,24 +7,25 @@ import sys
 import tempfile
 import tomllib
 import unittest
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class RenameAdoptionTest(unittest.TestCase):
-    def run_adoption(self, home, installed=True):
+    def run_adoption(self, home, installed=True, project=None):
         binary = home / 'bin'
         binary.mkdir(exist_ok=True)
         state = {'installed': [{'pluginId': 'quanyu-software-engineering@quanyu-skills',
-                               'enabled': installed, 'version': '1.1.0'}]}
+                               'enabled': installed, 'version': json.loads((ROOT / '.codex-plugin/plugin.json').read_text())['version']}]}
         fake = binary / 'codex'
         fake.write_text('#!' + sys.executable + '\nprint(' + repr(json.dumps(state)) + ')\n')
         fake.chmod(0o700)
         env = dict(os.environ, HOME=str(home), PATH=str(binary) + os.pathsep + os.environ['PATH'])
         return subprocess.run([sys.executable, str(ROOT / 'scripts/adopt-engineering-plugin.py'),
-                               '--plugin-root', str(ROOT)], env=env, capture_output=True, text=True)
+                               '--plugin-root', str(ROOT)] + (['--project', str(project)] if project else []), env=env, capture_output=True, text=True)
 
-    def test_rename_keeps_old_paths_and_preserves_other_settings(self):
+    def test_only_current_alias_and_unrelated_settings_are_preserved(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
             codex = home / '.codex'
@@ -43,14 +44,14 @@ class RenameAdoptionTest(unittest.TestCase):
             expected = tomllib.loads(original)
             expected['plugins']['quanyu-engineering@quanyu-skills']['enabled'] = False
             self.assertEqual(tomllib.loads(config.read_text()), expected)
-            for name in ['quanyu-engineering', 'quanyu-software-engineering']:
-                self.assertEqual((codex / 'shared-skills' / name).resolve(), ROOT)
+            self.assertEqual((codex / 'shared-skills/quanyu-software-engineering').resolve(), ROOT)
+            self.assertFalse((codex / 'shared-skills/quanyu-engineering').is_symlink())
             self.assertEqual((old_cache / 'keep').read_text(), 'in-flight')
             after = config.read_bytes()
-            backups = list((codex / 'backups').iterdir())
+            self.assertFalse((codex / 'backups').exists())
             self.assertEqual(self.run_adoption(home).returncode, 0)
             self.assertEqual(config.read_bytes(), after)
-            self.assertEqual(list((codex / 'backups').iterdir()), backups)
+            self.assertFalse((codex / 'backups').exists())
 
     def test_uninstalled_target_does_not_disable_existing_plugin(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -64,6 +65,25 @@ class RenameAdoptionTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(config.read_text(), original)
             self.assertFalse((codex / 'shared-skills').exists())
+
+    def test_project_old_texts_are_compressed_and_no_wrappers_regenerated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary); project = home / 'project'; project.mkdir()
+            old = project / '.agents/skills/planning'; old.mkdir(parents=True)
+            content = '---\nname: planning\ndescription: old copy\n---\nOld instructions'
+            (old / 'SKILL.md').write_text(content)
+            history = project / '.agents/shared-skills-legacy/old'; history.mkdir(parents=True)
+            (history / 'SKILL.md').write_text('historical instructions')
+            result = self.run_adoption(home, project=project)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(old.exists())
+            self.assertFalse(history.parent.exists())
+            archives = list((project / '.agents/archives').glob('*.zip'))
+            self.assertEqual(len(archives), 1)
+            with zipfile.ZipFile(archives[0]) as packed:
+                self.assertEqual(packed.read('.agents/skills/planning/SKILL.md').decode(), content)
+            self.assertEqual(self.run_adoption(home, project=project).returncode, 0)
+            self.assertEqual(list((project / '.agents/archives').glob('*.zip')), archives)
 
 
 if __name__ == '__main__':

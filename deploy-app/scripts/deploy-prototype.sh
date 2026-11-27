@@ -118,7 +118,7 @@ trap cleanup_lock EXIT
 # 3. 自检兜底
 # ============================================================
 log "Step 1/8: 跑 doctor.sh 自检"
-if ! bash "$SCRIPTS_DIR/doctor.sh" > /tmp/deploy-doctor.log 2>&1; then
+if ! bash "$SCRIPTS_DIR/doctor.sh" --target "$APP_KEY" "$ENV_NAME" "$APPS_JSON" "$ENVS_JSON" > /tmp/deploy-doctor.log 2>&1; then
     cat /tmp/deploy-doctor.log
     die "doctor 未 READY，停止部署。请按 setup.md 处理。"
 fi

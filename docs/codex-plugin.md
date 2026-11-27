@@ -14,35 +14,25 @@ codex plugin list --marketplace quanyu-skills --json
 
 更新在共享库改源、正常 PR 合并并更新插件版本，然后执行 `codex plugin marketplace upgrade quanyu-skills` 与 `codex plugin add quanyu-software-engineering@quanyu-skills`。同一机器只启用一个该插件版本，不再向每项目复制15项技能。
 
-## 1.1.0 命名迁移与主调度
+## 唯一当前版本与主调度
 
-插件定位为软件工程，正式名称由 `quanyu-engineering` 更正为 `quanyu-software-engineering`；UI 插件不变。升级市场、安装新名称后执行下文的兼容迁移脚本：它先确认新版本已安装启用，再禁用旧插件，保留旧缓存及 `~/.codex/shared-skills/quanyu-engineering` 兼容链接，两条维护链接均指向同一新版本。不要同时启用新旧名称，不卸载旧缓存或重启在途任务。已载入旧上下文不会被追溯替换；下一正常调用用新名称，已有文件路径仍可读取。
+只启用当前 `quanyu-software-engineering`，不保留旧名称兼容链接或项目技能正文副本。升级确认新版本可发现后，用现有采用脚本更新唯一当前链接；旧正文压缩封存并移出自动发现路径，不重新创建wrapper。现役业务无需为技能升级重启。
 
-`main-coordinator` 提供跨负责人统筹入口，复用原 `project-mgmt` 连续性参考与 `delivery-verification`，错误经验按需读取。没有新增自动调度核心、后台服务、任务注册、固定表单或统一审批。普通单人任务不强制加载主调度。
+`main-coordinator`按项目真实职责推进用户结果，不强制额外调度者、台账、固定表单或多Agent。原需求与业务权威留在各项目。
 
 ## 项目拓展与边界
 
 通用方法由插件维护；各项目 `AGENTS.md` 指向本项目的需求、架构、测试、发布及交付记录，承载领域语义、角色、环境和优先级。原文件和负责人不变，不新增扩展注册表或审批。可增加不同名称的项目技能，不用同名副本覆盖共享源。按任务选用，不强制15项串行执行。
 
-迁移已有项目，先确认插件已安装、15项可发现及源版本一致，再用 `~/.codex/config.toml` 禁用旧技能的**精确绝对路径**，不能按 name 禁用（会同时禁用插件）：
-
-```toml
-[[skills.config]]
-path = "/absolute/project/.agents/skills/requirement/SKILL.md"
-enabled = false
-```
-
-在途任务还会明确读取旧路径时，使用本库的兼容迁移脚本（Python 3.11+）：
+迁移已有项目，先沿官方入口确认当前插件已安装启用，再使用本库脚本（Python 3.11+）：
 
 ```sh
 python3 scripts/adopt-engineering-plugin.py --plugin-root /actual/installed/plugin/root --project /absolute/project
 ```
 
-脚本先核该插件版本已安装并启用，归档原技能而不删除；旧 `SKILL.md` 变为仅指向共享原文的兼容入口，自动发现按旧绝对路径禁用。辅助目录链接同一安装源，项目规则保持原处。原文件备份在项目 `.agents/shared-skills-legacy/`，不在自动发现目录，不作为日常编辑源。
+脚本核对已安装版本，更新唯一稳定入口 `~/.codex/shared-skills/quanyu-software-engineering`；将旧项目通用技能和原始历史逐字校验压缩后移出读取/发现路径，移除对应旧路径配置，不创建兼容 SKILL 或第二份正文。项目业务规则保留原处。普通目录占用别名时先核来源，不直接覆盖。
 
-实测不能把整个旧技能目录直接链接到插件再按旧路径禁用：客户端会解析真实路径，导致插件技能一起禁用。因此旧 `SKILL.md` 必须保持普通的短引用文件。不要把技能正文复制进这个兼容文件。
-
-所有兼容引用通过 `~/.codex/shared-skills/quanyu-software-engineering` 这一维护链接指向已安装插件。更新插件后仅执行 `python3 scripts/adopt-engineering-plugin.py --plugin-root /new/installed/root` 更新此链接，各已迁移项目不再各自升级副本。当前任务不重启，下一正常会话核唯一发现；已载入旧上下文不会被追溯清除。
+后续官方升级后仅用 `--plugin-root /new/installed/root` 切换稳定入口，不逐项目复制技能。退休旧插件名称、旧缓存和旧维护链接，必要历史压缩封存。当前任务不重启，不重新执行已通过步骤；已载入上下文不会追溯清除，下一次实际调用读取当前唯一入口。
 
 ## 验证
 
@@ -66,7 +56,7 @@ codex plugin list --marketplace quanyu-skills --json
 
 工程插件继续负责业务交互原型与流程复核，UI 插件负责规范与实际视觉质量；两者可独立使用，不强制串行或安装另一个插件。插件不新增 MCP、hooks、业务权限或发布门禁。合并、安装、技能发现和实际消费分别核验；不强制重启在途会话或修改其他项目。
 
-### 可选设计语言（UI 1.1.0）
+### 可选设计语言
 
 `ui-design`按需加载[语言入口](../quanyu-ui/ui-design/references/design-languages/index.md)，提供沉稳商务、科技纵深、浅色空间三个参考。`ui-review`检查选中语言的材质/密度约束，`ui-standards`维护项目采用和组件映射。没有新增第四个自动技能、MCP、hooks、字体依赖或全局主题；已有项目不随插件升级换肤。
 

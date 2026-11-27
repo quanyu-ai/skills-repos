@@ -35,12 +35,8 @@ ok=0
 for f in $WHITELIST; do [ "$f" = "$FIELD" ] && ok=1; done
 [ $ok -eq 1 ] || { echo "✗ field '$FIELD' 不在白名单（合法: $WHITELIST）" >&2; exit 1; }
 
-# reason 必填且 ≥ 5 字符
+# 保留变更依据，不设长度门槛
 [ -z "$REASON" ] && { echo "✗ --reason 必填" >&2; exit 1; }
-if [ ${#REASON} -lt 5 ]; then
-    echo "✗ --reason 太短（≥5字符），请写清楚原因" >&2
-    exit 1
-fi
 
 # 枚举校验
 case "$FIELD" in
