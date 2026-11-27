@@ -22,7 +22,7 @@ Options:
   --commit SHA         commit hash
   --version vX.Y.Z     版本号 tag
   --planned true|false 是否为计划态（默认按 status 推导）
-  --reason "..."       变更原因（建议 ≥ 5 字符）
+  --reason "..."       变更原因
 EOF
     exit 1
 }

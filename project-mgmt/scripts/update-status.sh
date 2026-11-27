@@ -28,12 +28,8 @@ if [ "$OLD" = "$NEW" ]; then
     exit 0
 fi
 
-# stage 变更必须带 reason，且 ≥5 字符
+# 状态变更保留依据，不按长度判断质量
 [ -z "$REASON" ] && { echo "✗ stage 变更必须 --reason "..."（不能为空）" >&2; exit 1; }
-if [ ${#REASON} -lt 5 ]; then
-    echo "✗ --reason 太短（≥5字符），请写清楚切阶段原因" >&2
-    exit 1
-fi
 
 FORCED=""
 if ! is_legal_transition "$OLD" "$NEW"; then

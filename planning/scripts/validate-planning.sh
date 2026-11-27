@@ -1,5 +1,5 @@
 #!/bin/bash
-# validate-planning.sh - 校验项目 planning 三件套完整性
+# validate-planning.sh - 检查已采用的规划文件可读性；不判断产品完成
 # Usage:
 #   validate-planning.sh <project-id>     # 校验单个项目
 #   validate-planning.sh --doctor         # skill 自检（脚本/模板齐全）
@@ -80,78 +80,20 @@ validate_project() {
     fi
 
     if [ ! -d "$planning_dir" ]; then
-        fail "$proj 缺少 planning/ 目录，请跑：bash scripts/init-planning.sh $proj"
+        warning "$proj 未采用 planning/ 目录；沿项目现有规划，不要求补模板"
         return
     fi
-
-    # 检查三件套
-    for f in PRD.md ROADMAP.md; do
-        if [ -f "$planning_dir/$f" ]; then
-            pass "$proj/planning/$f 存在"
+    local found=0
+    for f in PRD.md ROADMAP.md OKR.md; do
+        [ -e "$planning_dir/$f" ] || continue
+        found=$((found+1))
+        if [ -r "$planning_dir/$f" ] && [ -s "$planning_dir/$f" ]; then
+            pass "$proj/planning/$f 可读且非空；内容是否解决用户问题需实际判断"
         else
-            fail "$proj/planning/$f 缺失（必填）"
-            continue
+            fail "$proj/planning/$f 存在但不可读或为空"
         fi
     done
-
-    if [ -f "$planning_dir/OKR.md" ]; then
-        pass "$proj/planning/OKR.md 存在（可选）"
-    else
-        warning "$proj/planning/OKR.md 缺失（可选）"
-    fi
-
-    # PRD 必填字段检查
-    if [ -f "$planning_dir/PRD.md" ]; then
-        local prd="$planning_dir/PRD.md"
-        local sections=(
-            "一句话定位"
-            "目标用户画像"
-            "核心价值主张"
-            "MVP 范围"
-            "成功指标"
-            "商业模式"
-            "假设与风险"
-        )
-        for sec in "${sections[@]}"; do
-            if grep -q "$sec" "$prd"; then
-                pass "PRD 含「$sec」段"
-            else
-                fail "PRD 缺失「$sec」段"
-            fi
-        done
-
-        # draft 状态检查
-        if grep -q "^status: draft" "$prd"; then
-            pass "PRD status=draft（未审定，需龙哥审定后转 approved）"
-        elif grep -q "^status: approved" "$prd"; then
-            pass "PRD status=approved（已审定）"
-        elif grep -q "^status: reviewing" "$prd"; then
-            warning "PRD status=reviewing（审定中）"
-        else
-            warning "PRD frontmatter 缺 status 字段"
-        fi
-
-        # 商业模式 ≥2 候选项
-        local candidates
-        candidates=$(grep -c "^### 候选模式" "$prd" || true)
-        if [ "$candidates" -ge 2 ]; then
-            pass "PRD 商业模式段含 $candidates 个候选项（满足 ≥2）"
-        else
-            warning "PRD 商业模式段候选项 < 2（红线建议 ≥2，自用工具可标'自用，不卖'）"
-        fi
-    fi
-
-    # ROADMAP 必填检查
-    if [ -f "$planning_dir/ROADMAP.md" ]; then
-        local rm="$planning_dir/ROADMAP.md"
-        for v in V1 V2 V3; do
-            if grep -q "**$v" "$rm" || grep -qE "^### $v" "$rm" || grep -qE "\\| \*\*$v" "$rm"; then
-                pass "ROADMAP 包含 $v 段"
-            else
-                warning "ROADMAP 未明确包含 $v（建议覆盖 V1/V2/V3）"
-            fi
-        done
-    fi
+    [ "$found" -gt 0 ] || warning "未使用这些模板文件；不据此否定项目现有规划"
 }
 
 validate_all() {

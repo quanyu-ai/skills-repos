@@ -3,7 +3,7 @@ type: okr
 project_id: "<project-id>"
 status: draft           # draft | reviewing | approved
 legacy: false
-owner: 龙哥
+owner: <实际负责人>
 ai_team: [呆呆]
 quarter: <YYYY-QN>      # 例 2026-Q2
 created: <YYYY-MM-DD>
@@ -13,9 +13,9 @@ version: v0.1
 
 # OKR - <项目中文名> <YYYY-QN>
 
-> 状态：**draft（待龙哥审定）**
+> 状态：**draft（待项目决策人审定）**
 > 本季度（或本阶段）项目要拿下的 Objective + Key Results。
-> 每个 O 配 ≥2 个 KR，每个 KR 必须量化、可验收、有 owner 和时间窗。
+> 只为实际目标选取有用的结果指标，写明判断依据和负责人；不为凑数量编造指标。
 
 ---
 
@@ -25,7 +25,7 @@ version: v0.1
 > **反例 ❌**：「让产品变得更好」（不可验收）
 
 - **KR1.1**: <可量化指标，含数值 + 时间窗>
-  - Owner: 龙哥 / 呆呆
+  - Owner: <实际负责人>
   - 度量方式:
   - Due: <YYYY-MM-DD>
 - **KR1.2**: <可量化指标>
@@ -35,7 +35,7 @@ version: v0.1
 
 **KR 示例（正例）✅**：
 > - V1.1 + V1.2 在 6/15 前全部上 prod 跑稳 7 天 (Owner: 呆呆, Due: 2026-06-15)
-> - V2.0 灰度，至少 3 个内部用户每日活跃 (Owner: 龙哥, Due: 2026-06-30)
+> - V2.0 灰度，至少 3 个内部用户每日活跃 (Owner: 项目决策人, Due: 2026-06-30)
 
 **KR 示例（反例）❌**：
 > - 「让 V2 更好」（无指标）

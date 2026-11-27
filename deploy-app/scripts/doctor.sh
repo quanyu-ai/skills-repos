@@ -27,6 +27,19 @@ if [ "${1:-}" = "--demo-safe" ]; then
     exec "$SKILL_DIR/scripts/demo-safe.sh" doctor "$APP_KEY" --version "$TARGET_SHA" --config "$CONFIG_FILE"
 fi
 
+# A deployment depends on its selected target, not unrelated applications or SSH keys.
+if [ "${1:-}" = "--target" ]; then
+    [ "$#" -ge 3 ] || fail "usage: doctor.sh --target <app> <env> [apps.json] [environments.json]"
+    command -v jq >/dev/null 2>&1 || fail "jq required by this deployment adapter"
+    selected_apps="${4:-$APPS_JSON}"
+    selected_envs="${5:-$ENVS_JSON}"
+    [ -f "$selected_apps" ] && [ -f "$selected_envs" ] || fail "selected target configuration missing"
+    jq -e --arg key "$2" '.apps[$key] | type == "object"' "$selected_apps" >/dev/null || fail "selected app missing"
+    jq -e --arg key "$3" '.environments[$key] | type == "object"' "$selected_envs" >/dev/null || fail "selected environment missing"
+    echo "READY: selected target configuration"
+    exit 0
+fi
+
 # 前置：jq 必装（否则后面的 JSON 校验跑不动）
 command -v jq >/dev/null 2>&1 || fail "jq not installed - run: sudo apt-get install -y jq"
 
