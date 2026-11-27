@@ -1,7 +1,7 @@
 {
   "name": "quanyu-software-engineering",
-  "version": "1.1.6",
-  "description": "15项通用软件工程技能，涵盖主调度及需求至交付；支持各项目现有规则扩展。",
+  "version": "1.1.7",
+  "description": "16项通用软件工程技能，涵盖主调度及需求至交付；支持各项目现有规则扩展。",
   "author": {
     "name": "Quanyu AI"
   },
@@ -21,7 +21,8 @@
     "./mode/quanyu-tech-solo",
     "./engineering-debugging",
     "./regression-testing",
-    "./delivery-verification"
+    "./delivery-verification",
+    "./rule-design-and-simplification"
   ],
   "interface": {
     "displayName": "权舆软件工程技能",
